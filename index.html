@@ -808,7 +808,7 @@
             inset 0 0 30px rgba(217, 119, 87, 0.1);
         }
       }
-    </style><link id="googleidentityservice" type="text/css" media="all" href="https://accounts.google.com/gsi/style" rel="stylesheet"></head>
+    </style><link id="googleidentityservice" type="text/css" media="all" href="https://accounts.google.com/gsi/style" rel="stylesheet"><link id="googleidentityservice" type="text/css" media="all" href="https://accounts.google.com/gsi/style" rel="stylesheet"></head>
 <body>
 
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
@@ -1045,8 +1045,8 @@ window.addEventListener('load', function() {
     <img src="https://lh3.googleusercontent.com/a/ACg8ocIeVkwyF4q66N2g6wGW7Z4BJKAWn20-paC0f_DRoMd5r8941w=s96-c" style="width:22px;height:22px;border-radius:50%;border:1px solid rgba(176,108,255,0.4)">
     <span class="badge-email" style="font-size:11px;color:#b06cff;font-family:'Space Mono',monospace;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">wbryant@420craftbeverages.com</span>
   </div>
-      <div id="sheets-sync-indicator" style="font-size: 11px; font-family: var(--font-mono); color: var(--green); cursor: pointer;" onclick="showPage('backup',document.querySelector('[onclick*=backup]'))" title="Google Sheets sync status">🟢 Synced 5:46:12 PM</div>
-      <div class="topbar-time" id="clock">17:46:52</div>
+      <div id="sheets-sync-indicator" style="font-size: 11px; font-family: var(--font-mono); color: var(--green); cursor: pointer;" onclick="showPage('backup',document.querySelector('[onclick*=backup]'))" title="Google Sheets sync status">🟢 Synced 6:22:44 PM</div>
+      <div class="topbar-time" id="clock">18:29:32</div>
       <button class="btn btn-ghost" onclick="showPage('log-movement', document.querySelector('[onclick*=log-movement]'))">+ Log Movement</button>
     </div>
   </div>
@@ -1112,7 +1112,7 @@ window.addEventListener('load', function() {
           </div>
         </div>
         <div class="chart-wrap" style="height:220px">
-          <canvas id="monthlyChart" style="display: block; box-sizing: border-box; height: 220px; width: 1596px;" width="1596" height="220"></canvas>
+          <canvas id="monthlyChart" style="display: block; box-sizing: border-box; height: 220px; width: 1590px;" width="1590" height="220"></canvas>
         </div>
       </div>
     </div>
@@ -6415,7 +6415,7 @@ async function shApiCall(method, endpoint, body) {
   try {
     const res = await fetch(SHEETS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ action: 'ss_proxy', data: { method, endpoint, body, key } })
     });
     const result = await res.json();
@@ -8360,7 +8360,7 @@ function ssSaveKey() {
   if (sheetsEnabled()) {
     fetch(SHEETS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ action: 'ss_save_key', data: { key: val } })
     })
     .then(r => r.json())
@@ -15849,4 +15849,4 @@ function _fixSkuBrands() {
 </script>
 
 
-<div id="claude-agent-glow-border" style="position: fixed; inset: 0px; pointer-events: none; z-index: 2147483646; opacity: 1; transition: opacity 0.3s ease-in-out; animation: 2s ease-in-out 0s infinite normal none running claude-pulse; box-shadow: rgba(217, 119, 87, 0.5) 0px 0px 10px inset, rgba(217, 119, 87, 0.3) 0px 0px 20px inset, rgba(217, 119, 87, 0.1) 0px 0px 30px inset;"></div><div id="claude-agent-glow-border" style="position: fixed; inset: 0px; pointer-events: none; z-index: 2147483646; opacity: 1; transition: opacity 0.3s ease-in-out; animation: 2s ease-in-out 0s infinite normal none running claude-pulse; box-shadow: rgba(217, 119, 87, 0.5) 0px 0px 10px inset, rgba(217, 119, 87, 0.3) 0px 0px 20px inset, rgba(217, 119, 87, 0.1) 0px 0px 30px inset;"></div></body></html>
+<div id="claude-agent-glow-border" style="position: fixed; inset: 0px; pointer-events: none; z-index: 2147483646; opacity: 1; transition: opacity 0.3s ease-in-out; animation: 2s ease-in-out 0s infinite normal none running claude-pulse; box-shadow: rgba(217, 119, 87, 0.5) 0px 0px 10px inset, rgba(217, 119, 87, 0.3) 0px 0px 20px inset, rgba(217, 119, 87, 0.1) 0px 0px 30px inset;"></div><div id="claude-agent-glow-border" style="position: fixed; inset: 0px; pointer-events: none; z-index: 2147483646; opacity: 1; transition: opacity 0.3s ease-in-out; animation: 2s ease-in-out 0s infinite normal none running claude-pulse; box-shadow: rgba(217, 119, 87, 0.5) 0px 0px 10px inset, rgba(217, 119, 87, 0.3) 0px 0px 20px inset, rgba(217, 119, 87, 0.1) 0px 0px 30px inset;"></div><div id="claude-agent-glow-border" style="position: fixed; inset: 0px; pointer-events: none; z-index: 2147483646; opacity: 0; transition: opacity 0.3s ease-in-out; animation: 2s ease-in-out 0s infinite normal none running claude-pulse; box-shadow: rgba(217, 119, 87, 0.5) 0px 0px 10px inset, rgba(217, 119, 87, 0.3) 0px 0px 20px inset, rgba(217, 119, 87, 0.1) 0px 0px 30px inset;"></div></body></html>
