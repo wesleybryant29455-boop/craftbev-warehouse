@@ -1861,15 +1861,16 @@ window.addEventListener('load', function() {
               <div class="sh-phase-time" style="font-size:13px;font-family:var(--font-mono);color:var(--text2);margin-top:2px">0:00</div>
             </div>
           </div>
-          <!-- Worker selector + pause/stop -->
-          <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center">
+          <!-- Multi-worker crew + pause/stop -->
+          <div id="sh-work-crew-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px"></div>
+          <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center">
             <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:11px;color:var(--text3);white-space:nowrap">Worker:</span>
-              <select class="form-input" id="sh-work-worker" style="font-size:12px;padding:5px 8px" onchange="shUpdateWorkerRate()">
-                <option value="">— Select —</option>
+              <span style="font-size:11px;color:var(--text3);white-space:nowrap">+ Worker:</span>
+              <select class="form-input" id="sh-work-worker" style="font-size:12px;padding:5px 8px">
+                <option value="">— Add Worker —</option>
               </select>
-              <span id="sh-work-rate-label" style="font-size:11px;color:var(--text3);white-space:nowrap"></span>
             </div>
+            <button onclick="shAddWorker()" style="background:rgba(52,152,219,0.1);border:1px solid rgba(52,152,219,0.3);color:var(--blue);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;white-space:nowrap">+ Add</button>
             <button onclick="shPauseWork()" id="sh-work-pause-btn" style="background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.3);color:var(--amber);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;white-space:nowrap">⏸ Pause</button>
             <button onclick="shStopWork()" style="background:rgba(126,211,33,0.1);border:1px solid rgba(126,211,33,0.3);color:var(--green);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;white-space:nowrap">✓ Done</button>
           </div>
@@ -6397,8 +6398,10 @@ let shWorkTimer     = null;       // setInterval handle
 let shWorkPhase     = null;       // current phase: pick|pack|label|load
 let shWorkPhaseTimes = { pick:0, pack:0, label:0, load:0 }; // seconds per phase
 let shWorkPhaseStart = null;      // timestamp when current phase started
-let shWorkWorkerRate = 0;         // $/hr of selected worker
+let shWorkWorkerRate = 0;         // legacy - kept for compat
 let shWorkTotalSecs  = 0;         // running total seconds
+let shWorkCrew       = [];        // [{name, rate, clockInAt, clockedOutAt, totalSecs}]
+let shWorkCrewTimers = {};        // {name: intervalId}
 let shWorkPaused     = false;
 let shAddrCorrections = {};       // { prefix: correctedData }
 let shStage3Id       = null;      // shipment in stage 3
@@ -6763,6 +6766,8 @@ function shOpenWorkStage(id) {
   shWorkPhaseTimes = s.workPhaseTimes || { pick:0, pack:0, label:0, load:0 };
   shWorkTotalSecs  = Object.values(shWorkPhaseTimes).reduce((a,v)=>a+v,0);
   shWorkPhase      = null;
+  shWorkCrew       = [];
+  shWorkCrewTimers = {};
   shWorkPaused     = false;
   shUpdatePhaseDisplay();
 
@@ -6801,6 +6806,7 @@ function shOpenWorkStage(id) {
   }
 
   shWorkUpdateCOGS();
+  shRenderWorkCrew();
   document.getElementById('sh-work-modal').classList.remove('hidden');
 
   // Start clock ticking
@@ -6810,14 +6816,56 @@ function shOpenWorkStage(id) {
   if (!shWorkPhase) shStartPhase('pick');
 }
 
-function shUpdateWorkerRate() {
+function shAddWorker() {
   const el = document.getElementById('sh-work-worker');
-  if (!el) return;
+  if (!el || !el.value) return;
+  const name = el.value;
+  if (shWorkCrew.find(w => w.name === name)) { showToast('Already on crew'); return; }
   const opt  = el.options[el.selectedIndex];
-  shWorkWorkerRate = parseFloat(opt?.dataset.rate || 0);
-  const label = document.getElementById('sh-work-rate-label');
-  if (label) label.textContent = shWorkWorkerRate > 0 ? `$${shWorkWorkerRate}/hr` : '';
+  const rate = parseFloat(opt?.dataset?.rate || 0);
+  shWorkCrew.push({ name, rate, clockInAt: Date.now(), totalSecs: 0 });
+  el.value = '';
+  shRenderWorkCrew();
   shWorkUpdateCOGS();
+}
+
+function shRemoveWorker(name) {
+  // Bank their time before removing
+  const w = shWorkCrew.find(x => x.name === name);
+  if (w && !w.clockedOutAt) {
+    w.totalSecs += Math.round((Date.now() - w.clockInAt) / 1000);
+    w.clockedOutAt = Date.now();
+  }
+  shWorkCrew = shWorkCrew.filter(x => x.name !== name);
+  shRenderWorkCrew();
+  shWorkUpdateCOGS();
+}
+
+function shRenderWorkCrew() {
+  const list = document.getElementById('sh-work-crew-list');
+  if (!list) return;
+  if (!shWorkCrew.length) { list.innerHTML = '<div style="font-size:11px;color:var(--text3);padding:4px 0">No workers clocked in yet — add a worker below</div>'; return; }
+  list.innerHTML = shWorkCrew.map(w => {
+    const elapsed = w.clockedOutAt
+      ? w.totalSecs
+      : w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000);
+    const cost = (w.rate * elapsed / 3600).toFixed(2);
+    const status = w.clockedOutAt ? 'color:var(--text3)' : 'color:var(--green)';
+    return `<div style="display:flex;align-items:center;gap:8px;background:rgba(126,211,33,0.05);border:1px solid var(--border2);border-radius:7px;padding:6px 10px">
+      <span style="font-size:12px;font-weight:600;color:var(--text);flex:1">👷 ${w.name}</span>
+      <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">$${w.rate}/hr</span>
+      <span id="sh-crew-time-${w.name.replace(/\s+/g,'_')}" style="font-size:12px;font-family:var(--font-mono);${status};min-width:60px;text-align:right">${shFormatTime(elapsed)}</span>
+      <span style="font-size:11px;font-family:var(--font-mono);color:var(--amber);min-width:48px;text-align:right">$${cost}</span>
+      ${w.clockedOutAt
+        ? `<span style="font-size:10px;color:var(--text3);padding:2px 6px;border:1px solid var(--border2);border-radius:4px">clocked out</span>`
+        : `<button onclick="shRemoveWorker('${w.name}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">Clock Out</button>`
+      }
+    </div>`;
+  }).join('');
+}
+
+function shUpdateWorkerRate() {
+  // Legacy - kept for compat, no-op now
 }
 
 function shStartPhase(phase) {
@@ -6873,6 +6921,14 @@ function shWorkTick() {
   shWorkTotalSecs = total;
   const totalEl = document.getElementById('sh-work-total-clock');
   if (totalEl) totalEl.textContent = shFormatTime(total, true);
+  // Update crew timers display
+  shWorkCrew.forEach(w => {
+    if (w.clockedOutAt) return;
+    const wElapsed = w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000);
+    const key = w.name.replace(/\s+/g, '_');
+    const el = document.getElementById('sh-crew-time-' + key);
+    if (el) el.textContent = shFormatTime(wElapsed);
+  });
   // Update COGS live
   shWorkUpdateCOGS();
 }
@@ -6955,11 +7011,16 @@ function shWorkGetBoxes() {
 }
 
 function shWorkUpdateCOGS() {
-  // Labor: total seconds × hourly rate
+  // Labor: sum all crew members' time × their rate
+  const laborCost = shWorkCrew.reduce((sum, w) => {
+    const secs = w.clockedOutAt
+      ? w.totalSecs
+      : w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000);
+    return sum + (w.rate * secs / 3600);
+  }, 0);
   const currentPhaseElapsed = (shWorkPhase && shWorkPhaseStart && !shWorkPaused)
     ? Math.round((Date.now() - shWorkPhaseStart) / 1000) : 0;
   const totalSecs = Object.values(shWorkPhaseTimes).reduce((a,v)=>a+v,0) + currentPhaseElapsed;
-  const laborCost  = (shWorkWorkerRate * totalSecs / 3600);
   // Materials
   const boxCosts  = [...document.querySelectorAll('#sh-work-boxes-list .sh-box-cost')]
     .reduce((a,el)=>a+(parseFloat(el.value)||0),0);
@@ -6987,8 +7048,11 @@ function shWorkUpdateCOGS() {
   }
   const laborEl = document.getElementById('sh-work-labor-cost');
   if (laborEl) {
-    const mins = Math.round(totalSecs / 60);
-    laborEl.textContent = `${shFormatTime(totalSecs)} worked · ${shWorkWorkerRate>0?'$'+laborCost.toFixed(2)+' labor':'Select worker to track labor cost'}`;
+    const activeCrew = shWorkCrew.filter(w => !w.clockedOutAt).length;
+    const crewStr = shWorkCrew.length > 0
+      ? `${shWorkCrew.length} worker${shWorkCrew.length>1?'s':''} · $${laborCost.toFixed(2)} labor`
+      : 'Add workers below to track labor cost';
+    laborEl.textContent = `${shFormatTime(totalSecs)} elapsed · ${crewStr}`;
   }
 }
 
@@ -7004,21 +7068,25 @@ function shStopWork() {
   const s = shGetById(shWorkId);
   if (!s) return;
 
-  // Build labor records
-  const ops = JSON.parse(localStorage.getItem('420craft_operators')||'[]');
-  const workerEl = document.getElementById('sh-work-worker');
-  const workerName = workerEl?.value || '';
-  const op = ops.find(o=>o.name===workerName);
-  const rate = parseFloat(op?.rate||0);
+  // Build labor records from crew
+  // Clock out any still-active workers
+  shWorkCrew.forEach(w => {
+    if (!w.clockedOutAt) {
+      w.totalSecs += Math.round((Date.now() - w.clockInAt) / 1000);
+      w.clockedOutAt = Date.now();
+    }
+  });
 
-  const laborRecords = Object.entries(shWorkPhaseTimes)
-    .filter(([,secs])=>secs>0)
-    .map(([phase,secs])=>({
-      phase, worker:workerName, rate, mins: Math.round(secs/60),
-      cost: parseFloat((rate*secs/3600).toFixed(2))
-    }));
+  const laborRecords = shWorkCrew.map(w => ({
+    worker: w.name,
+    rate: w.rate,
+    mins: Math.round(w.totalSecs / 60),
+    cost: parseFloat((w.rate * w.totalSecs / 3600).toFixed(2)),
+    phases: shWorkPhaseTimes,
+  }));
 
-  const totalLaborCost = laborRecords.reduce((a,l)=>a+l.cost,0);
+  const totalLaborCost = laborRecords.reduce((a,l)=>a+l.cost, 0);
+  const workerName = shWorkCrew.map(w=>w.name).join(', ') || '';
   const cons = shWorkGetConsumables();
   const boxes = shWorkGetBoxes();
   const boxCosts = boxes.reduce((a,b)=>a+b.cost,0);
@@ -7044,9 +7112,12 @@ function shStopWork() {
   s.status = 'ready_ship';
   s.workLog = s.workLog || [];
   s.workLog.push({
-    ts: new Date().toISOString(), worker: workerName,
+    ts: new Date().toISOString(),
+    workers: shWorkCrew.map(w=>w.name),
+    worker: workerName,
     phases: shWorkPhaseTimes,
     totalMins: Math.round(Object.values(shWorkPhaseTimes).reduce((a,v)=>a+v,0)/60),
+    laborRecords,
   });
 
   // Deduct consumables from stock
