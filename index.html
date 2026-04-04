@@ -1086,6 +1086,9 @@ window.addEventListener('load', function() {
     <div class="nav-item" onclick="showPage('acct-inventory-val',this)"><span class="icon">📊</span> Inventory Valuation</div>
     <div class="nav-item" onclick="showPage('acct-close',this)"><span class="icon">🔒</span> Close & Audit</div>
     <div class="nav-item" onclick="showPage('acct-exceptions',this)"><span class="icon">⚠️</span> Exceptions<span id="acct-exception-badge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;font-family:var(--font-mono);margin-left:4px"></span></div>
+    <div class="nav-item" onclick="showPage('acct-reports',this)"><span class="icon">📈</span> Reports</div>
+    <div class="nav-item" onclick="showPage('acct-shipment-costing',this)"><span class="icon">🚚</span> Shipment Costing</div>
+    <div class="nav-item" onclick="showPage('acct-integrations',this)"><span class="icon">🔗</span> Integrations</div>
     <div class="nav-section">Export</div>
     <div class="nav-item" onclick="showPage('notifications',this)">
       <span class="icon">📧</span> Notifications
@@ -2110,6 +2113,9 @@ window.addEventListener('load', function() {
   <div class="page" id="page-acct-inventory-val"><div id="acct-inventory-val-content"></div></div>
   <div class="page" id="page-acct-close"><div id="acct-close-content"></div></div>
   <div class="page" id="page-acct-exceptions"><div id="acct-exceptions-content"></div></div>
+  <div class="page" id="page-acct-reports"><div id="acct-reports-content"></div></div>
+  <div class="page" id="page-acct-shipment-costing"><div id="acct-shipment-costing-content"></div></div>
+  <div class="page" id="page-acct-integrations"><div id="acct-integrations-content"></div></div>
 
   <div class="page" id="page-backup">
     <div class="section-header">
@@ -4446,6 +4452,8 @@ const pageTitles = {
   'acct-ar':'ACCOUNTS RECEIVABLE','acct-ap':'AP & PURCHASE ORDERS',
   'acct-vendors':'VENDOR MANAGEMENT','acct-inventory-val':'INVENTORY VALUATION',
   'acct-close':'CLOSE & AUDIT','acct-exceptions':'EXCEPTION CENTER',
+  'acct-reports':'REPORTS CENTER','acct-shipment-costing':'SHIPMENT COSTING',
+  'acct-integrations':'INTEGRATIONS',
 };
 function showPage(id, el) {
   // Auto-close sidebar on mobile whenever a page is shown
@@ -4487,6 +4495,9 @@ function showPage(id, el) {
   if (id === 'acct-inventory-val') renderAcctInventoryVal();
   if (id === 'acct-close')         renderAcctClose();
   if (id === 'acct-exceptions')    renderAcctExceptions();
+  if (id === 'acct-reports')         renderAcctReports();
+  if (id === 'acct-shipment-costing') renderAcctShipmentCosting();
+  if (id === 'acct-integrations')    renderAcctIntegrations();
 }
 
 // ══════════════════════════════════════════
@@ -17456,6 +17467,605 @@ function acctOnProdRunComplete(run){if(!run||!run.batchCode)return;if(costSnapsh
 
 // Auto-init on load
 setTimeout(()=>{try{acctSeedIfEmpty();runExceptionEngine();}catch(e){console.warn('Acct init:',e);}},2000);
+
+// ═══════════════════════════════════════════════════════════════
+// PHASE 2 — ENGINES
+// ═══════════════════════════════════════════════════════════════
+
+// ── PRICE BOOKS ──────────────────────────────────────────────
+function priceBooksLoad(){return acctLoad('420craft_acct_price_books');}
+function priceBookCreate(data){
+  const books=priceBooksLoad();
+  const book={bookId:acctId('PB'),name:data.name||'',customerId:data.customerId||'',brandName:data.brandName||'',dealId:data.dealId||'',effectiveDate:data.effectiveDate||acctToday(),expiryDate:data.expiryDate||'',status:'active',lines:data.lines||[],createdAt:acctNow(),notes:data.notes||''};
+  books.push(book);acctSave('420craft_acct_price_books',books);
+  acctAudit('create','price_book',book.bookId,{name:book.name},'Price book created');
+  return book;
+}
+function priceBookGetRate(customerId,brandName,sku,mg){
+  const books=priceBooksLoad().filter(b=>b.status==='active'&&(!b.customerId||b.customerId===customerId||b.brandName===brandName)&&(!b.expiryDate||b.expiryDate>=acctToday()));
+  for(const book of books){
+    const line=book.lines.find(l=>(!l.sku||l.sku===sku)&&(!l.mg||l.mg===mg));
+    if(line)return{pricePerCase:line.pricePerCase||0,source:'price_book',bookId:book.bookId};
+  }
+  const deals=dealGetActive(customerId,brandName);const deal=deals[0];
+  if(deal){
+    const pb=deal.priceBookLines?.find(l=>l.sku===sku&&(!l.mg||l.mg===mg));
+    if(pb)return{pricePerCase:pb.pricePerCase||0,source:'deal_price_book',dealId:deal.dealId};
+    if(deal.pricePerCase)return{pricePerCase:deal.pricePerCase,source:'deal_default',dealId:deal.dealId};
+  }
+  return{pricePerCase:0,source:'none'};
+}
+
+// ── TAX RULES ────────────────────────────────────────────────
+const DEFAULT_TAX_RULES=[
+  {ruleId:'tx1',name:'CO Sales Tax',state:'CO',rate:0.029,type:'sales',channel:'dtc',active:true},
+  {ruleId:'tx2',name:'Wholesale Exempt',state:'ALL',rate:0,type:'sales',channel:'wholesale',active:true,notes:'Resale exempt'},
+  {ruleId:'tx3',name:'THC Excise — CO',state:'CO',rate:0.15,type:'excise',channel:'all',active:true,notes:'15% THC excise on retail price'},
+];
+function taxRulesLoad(){const s=acctLoad('420craft_acct_tax_rules');if(s.length)return s;acctSave('420craft_acct_tax_rules',DEFAULT_TAX_RULES);return DEFAULT_TAX_RULES;}
+function calcTax(amount,state,channel,productType){
+  const rules=taxRulesLoad().filter(r=>r.active&&(r.state==='ALL'||r.state===state)&&(r.channel==='all'||r.channel===channel));
+  let total=0;const applied=[];
+  rules.forEach(r=>{if(r.type==='excise'&&productType!=='thc')return;const tax=amount*r.rate;total+=tax;applied.push({name:r.name,rate:r.rate,amount:tax});});
+  return{total,applied};
+}
+
+// ── STORAGE BILLING ──────────────────────────────────────────
+function calcStorageCharges(period){
+  const reservations=acctLoad(ACCT_KEYS.RESERVATIONS);const results=[];
+  reservations.filter(r=>r.status==='active').forEach(r=>{
+    const deal=dealGetActive(r.customerId,r.brandName,period+'-01')[0];
+    if(!deal||!deal.storageEnabled)return;
+    const graceEnd=r.graceExpiry||_addDays(r.startDate,deal.storageGraceDays||30);
+    const periodEnd=period+'-28';if(periodEnd<=graceEnd)return;
+    const billableDays=Math.max(0,_daysBetween(graceEnd,periodEnd));
+    let charge=0;
+    if(deal.storageRateType==='per_case_month')charge=(r.reservedCases||0)*(deal.storageRate||0);
+    else if(deal.storageRateType==='per_case_day')charge=(r.reservedCases||0)*(deal.storageRate||0)*billableDays;
+    else if(deal.storageRateType==='flat')charge=deal.storageRate||0;
+    if(charge>0)results.push({reservationId:r.id,customerId:r.customerId,brandName:r.brandName,period,reservedCases:r.reservedCases||0,billableDays,charge,dealId:deal.dealId});
+  });
+  return results;
+}
+function reservationCreate(customerId,brandName,batchCode,cases,startDate){
+  const reservations=acctLoad(ACCT_KEYS.RESERVATIONS);
+  const deal=dealGetActive(customerId,brandName)[0]||{};
+  const res={id:acctId('RES'),customerId,brandName,batchCode,reservedCases:cases,startDate:startDate||acctToday(),graceExpiry:_addDays(startDate||acctToday(),deal.storageGraceDays||30),status:'active',createdAt:acctNow(),notes:''};
+  reservations.push(res);acctSave(ACCT_KEYS.RESERVATIONS,reservations);
+  acctAudit('create','reservation',res.id,{customerId,brandName,cases},'Reservation created');
+  return res;
+}
+
+// ── FREIGHT REBILL ───────────────────────────────────────────
+function calcFreightRebill(shipment){
+  const deal=dealGetActive(shipment.recipientName,shipment.brandName||'')[0];
+  if(!deal||!deal.freightRebill)return{rebill:0,absorbed:true};
+  const actual=shipment.cogs?.carrierTotal||0;
+  const markup=(deal.freightMarkup||0)/100;
+  return{rebill:actual*(1+markup),markup:actual*markup,actual,absorbed:false,dealId:deal.dealId};
+}
+
+// ── SHIPMENT PROFITABILITY ────────────────────────────────────
+function calcShipmentProfitability(shipmentId){
+  const shArr=typeof shipments!=='undefined'?shipments:[];
+  const sh=shArr.find(s=>s.id===shipmentId);if(!sh)return null;
+  const items=sh.items||[];const cogs=sh.cogs||{};
+  let revenue=0;const revenueLines=[];
+  items.forEach(item=>{
+    const rate=priceBookGetRate(sh.recipientName,sh.brandName||'',item.sku,item.mg);
+    const itemRev=(rate.pricePerCase||0)*(parseInt(item.qty)||0);
+    revenue+=itemRev;
+    revenueLines.push({sku:item.sku,mg:item.mg,qty:parseInt(item.qty)||0,pricePerCase:rate.pricePerCase||0,revenue:itemRev,rateSource:rate.source});
+  });
+  const fr=calcFreightRebill(sh);revenue+=fr.rebill;
+  const laborCost=cogs.laborTotal||0,matCost=cogs.matTotal||0,carrierCost=cogs.carrierTotal||0;
+  const printCost=(cogs.printCosts?.label||0)+(cogs.printCosts?.manifest||0);
+  const snaps=acctLoad(ACCT_KEYS.COST_SNAPSHOTS);
+  let batchCogs=0;
+  items.forEach(item=>{
+    (item.batchAllocation||[]).forEach(a=>{
+      const snap=snaps.filter(s=>s.batchCode===a.batchCode).pop();
+      if(snap)batchCogs+=(snap.costPerCase||0)*(a.take||0);
+    });
+  });
+  const totalCost=batchCogs+laborCost+matCost+carrierCost+printCost;
+  const grossProfit=revenue-totalCost;
+  const totalCases=items.reduce((a,i)=>a+(parseInt(i.qty)||0),0);
+  return{shipmentId,customerId:sh.recipientName,brandName:sh.brandName||'',type:sh.type||'',status:sh.status||'',revenue,revenueLines,freightRebill:fr.rebill,batchCogs,laborCost,matCost,carrierCost,printCost,totalCost,grossProfit,grossMarginPct:revenue>0?(grossProfit/revenue*100):0,totalCases,totalCans:totalCases*24,revenuePerCase:totalCases>0?revenue/totalCases:0,costPerCase:totalCases>0?totalCost/totalCases:0,profitPerCase:totalCases>0?grossProfit/totalCases:0,shippedDate:sh.shippedDate||sh.createdAt||''};
+}
+
+// ── CUSTOMER P&L ─────────────────────────────────────────────
+function calcCustomerPnL(customerName,period){
+  const shArr=typeof shipments!=='undefined'?shipments:[];
+  const periodShipments=shArr.filter(s=>s.recipientName===customerName&&(s.shippedDate||s.createdAt||'').slice(0,7)===period&&!['pending','working'].includes(s.status));
+  let totalRevenue=0,totalCogs=0,totalLabor=0,totalFreight=0,totalMaterials=0;
+  const shipmentDetails=[];
+  periodShipments.forEach(s=>{
+    const prof=calcShipmentProfitability(s.id);if(!prof)return;
+    totalRevenue+=prof.revenue;totalCogs+=prof.batchCogs;totalLabor+=prof.laborCost;totalFreight+=prof.carrierCost;totalMaterials+=prof.matCost;
+    shipmentDetails.push(prof);
+  });
+  const setts=settlementsLoad().filter(s=>(s.customerId===customerName||s.brandName===customerName)&&s.period===period&&s.status!=='draft');
+  const settlementRevenue=setts.reduce((a,s)=>a+(s.netDue||0),0);
+  const invs=invoicesLoad().filter(i=>i.customerName===customerName&&(i.invoiceDate||'').slice(0,7)===period);
+  const invoicedAmount=invs.reduce((a,i)=>a+(i.totalAmount||0),0);
+  const collectedAmount=invs.reduce((a,i)=>a+(i.paidAmount||0),0);
+  const totalGrossProfit=totalRevenue+settlementRevenue-totalCogs-totalLabor-totalFreight-totalMaterials;
+  const totalRev=totalRevenue+settlementRevenue;
+  return{customerName,period,shipmentCount:periodShipments.length,totalRevenue,settlementRevenue,totalRevenueCombined:totalRev,totalCogs,totalLabor,totalFreight,totalMaterials,totalCost:totalCogs+totalLabor+totalFreight+totalMaterials,totalGrossProfit,grossMarginPct:totalRev>0?(totalGrossProfit/totalRev*100):0,invoicedAmount,collectedAmount,openAR:invoicedAmount-collectedAmount,rollforward:inventoryRollforward(customerName,customerName,period),shipmentDetails,settlements:setts};
+}
+function calcAllCustomersPnL(period){
+  const names=[...new Set([...(typeof shipments!=='undefined'?shipments.map(s=>s.recipientName):[]),...dealsLoad().map(d=>d.customerName)])].filter(Boolean);
+  return names.map(n=>calcCustomerPnL(n,period)).sort((a,b)=>b.totalGrossProfit-a.totalGrossProfit);
+}
+
+// ── UNBILLED DETECTION ───────────────────────────────────────
+function findUnbilledShipments(){
+  const shArr=typeof shipments!=='undefined'?shipments:[];
+  const billedIds=new Set(invoicesLoad().map(i=>i.refShipmentId).filter(Boolean));
+  return shArr.filter(s=>['label_pending','in_transit','delivered','ready_ship'].includes(s.status)&&!billedIds.has(s.id));
+}
+function findUnbilledPassThroughs(){
+  const billedPoIds=new Set(acctLoad(ACCT_KEYS.VENDOR_BILLS).map(b=>b.poId).filter(Boolean));
+  return posLoad().filter(p=>p.isPassThrough&&p.status==='fully_received'&&!billedPoIds.has(p.poId));
+}
+
+// ── CASH FORECAST ────────────────────────────────────────────
+function calcCashForecast(days){
+  const horizon=parseInt(days)||90;
+  const invs=invoicesLoad().filter(i=>!['paid','void'].includes(i.status));
+  const bills=acctLoad(ACCT_KEYS.VENDOR_BILLS).filter(b=>!['paid','void'].includes(b.status));
+  const today=new Date(acctToday());const buckets={};
+  for(let i=0;i<=horizon;i+=7){const d=new Date(today);d.setDate(d.getDate()+i);buckets[d.toISOString().slice(0,10)]={inflows:[],outflows:[]};}
+  const keys=Object.keys(buckets);
+  const addToBucket=(date,type,amount,label)=>{const d=new Date(date);const nearest=keys.reduce((a,b)=>Math.abs(new Date(b)-d)<Math.abs(new Date(a)-d)?b:a);if(buckets[nearest])buckets[nearest][type==='in'?'inflows':'outflows'].push({amount,label,date});};
+  invs.forEach(i=>addToBucket(i.dueDate||i.invoiceDate,'in',i.openAmount,i.customerName+' '+i.invoiceNo));
+  bills.forEach(b=>addToBucket(b.dueDate||b.billDate,'out',b.openAmount,b.vendorName));
+  let running=0;
+  const timeline=Object.entries(buckets).map(([date,{inflows,outflows}])=>{const inflow=inflows.reduce((a,x)=>a+x.amount,0);const outflow=outflows.reduce((a,x)=>a+x.amount,0);running+=inflow-outflow;return{date,inflow,outflow,inflows,outflows,runningBalance:running};});
+  return{timeline,totalInflow:timeline.reduce((a,t)=>a+t.inflow,0),totalOutflow:timeline.reduce((a,t)=>a+t.outflow,0),netCashFlow:running};
+}
+
+// ── CSV SELL-THROUGH IMPORT ──────────────────────────────────
+function parseSellThroughCSV(csvText,customerId,brandName,period){
+  const lines=csvText.trim().split('\n');if(lines.length<2)return{error:'Need headers + at least one row'};
+  const headers=lines[0].split(',').map(h=>h.trim().toLowerCase().replace(/[^a-z0-9]/g,'_'));
+  const col=name=>headers.indexOf(name);
+  const rows=lines.slice(1).map(line=>{
+    const vals=line.split(',').map(v=>v.trim().replace(/^"|"$/g,''));
+    return{sku:vals[col('sku')]||vals[0]||'',qty:parseFloat(vals[col('qty')]||vals[col('cases')]||vals[col('quantity')]||0)||0,revenue:parseFloat(vals[col('revenue')]||vals[col('gross_revenue')]||0)||0,returns:parseFloat(vals[col('returns')]||0)||0,allowances:parseFloat(vals[col('allowances')]||0)||0};
+  }).filter(r=>r.qty);
+  const totalCases=rows.reduce((a,r)=>a+r.qty,0),totalRevenue=rows.reduce((a,r)=>a+r.revenue,0),totalReturns=rows.reduce((a,r)=>a+r.returns,0),totalAllowances=rows.reduce((a,r)=>a+r.allowances,0);
+  const record=sellThroughRecord(customerId,brandName,period,{caseSold:totalCases,grossRevenue:totalRevenue,returns:totalReturns,allowances:totalAllowances,netRevenue:totalRevenue-totalAllowances,notes:'Imported from CSV — '+rows.length+' SKU lines'});
+  return{ok:true,record,rows,totalCases,totalRevenue};
+}
+
+// ── QBO SYNC LAYER ───────────────────────────────────────────
+const QBO_KEYS={CONFIG:'420craft_acct_qbo_config',EXT_MAP:'420craft_acct_ext_id_map',SYNC_LOG:'420craft_acct_sync_log'};
+function qboConfigLoad(){return acctLoadObj(QBO_KEYS.CONFIG);}
+function qboConfigSave(cfg){localStorage.setItem(QBO_KEYS.CONFIG,JSON.stringify(cfg));}
+function qboSyncLog(action,entity,entityId,status,detail){const log=acctLoad(QBO_KEYS.SYNC_LOG);log.push({id:acctId('QLOG'),ts:acctNow(),action,entity,entityId,status,detail:detail||''});if(log.length>2000)log.splice(0,log.length-2000);localStorage.setItem(QBO_KEYS.SYNC_LOG,JSON.stringify(log));}
+async function _qboApiCall(method,endpoint,payload,cfg){
+  if(!cfg||!cfg.accessToken||!cfg.companyId)return{error:'QBO credentials missing — configure in Integrations'};
+  try{
+    const base=cfg.env==='sandbox'?'https://sandbox-quickbooks.api.intuit.com':'https://quickbooks.api.intuit.com';
+    const resp=await fetch(base+'/v3/company/'+cfg.companyId+endpoint+'?minorversion=65',{method,headers:{'Authorization':'Bearer '+cfg.accessToken,'Content-Type':'application/json','Accept':'application/json'},body:method!=='GET'?JSON.stringify(payload):undefined});
+    if(!resp.ok){const err=await resp.text();return{error:'QBO '+resp.status+': '+err.slice(0,200)};}
+    return await resp.json();
+  }catch(e){return{error:e.message};}
+}
+async function qboPushInvoice(invoiceId){
+  const cfg=qboConfigLoad();if(!cfg.connected){qboSyncLog('push','invoice',invoiceId,'skipped','Not connected');return{error:'QBO not connected'};}
+  const invs=invoicesLoad();const inv=invs.find(i=>i.invoiceId===invoiceId);if(!inv)return{error:'Invoice not found'};
+  if(inv.qboInvoiceId){qboSyncLog('push','invoice',invoiceId,'skipped','Already synced');return{ok:true,skipped:true};}
+  const payload={DocNumber:inv.invoiceNo,TxnDate:inv.invoiceDate,DueDate:inv.dueDate,CustomerRef:{name:inv.customerName},Line:inv.lines.map((l,i)=>({Id:String(i+1),Amount:l.amount||0,DetailType:'SalesItemLineDetail',Description:l.description,SalesItemLineDetail:{ItemRef:{name:'Services'},Qty:l.qty||1,UnitPrice:l.unitPrice||0}})),PrivateNote:'420CraftID:'+inv.invoiceId};
+  const result=await _qboApiCall('POST','/invoice',payload,cfg);
+  if(result.error){qboSyncLog('push','invoice',invoiceId,'error',result.error);return result;}
+  const qboId=result.QueryResponse?.Invoice?.[0]?.Id||result.Id||result.id;
+  const idx=invs.findIndex(i=>i.invoiceId===invoiceId);
+  if(idx>=0){invs[idx].qboInvoiceId=qboId;invs[idx].qboSyncStatus='synced';invs[idx].qboSyncedAt=acctNow();acctSave(ACCT_KEYS.INVOICES,invs);}
+  qboSyncLog('push','invoice',invoiceId,'success','QBO ID: '+qboId);
+  return{ok:true,qboId};
+}
+async function qboPushBill(billId){
+  const cfg=qboConfigLoad();if(!cfg.connected)return{error:'Not connected'};
+  const bills=acctLoad(ACCT_KEYS.VENDOR_BILLS);const bill=bills.find(b=>b.billId===billId);
+  if(!bill)return{error:'Bill not found'};if(bill.qboBillId)return{ok:true,skipped:true};
+  const payload={VendorRef:{name:bill.vendorName},TxnDate:bill.billDate,DueDate:bill.dueDate,Line:bill.lines.map((l,i)=>({Id:String(i+1),Amount:(l.qty||0)*(l.unitCost||0),DetailType:'AccountBasedExpenseLineDetail',AccountBasedExpenseLineDetail:{AccountRef:{name:'Accounts Payable'},Description:l.description}}))};
+  const result=await _qboApiCall('POST','/bill',payload,cfg);
+  if(result.error){qboSyncLog('push','bill',billId,'error',result.error);return result;}
+  const qboId=result.Id||result.id;
+  const idx=bills.findIndex(b=>b.billId===billId);
+  if(idx>=0){bills[idx].qboBillId=qboId;bills[idx].qboSyncStatus='synced';acctSave(ACCT_KEYS.VENDOR_BILLS,bills);}
+  qboSyncLog('push','bill',billId,'success','QBO ID: '+qboId);
+  return{ok:true,qboId};
+}
+function qboBulkSync(){
+  const invs=invoicesLoad().filter(i=>i.qboSyncStatus==='pending'&&!['draft','void'].includes(i.status));
+  const bills=acctLoad(ACCT_KEYS.VENDOR_BILLS).filter(b=>b.qboSyncStatus==='pending');
+  let queued=0;
+  invs.forEach(i=>{setTimeout(()=>qboPushInvoice(i.invoiceId),queued*600);queued++;});
+  bills.forEach(b=>{setTimeout(()=>qboPushBill(b.billId),queued*600);queued++;});
+  showToast('⬆ Queued '+queued+' items for QBO sync');return{queued};
+}
+
+// ── SQUARE LAYER ─────────────────────────────────────────────
+const SQ_KEYS={CONFIG:'420craft_acct_square_config'};
+function squareConfigLoad(){return acctLoadObj(SQ_KEYS.CONFIG);}
+function squareConfigSave(cfg){localStorage.setItem(SQ_KEYS.CONFIG,JSON.stringify(cfg));}
+function squareEligibilityCheck(sku,channel,brandName){
+  const deals=dealGetActive(null,brandName);const deal=deals[0];
+  if(deal&&deal.thcRestricted)return{eligible:false,reason:'THC-restricted — Square not permitted'};
+  if(deal&&!deal.squareEligible)return{eligible:false,reason:'Deal not configured for Square'};
+  if(['wholesale','distributor'].includes(channel))return{eligible:false,reason:'B2B channel — Square not applicable'};
+  return{eligible:true};
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PHASE 2 — RENDER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
+function renderAcctReports(){
+  const el=document.getElementById('acct-reports-content');if(!el)return;
+  const prevPer=_prevPeriod(acctPeriod(acctToday()));
+  const allPnL=calcAllCustomersPnL(prevPer);
+  const unbilledShip=findUnbilledShipments();
+  const unbilledPT=findUnbilledPassThroughs();
+  const cashFcst=calcCashForecast(60);
+  const storageCharges=calcStorageCharges(prevPer);
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('REPORTS CENTER','Financial reports — period: '+prevPer,_acctBtn('↻ Refresh','renderAcctReports()'))}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px">
+      ${['Customer P&L','Cash Forecast','Unbilled Items','Storage Billing','Sell-Through'].map((tab,i)=>`<button onclick="acctShowReport(${i},this)" data-rtab="${i}" style="background:${i===0?'rgba(255,184,48,0.15)':'var(--bg3)'};border:1px solid ${i===0?'rgba(255,184,48,0.4)':'var(--border2)'};color:${i===0?'var(--amber)':'var(--text3)'};border-radius:6px;padding:7px 16px;font-size:12px;cursor:pointer;font-weight:${i===0?'600':'400'}">${tab}</button>`).join('')}
+    </div>
+    <div id="rp0">${_renderCustomerPnLReport(allPnL,prevPer)}</div>
+    <div id="rp1" style="display:none">${_renderCashForecastReport(cashFcst)}</div>
+    <div id="rp2" style="display:none">${_renderUnbilledReport(unbilledShip,unbilledPT)}</div>
+    <div id="rp3" style="display:none">${_renderStorageBillingReport(storageCharges,prevPer)}</div>
+    <div id="rp4" style="display:none">${_renderSellThroughReport(prevPer)}</div>
+  </div>`;
+}
+
+function acctShowReport(idx,btn){
+  document.querySelectorAll('[data-rtab]').forEach(b=>{b.style.background='var(--bg3)';b.style.borderColor='var(--border2)';b.style.color='var(--text3)';b.style.fontWeight='400';});
+  btn.style.background='rgba(255,184,48,0.15)';btn.style.borderColor='rgba(255,184,48,0.4)';btn.style.color='var(--amber)';btn.style.fontWeight='600';
+  for(let i=0;i<5;i++){const p=document.getElementById('rp'+i);if(p)p.style.display=i===idx?'':'none';}
+}
+
+function _renderCustomerPnLReport(allPnL,period){
+  if(!allPnL.length)return`<div style="text-align:center;padding:48px;color:var(--text3);background:var(--card);border-radius:10px">No shipment data for ${period} yet — complete the shipping flow to see P&L</div>`;
+  const totalRev=allPnL.reduce((a,c)=>a+c.totalRevenueCombined,0);
+  const totalGP=allPnL.reduce((a,c)=>a+c.totalGrossProfit,0);
+  return`<div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+      ${_acctCard('TOTAL REVENUE',acctFmt(totalRev),period,'var(--green)','💵')}
+      ${_acctCard('GROSS PROFIT',acctFmt(totalGP),totalRev>0?((totalGP/totalRev)*100).toFixed(1)+'% margin':'—','var(--amber)','📊')}
+      ${_acctCard('CUSTOMERS',allPnL.length,'in period','var(--blue)','👥')}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--card);border-radius:10px;overflow:hidden">
+      <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+        <th style="text-align:left;padding:10px 14px">Customer</th><th style="text-align:right;padding:10px 8px">Ship</th>
+        <th style="text-align:right;padding:10px 8px">Revenue</th><th style="text-align:right;padding:10px 8px">COGS</th>
+        <th style="text-align:right;padding:10px 8px">Labor</th><th style="text-align:right;padding:10px 8px">Freight</th>
+        <th style="text-align:right;padding:10px 8px">GP</th><th style="text-align:right;padding:10px 14px">Margin</th>
+      </tr>
+      ${allPnL.map(c=>{const mc=c.grossMarginPct>=30?'var(--green)':c.grossMarginPct>=15?'var(--amber)':'var(--red)';
+        return`<tr style="border-top:1px solid var(--border2);cursor:pointer" onclick="acctViewCustomerPnL('${c.customerName}','${c.period}')">
+          <td style="padding:10px 14px;font-weight:600">${c.customerName}</td>
+          <td style="padding:10px 8px;text-align:right;color:var(--text3)">${c.shipmentCount}</td>
+          <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--green)">${acctFmt(c.totalRevenueCombined)}</td>
+          <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt(c.totalCogs)}</td>
+          <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt(c.totalLabor)}</td>
+          <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt(c.totalFreight)}</td>
+          <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:${mc}">${acctFmt(c.totalGrossProfit)}</td>
+          <td style="padding:10px 14px;text-align:right;font-family:var(--font-mono);color:${mc}">${c.grossMarginPct.toFixed(1)}%</td>
+        </tr>`;}).join('')}
+    </table>
+  </div>`;
+}
+
+function _renderCashForecastReport(fcst){
+  return`<div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+      ${_acctCard('EXPECTED INFLOWS',acctFmt(fcst.totalInflow),'next 60 days','var(--green)','📥')}
+      ${_acctCard('EXPECTED OUTFLOWS',acctFmt(fcst.totalOutflow),'next 60 days','var(--red)','📤')}
+      ${_acctCard('NET CASH FLOW',acctFmt(fcst.netCashFlow),'forecast','var(--amber)','💰')}
+    </div>
+    ${fcst.totalInflow===0&&fcst.totalOutflow===0
+      ?`<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">Create invoices in AR and bills in AP to see cash forecast</div>`
+      :`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px;overflow-x:auto">
+        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">WEEKLY TIMELINE</div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:560px">
+          <tr style="color:var(--text3);font-size:10px;font-family:var(--font-mono)"><th style="text-align:left;padding:4px">Week</th><th style="text-align:right;padding:4px">Inflows</th><th style="text-align:right;padding:4px">Outflows</th><th style="text-align:right;padding:4px">Net</th><th style="text-align:right;padding:4px">Running</th></tr>
+          ${fcst.timeline.map(w=>{const net=w.inflow-w.outflow;return`<tr style="border-top:1px solid var(--border2)"><td style="padding:5px 4px;font-family:var(--font-mono);font-size:10px;color:var(--text3)">${w.date}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--green)">${w.inflow>0?acctFmt(w.inflow):'-'}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--red)">${w.outflow>0?acctFmt(w.outflow):'-'}</td><td style="text-align:right;font-family:var(--font-mono);color:${net>=0?'var(--green)':'var(--red)'}">${net!==0?acctFmt(net):'-'}</td><td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:${w.runningBalance>=0?'var(--green)':'var(--red)'}">${acctFmt(w.runningBalance)}</td></tr>`;}).join('')}
+        </table>
+      </div>`}
+  </div>`;
+}
+
+function _renderUnbilledReport(unbilledShip,unbilledPT){
+  return`<div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      ${_acctCard('UNBILLED SHIPMENTS',unbilledShip.length,'awaiting invoice',unbilledShip.length>0?'var(--amber)':'var(--green)','📦')}
+      ${_acctCard('UNBILLED PASS-THROUGHS',unbilledPT.length,'POs received not billed',unbilledPT.length>0?'var(--red)':'var(--green)','🧾')}
+    </div>
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">SHIPMENTS NEEDING INVOICE</div>
+    ${unbilledShip.length===0
+      ?`<div style="text-align:center;padding:20px;color:var(--green);background:rgba(57,232,122,0.06);border-radius:10px;margin-bottom:16px;font-size:12px">✅ All shipped orders have been invoiced</div>`
+      :unbilledShip.slice(0,15).map(s=>{const cases=(s.items||[]).reduce((a,i)=>a+(parseInt(i.qty)||0),0);
+        return`<div style="background:var(--card);border:1px solid rgba(255,184,48,0.25);border-left:3px solid var(--amber);border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div><div style="font-weight:600;font-size:13px">${s.recipientName||'Unknown'} <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">· ${(s.id||'').slice(-8)}</span></div>
+          <div style="font-size:11px;color:var(--text3)">${s.type||'shipment'} · ${cases} cases · ${s.shippedDate||s.createdAt?.slice(0,10)||'—'}</div></div>
+          <button onclick="acctCreateInvoiceForShipment('${s.id}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">📄 Invoice</button>
+        </div>`;}).join('')}
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin:16px 0 10px">PASS-THROUGHS NEEDING REBILL</div>
+    ${unbilledPT.length===0
+      ?`<div style="text-align:center;padding:20px;color:var(--green);background:rgba(57,232,122,0.06);border-radius:10px;font-size:12px">✅ No unbilled pass-throughs</div>`
+      :unbilledPT.map(po=>`<div style="background:var(--card);border:1px solid rgba(255,77,109,0.2);border-left:3px solid var(--red);border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><div style="font-weight:600;font-size:13px">${po.poNo} — ${po.vendorName}</div><div style="font-size:11px;color:var(--text3)">${po.brandName||po.customerId||'—'} · ${acctFmt(po.totalEstimated)}</div></div><span style="font-size:11px;color:var(--red)">⚠ Needs rebill</span></div>`).join('')}
+  </div>`;
+}
+
+function _renderStorageBillingReport(storageCharges,period){
+  const total=storageCharges.reduce((a,s)=>a+s.charge,0);
+  return`<div>
+    ${_acctCard('STORAGE CHARGES',acctFmt(total),'period: '+period,'var(--amber)','🏭')}
+    <div style="margin-top:16px">
+    ${storageCharges.length===0
+      ?`<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No storage charges for ${period}. Create reservations via Deals and they'll accrue after the grace period.</div>`
+      :storageCharges.map(s=>`<div style="background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div><div style="font-weight:600;font-size:13px">${s.brandName}</div><div style="font-size:11px;color:var(--text3)">${s.reservedCases} cases · ${s.billableDays} billable days</div></div>
+        <div style="text-align:right"><div style="font-family:var(--font-mono);font-size:16px;color:var(--amber)">${acctFmt(s.charge)}</div>
+        <button onclick="acctCreateStorageInvoice('${s.reservationId}',${s.charge})" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;margin-top:4px">Invoice</button></div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function _renderSellThroughReport(period){
+  const records=sellThroughLoad().filter(r=>r.period===period);
+  const deals=dealsLoad().filter(d=>d.status==='active'&&d.custReportsSellThrough);
+  return`<div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:13px;color:var(--text2)">Reports for <strong>${period}</strong></div>
+      <div style="display:flex;gap:8px">${_acctBtnGreen('Enter Report','acctEnterSellThroughModal()')}</div>
+    </div>
+    ${deals.length===0
+      ?`<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No profit-share deals with sell-through reporting enabled</div>`
+      :deals.map(d=>{const rec=records.find(r=>r.brandName===d.brandName);
+        return`<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${rec?'var(--green)':'var(--red)'};border-radius:8px;padding:14px 16px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+            <div style="flex:1"><div style="font-weight:600;font-size:13px;margin-bottom:6px">${d.brandName} <span style="font-size:10px;color:var(--text3)">${d.customerName}</span></div>
+              ${rec
+                ?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;font-size:11px">${[['Cases',rec.caseSold,'var(--green)'],['Gross Rev',acctFmt(rec.grossRevenue),'var(--text)'],['Returns',rec.returns,'var(--amber)'],['Allowances',acctFmt(rec.allowances),'var(--amber)'],['Net Rev',acctFmt(rec.netRevenue),'var(--green)']].map(([l,v,c])=>`<div style="background:var(--bg3);border-radius:6px;padding:5px 8px"><div style="color:var(--text3);font-size:9px">${l}</div><div style="color:${c};font-family:var(--font-mono);font-weight:700">${v}</div></div>`).join('')}</div>`
+                :`<div style="font-size:12px;color:var(--red)">⚠ Not received for ${period}</div>`}
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              ${!rec?`<button onclick="acctEnterSellThroughFor('${d.customerId||d.customerName}','${d.brandName}','${period}')" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Enter</button>`:''}
+              <button onclick="acctImportSellThroughCSV('${d.customerId||d.customerName}','${d.brandName}','${period}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">CSV Import</button>
+            </div>
+          </div>
+        </div>`;}).join('')}
+  </div>`;
+}
+
+function renderAcctShipmentCosting(){
+  const el=document.getElementById('acct-shipment-costing-content');if(!el)return;
+  const shArr=typeof shipments!=='undefined'?shipments:[];
+  const shipped=shArr.filter(s=>!['pending','working'].includes(s.status)).slice().reverse().slice(0,30);
+  const profitability=shipped.map(s=>calcShipmentProfitability(s.id)).filter(Boolean);
+  const totalRev=profitability.reduce((a,p)=>a+p.revenue,0);
+  const totalCost=profitability.reduce((a,p)=>a+p.totalCost,0);
+  const totalGP=profitability.reduce((a,p)=>a+p.grossProfit,0);
+  const unbilled=findUnbilledShipments();
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('SHIPMENT COSTING','Revenue vs cost per shipment — batch COGS + labor + freight + materials',_acctBtnGreen('+ Price Book','acctNewPriceBookModal()')+_acctBtn('Unbilled ('+unbilled.length+')','showPage("acct-reports",document.querySelector("[onclick*=acct-reports]"));setTimeout(()=>{const b=document.querySelector("[data-rtab=\\"2\\"]");if(b){acctShowReport(2,b);}},200)'))}
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+      ${_acctCard('TOTAL REVENUE',acctFmt(totalRev),'last 30 shipments','var(--green)','💵')}
+      ${_acctCard('TOTAL COST',acctFmt(totalCost),'COGS+labor+freight','var(--red)','📊')}
+      ${_acctCard('GROSS PROFIT',acctFmt(totalGP),totalRev>0?((totalGP/totalRev)*100).toFixed(1)+'% margin':'—','var(--amber)','📈')}
+      ${_acctCard('UNBILLED',unbilled.length,'need invoices',unbilled.length>0?'var(--red)':'var(--green)','⚠️')}
+    </div>
+    ${profitability.length===0
+      ?`<div style="text-align:center;padding:48px;color:var(--text3);background:var(--card);border-radius:10px">No shipped orders yet — complete the Create → Work → Ship flow to see profitability here</div>`
+      :`<table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--card);border-radius:10px;overflow:hidden">
+        <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+          <th style="text-align:left;padding:10px 14px">Shipment</th><th style="text-align:left;padding:10px 8px">Customer</th>
+          <th style="text-align:right;padding:10px 8px">Cases</th><th style="text-align:right;padding:10px 8px">Revenue</th>
+          <th style="text-align:right;padding:10px 8px">Batch COGS</th><th style="text-align:right;padding:10px 8px">Labor</th>
+          <th style="text-align:right;padding:10px 8px">Freight</th><th style="text-align:right;padding:10px 8px">Profit</th>
+          <th style="text-align:right;padding:10px 14px">Margin</th>
+        </tr>
+        ${profitability.map(p=>{const mc=p.grossMarginPct>=30?'var(--green)':p.grossMarginPct>=10?'var(--amber)':'var(--red)';const hasRev=p.revenue>0;
+          return`<tr style="border-top:1px solid var(--border2)">
+            <td style="padding:8px 14px;font-family:var(--font-mono);font-size:10px;color:var(--text3)">${(p.shipmentId||'').slice(-8)}</td>
+            <td style="padding:8px 8px">${p.customerId}</td>
+            <td style="padding:8px 8px;text-align:right;font-family:var(--font-mono)">${p.totalCases}</td>
+            <td style="padding:8px 8px;text-align:right;font-family:var(--font-mono);color:${hasRev?'var(--green)':'var(--text3)'}">${hasRev?acctFmt(p.revenue):'needs price book'}</td>
+            <td style="padding:8px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${p.batchCogs>0?acctFmt(p.batchCogs):'—'}</td>
+            <td style="padding:8px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${p.laborCost>0?acctFmt(p.laborCost):'—'}</td>
+            <td style="padding:8px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${p.carrierCost>0?acctFmt(p.carrierCost):'—'}</td>
+            <td style="padding:8px 8px;text-align:right;font-family:var(--font-mono);color:${hasRev?mc:'var(--text3)'}">${hasRev?acctFmt(p.grossProfit):'—'}</td>
+            <td style="padding:8px 14px;text-align:right;font-family:var(--font-mono);color:${hasRev?mc:'var(--text3)'}">${hasRev?p.grossMarginPct.toFixed(1)+'%':'—'}</td>
+          </tr>`;}).join('')}
+      </table>
+      ${profitability.some(p=>p.revenue===0)?`<div style="background:rgba(255,184,48,0.08);border:1px solid rgba(255,184,48,0.25);border-radius:10px;padding:14px 18px;margin-top:12px"><div style="font-size:12px;color:var(--amber);font-weight:600;margin-bottom:6px">⚠ Some shipments show $0 revenue — create a price book to unlock profitability</div>${_acctBtnGreen('+ Create Price Book','acctNewPriceBookModal()')}</div>`:''}`}
+  </div>`;
+}
+
+function renderAcctIntegrations(){
+  const el=document.getElementById('acct-integrations-content');if(!el)return;
+  const qbo=qboConfigLoad();const sq=squareConfigLoad();
+  const syncLog=acctLoad(QBO_KEYS.SYNC_LOG).slice(-12).reverse();
+  const pendingInvs=invoicesLoad().filter(i=>i.qboSyncStatus==='pending'&&!['draft','void'].includes(i.status)).length;
+  const pendingBills=acctLoad(ACCT_KEYS.VENDOR_BILLS).filter(b=>b.qboSyncStatus==='pending').length;
+  el.innerHTML=`<div style="padding:24px;max-width:1000px">
+    ${_acctSectionHeader('INTEGRATIONS','QuickBooks Online and Square — sync invoices, bills, customers, and payments')}
+
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:20px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px">🟢 QuickBooks Online</div>
+          <div style="font-size:12px;color:var(--text3)">${qbo.connected?'Connected — '+qbo.companyName:'Not connected — click + Connect to configure'}</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          ${qbo.connected?`<button onclick="qboBulkSync()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer">⬆ Sync Pending (${pendingInvs+pendingBills})</button>`:''}
+          <button onclick="acctQBOConfigModal()" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer">${qbo.connected?'⚙ Settings':'+ Connect'}</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:14px">
+        ${[['Pending Invoices',pendingInvs,'var(--amber)'],['Pending Bills',pendingBills,'var(--amber)'],['Errors',syncLog.filter(l=>l.status==='error').length,'var(--red)'],['Synced Today',syncLog.filter(l=>l.status==='success'&&l.ts.slice(0,10)===acctToday()).length,'var(--green)']].map(([label,val,c])=>`<div style="background:var(--bg3);border-radius:8px;padding:10px 12px;text-align:center"><div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);margin-bottom:2px">${label.toUpperCase()}</div><div style="font-size:18px;font-family:var(--font-mono);color:${c}">${val}</div></div>`).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">
+        ${[['✅ Invoices → QBO','on finalize/manual'],['✅ Bills → QBO','on create/manual'],['✅ Customers synced first','before invoices'],['✅ Vendors synced first','before bills'],['❌ Batch cost calcs','stays internal (source of truth)'],['❌ Settlement math','stays internal (source of truth)'],['❌ Production runs','stays internal (source of truth)'],['❌ COA/lot traceability','stays internal (source of truth)']].map(([l,s])=>`<div style="background:var(--bg3);border-radius:6px;padding:7px 10px"><div style="color:var(--text2);font-weight:600;margin-bottom:1px">${l}</div><div style="color:var(--text3);font-size:10px">${s}</div></div>`).join('')}
+      </div>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:20px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px">⬛ Square</div>
+          <div style="font-size:12px;color:var(--text3)">${sq.connected?'Connected — Location: '+sq.locationId:'Not connected — eligible DTC and functional beverage channels only'}</div>
+        </div>
+        <button onclick="acctSquareConfigModal()" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer">${sq.connected?'⚙ Settings':'+ Connect'}</button>
+      </div>
+      <div style="background:rgba(255,184,48,0.06);border:1px solid rgba(255,184,48,0.2);border-radius:8px;padding:12px;font-size:11px;color:var(--text3)"><strong style="color:var(--amber)">⚠ Eligibility is per-deal and per-SKU</strong> — THC-restricted products are never processed through Square. Configure eligibility in each deal under Deals & Contracts.</div>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">SYNC LOG (LAST 12)</div>
+      ${syncLog.length===0
+        ?'<div style="color:var(--text3);font-size:12px">No sync activity yet — connect QBO above and click Sync Pending</div>'
+        :syncLog.map(l=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2);font-size:11px"><span style="color:${l.status==='success'?'var(--green)':l.status==='error'?'var(--red)':'var(--amber)'};flex-shrink:0">●</span><span style="font-family:var(--font-mono);color:var(--text3);min-width:120px;flex-shrink:0">${l.ts.slice(0,16).replace('T',' ')}</span><span style="color:var(--text2)">${l.action} ${l.entity} — ${l.detail||l.status}</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ── PHASE 2 MODALS ────────────────────────────────────────────
+function acctNewPriceBookModal(){
+  const deals=dealsLoad().filter(d=>d.status==='active');
+  acctModal('NEW PRICE BOOK',`<div style="display:grid;gap:12px">
+    <div class="form-group"><label class="form-label">Name *</label><input class="form-input" id="pb-name" placeholder="e.g. AppGirls Standard 2025"></div>
+    <div class="form-group"><label class="form-label">Customer / Deal</label><select class="form-input" id="pb-deal"><option value="">— Apply globally —</option>${deals.map(d=>`<option value="${d.dealId}|${d.customerId||d.customerName}|${d.brandName}">${d.customerName} — ${d.brandName}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Effective Date</label><input class="form-input" type="date" id="pb-start" value="${acctToday()}"></div>
+    <div class="form-group"><label class="form-label">Price Lines — one per line: SKU name, MG, $/case</label>
+      <textarea class="form-input" id="pb-lines" style="height:120px;font-family:var(--font-mono);font-size:11px" placeholder="Blind Tiger Cola, 25 MG, 42.00&#10;Gata Juice Lemonade, 25 MG, 40.00&#10;AppGirls Strawberry Lemonade, 10 MG, 38.00"></textarea>
+    </div>
+  </div>`,()=>{
+    const name=document.getElementById('pb-name').value.trim();if(!name){showToast('⚠ Name required');return;}
+    const[dealId,customerId,brandName]=(document.getElementById('pb-deal').value||'||').split('|');
+    const raw=document.getElementById('pb-lines').value.split('\n').filter(l=>l.trim());
+    const lines=raw.map(l=>{const parts=l.split(',').map(s=>s.trim());return{sku:parts[0]||'',mg:parts[1]||'',pricePerCase:parseFloat(parts[2])||0};}).filter(l=>l.sku&&l.pricePerCase>0);
+    if(!lines.length){showToast('⚠ Enter at least one price line');return;}
+    priceBookCreate({name,dealId,customerId,brandName,effectiveDate:document.getElementById('pb-start').value,lines});
+    showToast('✅ Price book created — '+lines.length+' SKU prices');renderAcctShipmentCosting();
+  },'Create Price Book');
+}
+
+function acctQBOConfigModal(){
+  const cfg=qboConfigLoad();
+  acctModal('QUICKBOOKS ONLINE',`<div style="display:grid;gap:12px">
+    <div style="background:rgba(52,152,219,0.08);border:1px solid rgba(52,152,219,0.2);border-radius:8px;padding:12px;font-size:11px;color:var(--text3)">Create a QBO app at <strong style="color:var(--blue)">developer.intuit.com</strong> to get your credentials. Access tokens expire — refresh them periodically.</div>
+    <div class="form-group"><label class="form-label">Company ID (Realm ID)</label><input class="form-input" id="qbo-co" value="${cfg.companyId||''}" placeholder="9130350..."></div>
+    <div class="form-group"><label class="form-label">Access Token</label><input class="form-input" id="qbo-tok" value="${cfg.accessToken||''}" placeholder="eyJ...token" style="font-family:var(--font-mono);font-size:10px"></div>
+    <div class="form-group"><label class="form-label">Environment</label><select class="form-input" id="qbo-env"><option value="production" ${cfg.env!=='sandbox'?'selected':''}>Production</option><option value="sandbox" ${cfg.env==='sandbox'?'selected':''}>Sandbox (testing)</option></select></div>
+    <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="qbo-name" value="${cfg.companyName||''}" placeholder="420 Craft Beverages"></div>
+  </div>`,()=>{
+    const co=document.getElementById('qbo-co').value.trim(),tok=document.getElementById('qbo-tok').value.trim();
+    qboConfigSave({companyId:co,accessToken:tok,env:document.getElementById('qbo-env').value,companyName:document.getElementById('qbo-name').value.trim(),connected:!!(co&&tok),connectedAt:acctNow()});
+    showToast(co&&tok?'✅ QBO connected':'⚠ QBO credentials cleared');renderAcctIntegrations();
+  },'Save');
+}
+
+function acctSquareConfigModal(){
+  const cfg=squareConfigLoad();
+  acctModal('SQUARE SETTINGS',`<div style="display:grid;gap:12px">
+    <div style="background:rgba(255,184,48,0.06);border:1px solid rgba(255,184,48,0.2);border-radius:8px;padding:12px;font-size:11px;color:var(--amber)">⚠ For eligible non-THC-restricted DTC channels only. Configure per-deal eligibility in Deals & Contracts.</div>
+    <div class="form-group"><label class="form-label">Access Token</label><input class="form-input" id="sq-tok" value="${cfg.accessToken||''}" placeholder="EAAAl...token" style="font-family:var(--font-mono);font-size:10px"></div>
+    <div class="form-group"><label class="form-label">Location ID</label><input class="form-input" id="sq-loc" value="${cfg.locationId||''}" placeholder="LID..."></div>
+    <div class="form-group"><label class="form-label">Environment</label><select class="form-input" id="sq-env"><option value="production" ${cfg.env!=='sandbox'?'selected':''}>Production</option><option value="sandbox" ${cfg.env==='sandbox'?'selected':''}>Sandbox</option></select></div>
+  </div>`,()=>{
+    const tok=document.getElementById('sq-tok').value.trim();
+    squareConfigSave({accessToken:tok,locationId:document.getElementById('sq-loc').value.trim(),env:document.getElementById('sq-env').value,connected:!!tok,connectedAt:acctNow()});
+    showToast(tok?'✅ Square connected':'⚠ Square credentials cleared');renderAcctIntegrations();
+  },'Save');
+}
+
+function acctImportSellThroughCSV(customerId,brandName,period){
+  acctModal('IMPORT CSV — '+brandName+' '+period,`<div style="display:grid;gap:12px">
+    <div style="background:var(--bg3);border-radius:8px;padding:12px;font-size:11px;color:var(--text3)">Expected columns: <code style="color:var(--green)">sku, qty, revenue, returns, allowances</code> — first row must be headers</div>
+    <div class="form-group"><label class="form-label">Paste CSV *</label>
+      <textarea class="form-input" id="csv-in" style="height:140px;font-family:var(--font-mono);font-size:11px" placeholder="sku,qty,revenue,returns,allowances&#10;Blind Tiger Cola 25 MG,45,5400,2,120&#10;Blind Tiger Root Beer 25 MG,38,4560,0,80"></textarea>
+    </div>
+  </div>`,()=>{
+    const csv=document.getElementById('csv-in').value.trim();if(!csv){showToast('⚠ Paste CSV first');return;}
+    const result=parseSellThroughCSV(csv,customerId,brandName,period);
+    if(result.error){showToast('❌ '+result.error);return;}
+    showToast('✅ Imported: '+result.totalCases+' cases · '+acctFmt(result.totalRevenue));
+    renderAcctReports();
+  },'Import');
+}
+
+// ── PHASE 2 ACTION HELPERS ────────────────────────────────────
+function acctCreateInvoiceForShipment(shipmentId){
+  const shArr=typeof shipments!=='undefined'?shipments:[];
+  const sh=shArr.find(s=>s.id===shipmentId);if(!sh){showToast('Shipment not found');return;}
+  const prof=calcShipmentProfitability(shipmentId);
+  const cases=(sh.items||[]).reduce((a,i)=>a+(parseInt(i.qty)||0),0);
+  const deal=dealGetActive(sh.recipientName,sh.brandName||'')[0]||{};
+  const lines=[];
+  if(prof&&prof.revenueLines){prof.revenueLines.filter(l=>l.revenue>0).forEach(l=>{lines.push({lineId:acctId('IL'),description:l.sku+' '+l.mg+' × '+l.qty+' cases',glCode:'4000',qty:l.qty,unitPrice:l.pricePerCase,amount:l.revenue,type:'product_revenue'});});}
+  if(!lines.length){lines.push({lineId:acctId('IL'),description:'Shipment '+shipmentId+' — '+cases+' cases',glCode:'4000',qty:cases,unitPrice:deal.pricePerCase||0,amount:(deal.pricePerCase||0)*cases,type:'product_revenue'});}
+  if(prof&&prof.freightRebill>0)lines.push({lineId:acctId('IL'),description:'Freight Rebill',glCode:'4040',qty:1,unitPrice:prof.freightRebill,amount:prof.freightRebill,type:'freight_rebill'});
+  const inv=invoiceCreate('shipment',{customerName:sh.recipientName,brandName:sh.brandName||'',refShipmentId:shipmentId,lines,terms:deal.paymentTerms||'Net30',dueDate:_addDays(acctToday(),_termsDays(deal.paymentTerms)),notes:'From shipment '+shipmentId});
+  showToast('✅ Invoice '+inv.invoiceNo+' — '+acctFmt(inv.totalAmount));
+  showPage('acct-ar',document.querySelector('[onclick*=acct-ar]'));
+}
+
+function acctCreateStorageInvoice(reservationId,charge){
+  const res=acctLoad(ACCT_KEYS.RESERVATIONS).find(r=>r.id===reservationId);if(!res){showToast('Reservation not found');return;}
+  const deal=dealGetActive(res.customerId,res.brandName)[0]||{};
+  const inv=invoiceCreate('storage',{customerName:res.customerId,brandName:res.brandName,lines:[{lineId:acctId('IL'),description:'Storage Fee — '+res.brandName+' — '+res.reservedCases+' cases',glCode:'4050',qty:1,unitPrice:parseFloat(charge),amount:parseFloat(charge),type:'storage_revenue'}],terms:deal.paymentTerms||'Net30',dueDate:_addDays(acctToday(),_termsDays(deal.paymentTerms))});
+  showToast('✅ Storage invoice '+inv.invoiceNo+': '+acctFmt(inv.totalAmount));
+  showPage('acct-ar',document.querySelector('[onclick*=acct-ar]'));
+}
+
+function acctViewCustomerPnL(customerName,period){
+  const pnl=calcCustomerPnL(customerName,period);
+  acctModal('P&L — '+customerName+' '+period,`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      ${[['Shipments',pnl.shipmentCount,'var(--text)'],['Revenue',acctFmt(pnl.totalRevenueCombined),'var(--green)'],['Batch COGS',acctFmt(pnl.totalCogs),'var(--text3)'],['Labor',acctFmt(pnl.totalLabor),'var(--text3)'],['Freight',acctFmt(pnl.totalFreight),'var(--text3)'],['Materials',acctFmt(pnl.totalMaterials),'var(--text3)'],['Gross Profit',acctFmt(pnl.totalGrossProfit),pnl.totalGrossProfit>=0?'var(--green)':'var(--red)'],['Margin',pnl.grossMarginPct.toFixed(1)+'%',pnl.grossMarginPct>=20?'var(--green)':'var(--amber)'],['Invoiced',acctFmt(pnl.invoicedAmount),'var(--blue)'],['Collected',acctFmt(pnl.collectedAmount),'var(--green)'],['Open AR',acctFmt(pnl.openAR),'var(--amber)'],['Settlement Rev',acctFmt(pnl.settlementRevenue),'var(--purple)']].map(([label,val,c])=>`<div style="background:var(--bg3);border-radius:6px;padding:8px 10px"><div style="font-size:9px;color:var(--text3);font-family:var(--font-mono)">${label.toUpperCase()}</div><div style="font-size:14px;font-weight:600;color:${c};font-family:var(--font-mono)">${val}</div></div>`).join('')}
+    </div>
+    ${pnl.rollforward?`<div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);margin-bottom:6px;letter-spacing:1px">INVENTORY ROLLFORWARD</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${[['Opening',pnl.rollforward.opening,'var(--text3)'],['Produced',pnl.rollforward.produced,'var(--blue)'],['Shipped',pnl.rollforward.shipped,'var(--amber)'],['Sold',pnl.rollforward.soldThrough,'var(--green)'],['Samples',pnl.rollforward.samples,'var(--text3)'],['W/O',pnl.rollforward.writeOffs,'var(--red)'],['Ending',pnl.rollforward.ending,'var(--purple)']].map(([l,v,c])=>`<div style="background:var(--bg3);border-radius:4px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text3)">${l}</div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:${c}">${v}</div></div>`).join('')}</div>`:''}`,
+  null,'Close');
+}
+
+// ── AUTO-INVOICE HOOK ─────────────────────────────────────────
+function acctOnShipmentSubmitted(shipmentId){
+  try{
+    const shArr=typeof shipments!=='undefined'?shipments:[];
+    const sh=shArr.find(s=>s.id===shipmentId);if(!sh)return;
+    const deal=dealGetActive(sh.recipientName,sh.brandName||'')[0];
+    if(deal&&deal.invoiceCadence==='on_shipment'){setTimeout(()=>acctCreateInvoiceForShipment(shipmentId),1200);}
+  }catch(e){console.warn('Auto-invoice:',e);}
+}
+
+// ── EXTEND EXCEPTION ENGINE ───────────────────────────────────
+const _p1ExceptionEngine=runExceptionEngine;
+runExceptionEngine=function(){
+  const exceptions=_p1ExceptionEngine();
+  try{
+    const unbilled=findUnbilledShipments();
+    if(unbilled.length>3)exceptions.push({id:acctId('EX'),sev:'warning',category:'ar',title:'Unbilled shipments',detail:unbilled.length+' shipped orders have not been invoiced',entityType:'shipment',entityId:'bulk',ts:acctNow()});
+    const activeDeals=dealsLoad().filter(d=>d.status==='active'&&!['profit_share','reserved_stock'].includes(d.dealType));
+    activeDeals.forEach(d=>{const rate=priceBookGetRate(d.customerName,d.brandName,'','');if(rate.source==='none')exceptions.push({id:acctId('EX'),sev:'warning',category:'costing',title:'No price configured',detail:'No price book for '+d.customerName+' / '+d.brandName+' — revenue shows $0',entityType:'deal',entityId:d.dealId,ts:acctNow()});});
+    const failedSyncs=acctLoad(QBO_KEYS.SYNC_LOG).filter(l=>l.status==='error');
+    if(failedSyncs.length)exceptions.push({id:acctId('EX'),sev:'warning',category:'integration',title:'QBO sync errors',detail:failedSyncs.length+' sync errors — check Integrations',entityType:'sync',entityId:'qbo',ts:acctNow()});
+  }catch(e){}
+  return exceptions;
+};
+
+// ── PHASE 2 INIT ─────────────────────────────────────────────
+setTimeout(()=>{try{taxRulesLoad();runExceptionEngine();}catch(e){console.warn('P2 init:',e);}},3500);
 
 </script>
 </body>
