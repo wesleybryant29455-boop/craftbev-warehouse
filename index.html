@@ -463,6 +463,9 @@
   body.mobile-view .pagination { flex-wrap: wrap !important; gap: 4px !important; }
   body.mobile-view .page-btn { padding: 4px 8px !important; font-size: 11px !important; }
   body.mobile-view #prod-run-live { left: 0 !important; top: 0 !important; }
+  body.mobile-view #sh-work-modal > div { padding: 16px; border-radius: 0; max-height: 100vh; }
+  body.mobile-view .sh-phase-btn { padding: 8px 4px !important; }
+  body.mobile-view #sh-work-total-clock { font-size: 20px !important; }
   body.mobile-view #oq-kpi-row { grid-template-columns: 1fr 1fr !important; }
   body.mobile-view #page-order-queue .filter-bar > button { flex: 1 1 calc(50% - 6px) !important; text-align: center !important; }
   body.mobile-view #page-batch-calc .card-grid { grid-template-columns: 1fr !important; }
@@ -1732,7 +1735,7 @@ window.addEventListener('load', function() {
     </div>
 
     <!-- ══ STAGE 1: CREATE MODAL ══ -->
-    <div id="sh-create-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto;backdrop-filter:blur(6px)" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div id="sh-create-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto;backdrop-filter:blur(6px)" onclick="if(event.target===this){shClearAllAutocomplete();this.classList.add('hidden')}">
       <div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:700px;padding:28px" onclick="event.stopPropagation()">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="display:flex;align-items:center;gap:12px">
@@ -1740,7 +1743,7 @@ window.addEventListener('load', function() {
           </div>
           <div style="display:flex;align-items:center;gap:8px">
             <button onclick="shOpenAddressBook()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer" title="Address Book">📒 Address Book</button>
-            <button onclick="document.getElementById('sh-create-modal').classList.add('hidden')" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
+            <button onclick="shClearAllAutocomplete();document.getElementById('sh-create-modal').classList.add('hidden')" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
           </div>
         </div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:20px">Quick intake — who, what, where. You'll add boxes and costs at the bench.</div>
@@ -1823,14 +1826,14 @@ window.addEventListener('load', function() {
 
         <div style="display:flex;gap:8px;margin-top:16px">
           <button onclick="shCreateShipment()" class="btn btn-primary" style="flex:1">Create → Start Work</button>
-          <button onclick="document.getElementById('sh-create-modal').classList.add('hidden')" class="btn btn-ghost">Cancel</button>
+          <button onclick="shClearAllAutocomplete();document.getElementById('sh-create-modal').classList.add('hidden')" class="btn btn-ghost">Cancel</button>
         </div>
       </div>
     </div>
 
     <!-- ══ STAGE 2: WORK MODAL ══ -->
     <div id="sh-work-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;backdrop-filter:blur(6px)" onclick="if(event.target===this)shCloseWork()">
-      <div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:760px;padding:28px" onclick="event.stopPropagation()">
+      <div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:760px;padding:28px;max-height:90vh;overflow-y:auto" onclick="event.stopPropagation()">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="display:flex;align-items:center;gap:10px">
             <button onclick="shWorkBackToCreate()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer">← Edit Order</button>
@@ -6806,7 +6809,10 @@ function shOpenWorkStage(id) {
   shWorkPhaseTimes = s.workPhaseTimes || { pick:0, pack:0, label:0, load:0 };
   shWorkTotalSecs  = Object.values(shWorkPhaseTimes).reduce((a,v)=>a+v,0);
   shWorkPhase      = null;
-  shWorkCrew       = [];
+  // Restore saved crew if resuming, fresh crew if new
+  shWorkCrew = (s._savedCrew && s._savedCrew.length)
+    ? s._savedCrew.map(w => ({ ...w, clockInAt: Date.now(), totalSecs: w.totalSecs, paused: true, clockedOutAt: null }))
+    : [];
   shWorkCrewTimers = {};
   shWorkPaused     = false;
   shUpdatePhaseDisplay();
@@ -7129,6 +7135,10 @@ function shWorkUpdateCOGS() {
 }
 
 function shStopWork() {
+  // Warn if no workers logged
+  if (shWorkCrew.length === 0) {
+    if (!confirm('⚠ No workers are clocked in — labor cost will be $0.00.\n\nContinue anyway?')) return;
+  }
   // Bank current phase time
   if (shWorkPhase && shWorkPhaseStart && !shWorkPaused) {
     const elapsed = Math.round((Date.now() - shWorkPhaseStart) / 1000);
@@ -7198,7 +7208,7 @@ function shStopWork() {
     const item = shippingMaterials.find(m=>m.id===c.id);
     if (item) item.stockOnHand = Math.max(0,(parseFloat(item.stockOnHand)||0)-c.qty);
   });
-  localStorage.setItem('420craft_shipping_materials', JSON.stringify(shippingMaterials));
+  smSave(); // saves to localStorage AND syncs to Sheets
 
   shSave();
   shWorkPhase = null; shWorkId = null; shWorkPhaseTimes={pick:0,pack:0,label:0,load:0};
@@ -7212,6 +7222,26 @@ function shStopWork() {
 }
 
 function shCloseWork() {
+  // Save current crew state to shipment so resume can restore it
+  if (shWorkId) {
+    shLoad();
+    const s = shGetById(shWorkId);
+    if (s) {
+      // Bank active phase time before saving
+      if (shWorkPhase && shWorkPhaseStart && !shWorkPaused) {
+        const elapsed = Math.round((Date.now() - shWorkPhaseStart) / 1000);
+        shWorkPhaseTimes[shWorkPhase] = (shWorkPhaseTimes[shWorkPhase]||0) + elapsed;
+      }
+      s.workPhaseTimes = shWorkPhaseTimes;
+      s._savedCrew = shWorkCrew.map(w => ({
+        ...w,
+        // If still active, bank time up to now
+        totalSecs: w.clockedOutAt ? w.totalSecs : w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000),
+        clockedOutAt: w.clockedOutAt || Date.now(),
+      }));
+      shSave();
+    }
+  }
   // Save progress without completing
   if (shWorkPhase && shWorkPhaseStart && !shWorkPaused) {
     const elapsed = Math.round((Date.now()-shWorkPhaseStart)/1000);
@@ -7374,7 +7404,20 @@ async function shSubmitShipment() {
       showToast('✅ ShipStation order: '+ssResult.orderNumber);
     }
   } else {
-    s.status = s.type==='ltl' ? (s.proNumber?'in_transit':'booked') : 'label_pending';
+    if (s.type === 'ltl') {
+      if (!s.proNumber && !s.bolNumber) {
+        const proceed = confirm('⚠ No PRO or BOL number entered for this LTL shipment.\n\nIt will be saved as "Booked". You can add the PRO number later in the detail view.\n\nContinue?');
+        if (!proceed) {
+          if (shWorkTimer) clearInterval(shWorkTimer);
+          return;
+        }
+        s.status = 'booked';
+      } else {
+        s.status = 'in_transit';
+      }
+    } else {
+      s.status = 'label_pending';
+    }
     showToast(`✅ Shipment ${s.id} submitted`);
   }
 
@@ -7583,6 +7626,7 @@ async function shGetLiveRates() {
   }
 
   // Step 2: Fetch rates for each carrier in parallel
+  const shipDateVal = document.getElementById('sh-s3-ship-date')?.value || new Date().toISOString().slice(0,10);
   const ratePayload = {
     ServiceCode:     null,
     PackageCode:     'package',
@@ -7594,6 +7638,7 @@ async function shGetLiveRates() {
     Weight:          { Value: totalWeight, Units: 'pounds' },
     Confirmation:    s.sigRequired ? 'signature' : 'none',
     Residential:     s.residential || false,
+    ShipDate:        shipDateVal,
   };
   if (firstBox.length) {
     ratePayload.Dimensions = { Units:'inches', Length:firstBox.length, Width:firstBox.width, Height:firstBox.height };
@@ -7778,8 +7823,13 @@ async function shCreateSSOrder(s) {
     requestedShippingService: s.service||'',
     internalNotes: s.notes||'',
     gift: s.type==='sample',
-    weight:{ value:s.boxes?.reduce((a,b)=>a+b.weight,0)||1, units:'pounds' },
-    dimensions: s.boxes?.[0]?{ units:'inches', length:s.boxes[0].length||1, width:s.boxes[0].width||1, height:s.boxes[0].height||1 }:undefined,
+    weight:{ value:s.boxes?.reduce((a,b)=>a+(parseFloat(b.weight)||0),0)||1, units:'pounds' },
+    dimensions: s.boxes?.[0] && (s.boxes[0].length||s.boxes[0].width||s.boxes[0].height) ? {
+      units:'inches',
+      length: parseFloat(s.boxes[0].length)||1,
+      width:  parseFloat(s.boxes[0].width)||1,
+      height: parseFloat(s.boxes[0].height)||1
+    } : undefined,
     advancedOptions:{ customField1:s.refNumber||'', customField2:s.id },
     confirmation: s.sigRequired?'signature':(s.residential?'delivery':'none'),
   };
@@ -7855,14 +7905,20 @@ function shOpenAddressBook() {
 function shRenderAddressBook() {
   abLoad();
   const query = document.getElementById('sh-ab-search')?.value?.toLowerCase().trim() || '';
+  // Sort by most used first, then most recently used
+  const sorted = [...addressBook].sort((a, b) => {
+    const ua = b.useCount || 0, ub = a.useCount || 0;
+    if (ua !== ub) return ua - ub;
+    return new Date(b.lastUsed||0) - new Date(a.lastUsed||0);
+  });
   const filtered = query
-    ? addressBook.filter(a =>
+    ? sorted.filter(a =>
         (a.name||'').toLowerCase().includes(query) ||
         (a.company||'').toLowerCase().includes(query) ||
         (a.city||'').toLowerCase().includes(query) ||
         (a.zip||'').includes(query)
       )
-    : addressBook;
+    : sorted;
 
   const list = document.getElementById('sh-ab-list');
   if (!list) return;
@@ -7880,6 +7936,10 @@ function shRenderAddressBook() {
         <div style="font-weight:700;font-size:13px;margin-bottom:2px">${a.name||'—'} ${a.company?'<span style="font-weight:400;color:var(--text3)">· '+a.company+'</span>':''}</div>
         <div style="font-size:12px;color:var(--text3)">${[a.addr1,a.city,(a.state?a.state+' ':'')+a.zip].filter(Boolean).join(', ')}</div>
         ${a.phone||a.email?`<div style="font-size:11px;color:var(--text3);margin-top:2px">${[a.phone,a.email].filter(Boolean).join(' · ')}</div>`:''}
+        <div style="font-size:10px;color:var(--text3);margin-top:3px;font-family:var(--font-mono)">
+          ${a.useCount ? `Used ${a.useCount}x` : 'Never shipped'}
+          ${a.lastUsed ? ` · Last: ${new Date(a.lastUsed).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})}` : ''}
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
         <button onclick="shAbFillForm('${a.id}')" class="btn btn-primary" style="font-size:11px;padding:5px 12px;white-space:nowrap">Use This</button>
@@ -8346,6 +8406,17 @@ function shClearAddrValidation(prefix) {
   if (res) res.innerHTML='';
   if (cor) cor.style.display='none';
   delete _shAddrCorrections[p];
+}
+
+function shClearAllAutocomplete() {
+  // Cancel any pending autocomplete fetches and hide dropdowns
+  clearTimeout(_shAutocompleteTimeout);
+  clearTimeout(_shAddr1Timeout);
+  _shAddr1Results = [];
+  const d1 = document.getElementById('sh-addr-dropdown');
+  const d2 = document.getElementById('sh-addr1-dropdown');
+  if (d1) d1.style.display = 'none';
+  if (d2) d2.style.display = 'none';
 }
 
 function shAutoValidateAddr(prefix) {
@@ -14372,6 +14443,7 @@ function bcLoadData() {
 }
 function bcSaveData() {
   localStorage.setItem('420craft_batch_log', JSON.stringify(bcBatchLog));
+  if (sheetsEnabled()) sheetsQueue('sync_all', { batchLog: bcBatchLog });
 }
 
 function renderBatchCalc() {
