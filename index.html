@@ -17162,11 +17162,9 @@ function _acctBtnGreen(label,onclick){return`<button onclick="${onclick}" style=
 
 function renderAcctHome(){
   const el=document.getElementById('acct-home-content');
-  if(el&&!el.innerHTML.trim())el.innerHTML='<div style="padding:48px;text-align:center;color:var(--text3)">⏳ Loading accounting data...</div>';
+  if(!el)return;
+  if(!el.innerHTML.trim())el.innerHTML='<div style="padding:48px;text-align:center;color:var(--text3)">⏳ Loading accounting data...</div>';
   acctSeedIfEmpty();
-  const kpi=acctKPIs();const exceptions=runExceptionEngine();
-  const errors=exceptions.filter(e=>e.sev==='error').length,warnings=exceptions.filter(e=>e.sev==='warning').length;
-  const el=document.getElementById('acct-home-content');if(!el)return;
   const aging=arAgingReport();const agingTotal=Object.values(aging).reduce((a,v)=>a+v.reduce((b,i)=>b+(i.openAmount||0),0),0);
   const invVal=inventoryValuationSummary();
   el.innerHTML=`<div style="padding:24px;max-width:1200px">
@@ -18176,12 +18174,15 @@ function acctCreateStorageInvoice(reservationId,charge){
 
 function acctViewCustomerPnL(customerName,period){
   const pnl=calcCustomerPnL(customerName,period);
-  acctModal('P&L — '+customerName+' '+period,`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-      ${[['Shipments',pnl.shipmentCount,'var(--text)'],['Revenue',acctFmt(pnl.totalRevenueCombined),'var(--green)'],['Batch COGS',acctFmt(pnl.totalCogs),'var(--text3)'],['Labor',acctFmt(pnl.totalLabor),'var(--text3)'],['Freight',acctFmt(pnl.totalFreight),'var(--text3)'],['Materials',acctFmt(pnl.totalMaterials),'var(--text3)'],['Gross Profit',acctFmt(pnl.totalGrossProfit),pnl.totalGrossProfit>=0?'var(--green)':'var(--red)'],['Margin',pnl.grossMarginPct.toFixed(1)+'%',pnl.grossMarginPct>=20?'var(--green)':'var(--amber)'],['Invoiced',acctFmt(pnl.invoicedAmount),'var(--blue)'],['Collected',acctFmt(pnl.collectedAmount),'var(--green)'],['Open AR',acctFmt(pnl.openAR),'var(--amber)'],['Settlement Rev',acctFmt(pnl.settlementRevenue),'var(--purple)']].map(([label,val,c])=>`<div style="background:var(--bg3);border-radius:6px;padding:8px 10px"><div style="font-size:9px;color:var(--text3);font-family:var(--font-mono)">${label.toUpperCase()}</div><div style="font-size:14px;font-weight:600;color:${c};font-family:var(--font-mono)">${val}</div></div>`).join('')}
-    </div>
-    ${pnl.rollforward?'<div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);margin-bottom:6px;letter-spacing:1px">INVENTORY ROLLFORWARD</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">'+[['Opening',pnl.rollforward.opening,'var(--text3)'],['Produced',pnl.rollforward.produced,'var(--blue)'],['Shipped',pnl.rollforward.shipped,'var(--amber)'],['Sold',pnl.rollforward.soldThrough,'var(--green)'],['Samples',pnl.rollforward.samples,'var(--text3)'],['W/O',pnl.rollforward.writeOffs,'var(--red)'],['Ending',pnl.rollforward.ending,'var(--purple)']].map(function(a){return'<div style="background:var(--bg3);border-radius:4px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text3)">'+a[0]+'</div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:'+a[2]+'">'+a[1]+'</div></div>';}).join('')+'</div>':''},
-  null,'Close');
+  const kpiRows=[['Shipments',pnl.shipmentCount,'var(--text)'],['Revenue',acctFmt(pnl.totalRevenueCombined),'var(--green)'],['Batch COGS',acctFmt(pnl.totalCogs),'var(--text3)'],['Labor',acctFmt(pnl.totalLabor),'var(--text3)'],['Freight',acctFmt(pnl.totalFreight),'var(--text3)'],['Materials',acctFmt(pnl.totalMaterials),'var(--text3)'],['Gross Profit',acctFmt(pnl.totalGrossProfit),pnl.totalGrossProfit>=0?'var(--green)':'var(--red)'],['Margin',pnl.grossMarginPct.toFixed(1)+'%',pnl.grossMarginPct>=20?'var(--green)':'var(--amber)'],['Invoiced',acctFmt(pnl.invoicedAmount),'var(--blue)'],['Collected',acctFmt(pnl.collectedAmount),'var(--green)'],['Open AR',acctFmt(pnl.openAR),'var(--amber)'],['Settlement Rev',acctFmt(pnl.settlementRevenue),'var(--purple)']];
+  const kpiHtml=kpiRows.map(function(r){return'<div style="background:var(--bg3);border-radius:6px;padding:8px 10px"><div style="font-size:9px;color:var(--text3);font-family:var(--font-mono)">'+r[0].toUpperCase()+'</div><div style="font-size:14px;font-weight:600;color:'+r[2]+';font-family:var(--font-mono)">'+r[1]+'</div></div>';}).join('');
+  let rfHtml='';
+  if(pnl.rollforward){
+    const rfRows=[['Opening',pnl.rollforward.opening,'var(--text3)'],['Produced',pnl.rollforward.produced,'var(--blue)'],['Shipped',pnl.rollforward.shipped,'var(--amber)'],['Sold',pnl.rollforward.soldThrough,'var(--green)'],['Samples',pnl.rollforward.samples,'var(--text3)'],['W/O',pnl.rollforward.writeOffs,'var(--red)'],['Ending',pnl.rollforward.ending,'var(--purple)']];
+    rfHtml='<div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);margin-bottom:6px;letter-spacing:1px">INVENTORY ROLLFORWARD</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">'+rfRows.map(function(a){return'<div style="background:var(--bg3);border-radius:4px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text3)">'+a[0]+'</div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:'+a[2]+'">'+a[1]+'</div></div>';}).join('')+'</div>';
+  }
+  const body='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+kpiHtml+'</div>'+rfHtml;
+  acctModal('P&L \u2014 '+customerName+' '+period, body, null, 'Close');
 }
 
 // ── AUTO-INVOICE HOOK ─────────────────────────────────────────
