@@ -50,6 +50,8 @@
     --radius: 12px;
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  button, [onclick] { -webkit-tap-highlight-color: transparent; touch-action: manipulation; cursor: pointer; }
+  input, select, textarea { -webkit-appearance: none; font-size: 16px; } /* 16px prevents iOS zoom */
   html { scroll-behavior: smooth; }
   body {
     background: var(--bg);
@@ -794,6 +796,48 @@
   /* Wizard */
   .wizard-steps { overflow-x:auto; }
 }
+
+  /* ── ACCOUNTING MOBILE RESPONSIVE ──────────────────────── */
+  /* ── TABLET (768–1024px) ─────────────────────────────── */
+  @media (max-width: 1024px) and (min-width: 769px) {
+    #sidebar { width: 190px; }
+    #main { margin-left: 190px; }
+    .card-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  }
+  @media (max-width: 1024px) {
+    #page-acct-reports table th:nth-child(n+6),
+    #page-acct-reports table td:nth-child(n+6),
+    #page-acct-shipment-costing table th:nth-child(n+8),
+    #page-acct-shipment-costing table td:nth-child(n+8) { display: none; }
+  }
+  @media (max-width: 768px) {
+    #page-acct-home [style*="grid-template-columns:repeat(auto-fill,minmax(170px"],
+    #page-acct-home [style*="grid-template-columns:repeat(auto-fill,minmax(180px"] {
+      grid-template-columns: 1fr 1fr !important;
+    }
+    #page-acct-reports table,
+    #page-acct-shipment-costing table,
+    #page-acct-ar table,
+    #page-acct-ap table,
+    #page-acct-inventory-val table {
+      font-size: 10px !important;
+    }
+    #page-acct-settlements [style*="grid-template-columns:repeat(auto-fill,minmax(90px"],
+    #page-acct-settlements [style*="grid-template-columns:1fr 1fr 1fr"] {
+      grid-template-columns: 1fr 1fr !important;
+    }
+    #page-acct-close [style*="grid-template-columns:1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+    .acct-modal-overlay { padding: 10px !important; }
+    #acct-modal-overlay > div { padding: 20px !important; max-height: 92vh; overflow-y: auto; }
+  }
+  @media (max-width: 480px) {
+    #page-acct-home [style*="grid-template-columns:repeat(auto-fill,minmax(170px"],
+    #page-acct-home [style*="grid-template-columns:1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -4197,19 +4241,25 @@ async function _sheetsFlush() {
   _updateSyncIndicator('⏳ Syncing...', 'var(--amber)');
 
   for (const item of batch) {
+    const controller = new AbortController();
+    const flushTimeout = setTimeout(() => controller.abort(), 15000);
     try {
       await fetch(SHEETS_URL, {
         method: 'POST',
         mode: 'no-cors',
         redirect: 'follow',
         body: JSON.stringify(item),
-        headers: { 'Content-Type': 'text/plain' }
+        headers: { 'Content-Type': 'text/plain' },
+        signal: controller.signal,
       });
+      clearTimeout(flushTimeout);
     } catch(e) {
-      // Network error — re-queue this item and retry in 30s
+      clearTimeout(flushTimeout);
+      // Network error or timeout — re-queue this item and retry in 30s
       _syncQueue.unshift(item);
       _syncStatus = 'error';
-      _updateSyncIndicator('⚠ Sync error — retrying...', 'var(--red)');
+      const msg = e.name === 'AbortError' ? '⚠ Sync timeout — retrying...' : '⚠ Sync error — retrying...';
+      _updateSyncIndicator(msg, 'var(--red)');
       console.warn('Sheets sync error:', e.message);
       if (_syncTimer) clearTimeout(_syncTimer);
       _syncTimer = setTimeout(_sheetsFlush, 30000); // retry in 30s
@@ -4486,6 +4536,8 @@ function showPage(id, el) {
   if (id === 'settings') renderSettings();
   if (id === 'shipping') renderShipping();
   if (id === 'acct-home')          renderAcctHome();
+  // Refresh exception badge on any accounting page nav
+  if (id.startsWith('acct-')) setTimeout(()=>{try{runExceptionEngine();}catch(e){}}, 500);
   if (id === 'acct-deals')         renderAcctDeals();
   if (id === 'acct-costing')       renderAcctCosting();
   if (id === 'acct-settlements')   renderAcctSettlements();
@@ -6526,17 +6578,25 @@ function shApiEnabled() {
 }
 async function shApiCall(method, endpoint, body) {
   if (!sheetsEnabled()) return { error: 'Apps Script not connected.' };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
   try {
     const res = await fetch(SHEETS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'ss_proxy', data: { method, endpoint, body } })
+      body: JSON.stringify({ action: 'ss_proxy', data: { method, endpoint, body } }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     const result = await res.json();
     if (!result.ok) return { error: result.error || 'Apps Script error' };
     if (result.result?.error) return { error: result.result.error };
     return result.result;
-  } catch(e) { return { error: e.message }; }
+  } catch(e) {
+    clearTimeout(timeout);
+    if (e.name === 'AbortError') return { error: 'Request timed out after 20s — check your Apps Script URL in Settings' };
+    return { error: e.message };
+  }
 }
 
 // ── Render page ───────────────────────────
@@ -9168,6 +9228,42 @@ function backupExport() {
       XLSX.utils.book_append_sheet(wb, wsNT, 'Network Contacts');
     }
 
+    // ── ACCOUNTING DATA SHEETS ──────────────────────────────
+    const acctSheetDefs = [
+      { key:'420craft_acct_deals',          name:'Acct-Deals' },
+      { key:'420craft_acct_invoices',       name:'Acct-Invoices' },
+      { key:'420craft_acct_payments',       name:'Acct-Payments' },
+      { key:'420craft_acct_settlements',    name:'Acct-Settlements' },
+      { key:'420craft_acct_cost_snapshots', name:'Acct-CostSnapshots' },
+      { key:'420craft_acct_pos',            name:'Acct-PurchaseOrders' },
+      { key:'420craft_acct_bills',          name:'Acct-Bills' },
+      { key:'420craft_acct_vendors',        name:'Acct-Vendors' },
+      { key:'420craft_acct_sell_through',   name:'Acct-SellThrough' },
+      { key:'420craft_acct_close_periods',  name:'Acct-ClosePeriods' },
+      { key:'420craft_acct_audit_trail',    name:'Acct-AuditTrail' },
+      { key:'420craft_acct_price_books',    name:'Acct-PriceBooks' },
+      { key:'420craft_acct_sync_log',       name:'Acct-SyncLog' },
+    ];
+    acctSheetDefs.forEach(({ key, name }) => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const data = JSON.parse(raw);
+          if (Array.isArray(data) && data.length > 0) {
+            const flat = data.map(r => {
+              const out = {};
+              Object.entries(r).forEach(([k, v]) => {
+                out[k] = (typeof v === 'object' && v !== null) ? JSON.stringify(v) : v;
+              });
+              return out;
+            });
+            const ws = XLSX.utils.json_to_sheet(flat);
+            XLSX.utils.book_append_sheet(wb, ws, name);
+          }
+        }
+      } catch(e) { console.warn('Acct sheet failed:', name, e); }
+    });
+
     // ── Download ──────────────────────────────────────
     XLSX.writeFile(wb, '420craft-backup-' + date + '.xlsx');
     statusEl.textContent = '✅ Backup exported! File: 420craft-backup-' + date + '.xlsx — ' + skuData.length + ' SKUs, ' + batchData.length + ' batches, ' + movements.length + ' movements';
@@ -9382,6 +9478,41 @@ function backupImport() {
       }));
       localStorage.setItem('420craft_shipping_materials', JSON.stringify(sm));
     }
+
+    // ── RESTORE ACCOUNTING DATA ────────────────────────────
+    const acctRestoreMap = {
+      'Acct-Deals':         '420craft_acct_deals',
+      'Acct-Invoices':      '420craft_acct_invoices',
+      'Acct-Payments':      '420craft_acct_payments',
+      'Acct-Settlements':   '420craft_acct_settlements',
+      'Acct-CostSnapshots': '420craft_acct_cost_snapshots',
+      'Acct-PurchaseOrders':'420craft_acct_pos',
+      'Acct-Bills':         '420craft_acct_bills',
+      'Acct-Vendors':       '420craft_acct_vendors',
+      'Acct-SellThrough':   '420craft_acct_sell_through',
+      'Acct-ClosePeriods':  '420craft_acct_close_periods',
+      'Acct-AuditTrail':    '420craft_acct_audit_trail',
+      'Acct-PriceBooks':    '420craft_acct_price_books',
+      'Acct-SyncLog':       '420craft_acct_sync_log',
+    };
+    Object.entries(acctRestoreMap).forEach(([sheetName, lsKey]) => {
+      if (wb.SheetNames.includes(sheetName)) {
+        try {
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
+          // Parse any JSON-stringified fields back to objects
+          const restored = rows.map(r => {
+            const out = {};
+            Object.entries(r).forEach(([k, v]) => {
+              if (typeof v === 'string' && (v.startsWith('{') || v.startsWith('['))) {
+                try { out[k] = JSON.parse(v); } catch { out[k] = v; }
+              } else { out[k] = v; }
+            });
+            return out;
+          });
+          localStorage.setItem(lsKey, JSON.stringify(restored));
+        } catch(e) { console.warn('Acct restore failed:', sheetName, e); }
+      }
+    });
 
     saveData();
     document.getElementById('backup-preview').style.display = 'none';
@@ -16172,17 +16303,7 @@ function ntClearHistory() {
 
 
 // ── MOBILE SIDEBAR ──────────────────────────────────────────────
-function toggleSidebar() {
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.getElementById('sidebar-overlay');
-  sidebar.classList.toggle('mobile-open');
-  if (overlay) overlay.classList.toggle('active');
-}
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('mobile-open');
-  const overlay = document.getElementById('sidebar-overlay');
-  if (overlay) overlay.classList.remove('active');
-}
+// (functions defined below with applyMobileClass)
 document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', function() {
@@ -16498,6 +16619,18 @@ function _fixSkuBrands() {
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
 }
 
+
+// ── HTML SANITIZER (XSS prevention) ─────────────────────────────────
+function _esc(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/`/g, '&#96;');
+}
 // ═══════════════════════════════════════════════════════════════════════
 // ACCOUNTING ENGINE — CHUNK 1: Foundation, Deals, Costing
 // ═══════════════════════════════════════════════════════════════════════
@@ -16680,6 +16813,7 @@ function sellThroughRecord(customerId,brandName,period,data){
 function sellThroughGetForPeriod(customerId,brandName,period){return sellThroughLoad().find(r=>r.customerId===customerId&&r.brandName===brandName&&r.period===period);}
 
 function inventoryRollforward(customerId,brandName,period){
+  if(!period)return{period:'',opening:0,produced:0,returned:0,shipped:0,soldThrough:0,samples:0,writeOffs:0,ending:0};
   const mv=typeof movements!=='undefined'?movements:[];
   const inPeriod=ts=>ts&&ts.slice(0,7)===period;
   const forBrand=m=>{if(!brandName)return true;const dest=m.Destination;if(dest&&dest.company&&dest.company.toLowerCase().includes(brandName.toLowerCase()))return true;if(m.SKU&&m.SKU.toLowerCase().includes(brandName.toLowerCase()))return true;return false;};
@@ -16783,6 +16917,10 @@ function _nextInvoiceNo(){
 }
 
 function invoiceCreate(type,data){
+  // Warn if creating invoice for a locked period
+  if(data.invoiceDate&&isPeriodLocked(acctPeriod(data.invoiceDate))){
+    console.warn('⚠ Creating invoice in locked period:',acctPeriod(data.invoiceDate));
+  }
   const invoices=invoicesLoad();
   const inv={invoiceId:acctId('INV'),invoiceNo:_nextInvoiceNo(),type,status:'draft',customerId:data.customerId||'',customerName:data.customerName||'',brandName:data.brandName||'',dealId:data.dealId||'',invoiceDate:data.invoiceDate||acctToday(),dueDate:data.dueDate||_addDays(acctToday(),30),terms:data.terms||'Net30',lines:data.lines||[],subtotal:0,taxAmount:parseFloat(data.taxAmount)||0,totalAmount:0,paidAmount:0,openAmount:0,currency:'USD',refOrderId:data.refOrderId||'',refShipmentId:data.refShipmentId||'',refSettlementId:data.refSettlementId||'',notes:data.notes||'',createdAt:acctNow(),sentAt:null,paidAt:null,qboSyncStatus:'pending',qboInvoiceId:null};
   inv.subtotal=inv.lines.reduce((a,l)=>a+(parseFloat(l.amount)||0),0);
@@ -17019,6 +17157,8 @@ function _acctBtn(label,onclick){return`<button onclick="${onclick}" style="back
 function _acctBtnGreen(label,onclick){return`<button onclick="${onclick}" style="background:rgba(57,232,122,0.12);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;font-weight:600">${label}</button>`;}
 
 function renderAcctHome(){
+  const el=document.getElementById('acct-home-content');
+  if(el&&!el.innerHTML.trim())el.innerHTML='<div style="padding:48px;text-align:center;color:var(--text3)">⏳ Loading accounting data...</div>';
   acctSeedIfEmpty();
   const kpi=acctKPIs();const exceptions=runExceptionEngine();
   const errors=exceptions.filter(e=>e.sev==='error').length,warnings=exceptions.filter(e=>e.sev==='warning').length;
@@ -17087,8 +17227,8 @@ function _renderDealCard(d){
     <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-          <span style="font-weight:700;font-size:14px">${d.customerName}</span>
-          ${d.brandName&&d.brandName!==d.customerName?`<span style="color:var(--text3);font-size:12px">· ${d.brandName}</span>`:''}
+          <span style="font-weight:700;font-size:14px">${_esc(d.customerName)}</span>
+          ${d.brandName&&d.brandName!==d.customerName?`<span style="color:var(--text3);font-size:12px">· ${_esc(d.brandName)}</span>`:''}
           <span style="font-size:10px;font-family:var(--font-mono);background:var(--bg3);padding:2px 8px;border-radius:4px;color:${sc}">${d.status.toUpperCase()}</span>
           <span style="font-size:10px;color:var(--text3)">${DEAL_TYPES[d.dealType]||d.dealType}</span>
         </div>
@@ -17176,7 +17316,7 @@ function renderAcctAR(){
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">
       ${[['Current',aging.current,'var(--green)'],['1-30',aging['1-30'],'var(--text)'],['31-60',aging['31-60'],'var(--amber)'],['61-90',aging['61-90'],'var(--red)'],['90+',aging['90+'],'var(--red)']].map(([label,inv,c])=>{const amt=inv.reduce((a,i)=>a+(i.openAmount||0),0);return`<div style="background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);margin-bottom:4px">${label} DAYS</div><div style="font-family:var(--font-mono);font-size:16px;color:${c}">${acctFmt(amt)}</div><div style="font-size:10px;color:var(--text3)">${inv.length} inv</div></div>`;}).join('')}
     </div>
-    ${invs.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No invoices yet. Generate from shipments or settlements.</div>':invs.slice().reverse().map(inv=>{const c={draft:'var(--text3)',sent:'var(--blue)',partial:'var(--amber)',paid:'var(--green)',overdue:'var(--red)',void:'var(--text3)'}[inv.status]||'var(--text3)';const isOverdue=!['paid','void'].includes(inv.status)&&inv.dueDate<acctToday();return`<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${c};border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-family:var(--font-mono);font-size:12px">${inv.invoiceNo}</span><span style="font-size:12px;color:var(--text3)">${inv.customerName}${inv.brandName?' · '+inv.brandName:''}</span><span style="font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:4px;background:var(--bg3);color:${c}">${inv.status.toUpperCase()}</span>${isOverdue?'<span style="font-size:10px;color:var(--red)">OVERDUE</span>':''}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${INVOICE_TYPES[inv.type]||inv.type} · Due ${inv.dueDate} · ${inv.terms}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-family:var(--font-mono);font-size:16px;color:${inv.openAmount>0?'var(--amber)':'var(--green)'}">${acctFmt(inv.openAmount)}</div><div style="font-size:10px;color:var(--text3)">of ${acctFmt(inv.totalAmount)}</div></div><div style="display:flex;gap:5px;flex-shrink:0">${!['paid','void'].includes(inv.status)?`<button onclick="acctRecordPaymentForInvoice('${inv.invoiceId}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Pay</button>`:''}</div></div>`;}).join('')}
+    ${invs.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No invoices yet. Generate from shipments or settlements.</div>':invs.slice().reverse().map(inv=>{const c={draft:'var(--text3)',sent:'var(--blue)',partial:'var(--amber)',paid:'var(--green)',overdue:'var(--red)',void:'var(--text3)'}[inv.status]||'var(--text3)';const isOverdue=!['paid','void'].includes(inv.status)&&inv.dueDate<acctToday();return`<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${c};border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-family:var(--font-mono);font-size:12px">${inv.invoiceNo}</span><span style="font-size:12px;color:var(--text3)">${_esc(inv.customerName)}${inv.brandName?' · '+inv.brandName:''}</span><span style="font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:4px;background:var(--bg3);color:${c}">${inv.status.toUpperCase()}</span>${isOverdue?'<span style="font-size:10px;color:var(--red)">OVERDUE</span>':''}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${INVOICE_TYPES[inv.type]||inv.type} · Due ${inv.dueDate} · ${inv.terms}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-family:var(--font-mono);font-size:16px;color:${inv.openAmount>0?'var(--amber)':'var(--green)'}">${acctFmt(inv.openAmount)}</div><div style="font-size:10px;color:var(--text3)">of ${acctFmt(inv.totalAmount)}</div></div><div style="display:flex;gap:5px;flex-shrink:0">${!['paid','void'].includes(inv.status)?`<button onclick="acctRecordPaymentForInvoice('${inv.invoiceId}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Pay</button>`:''}</div></div>`;}).join('')}
   </div>`;
 }
 
@@ -17199,7 +17339,7 @@ function renderAcctVendors(){
   const vendors=vendorsLoad();const el=document.getElementById('acct-vendors-content');if(!el)return;
   el.innerHTML=`<div style="padding:24px;max-width:1200px">
     ${_acctSectionHeader('VENDOR MANAGEMENT',vendors.length+' vendors',_acctBtnGreen('+ New Vendor','acctNewVendorModal()'))}
-    ${vendors.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No vendors yet</div>':`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px">${vendors.map(v=>`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px 16px"><div style="font-weight:700;font-size:13px;margin-bottom:4px">${v.name}${v.preferred?' <span style="font-size:10px;color:var(--green)">★ Preferred</span>':''}</div><div style="font-size:11px;color:var(--text3);margin-bottom:8px">${(v.categories||[]).join(', ')||'No categories'} · ${v.paymentTerms} · Lead: ${v.leadTimeDays}d</div>${v.email?`<div style="font-size:11px;color:var(--blue)">${v.email}</div>`:''}<div style="display:flex;gap:6px;margin-top:10px"><button onclick="acctNewPOForVendor('${v.vendorId}')" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">+ PO</button></div></div>`).join('')}</div>`}
+    ${vendors.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No vendors yet</div>':`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px">${vendors.map(v=>`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px 16px"><div style="font-weight:700;font-size:13px;margin-bottom:4px">${_esc(v.name)}${v.preferred?' <span style="font-size:10px;color:var(--green)">★ Preferred</span>':''}</div><div style="font-size:11px;color:var(--text3);margin-bottom:8px">${(v.categories||[]).join(', ')||'No categories'} · ${v.paymentTerms} · Lead: ${v.leadTimeDays}d</div>${v.email?`<div style="font-size:11px;color:var(--blue)">${v.email}</div>`:''}<div style="display:flex;gap:6px;margin-top:10px"><button onclick="acctNewPOForVendor('${v.vendorId}')" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">+ PO</button></div></div>`).join('')}</div>`}
   </div>`;
 }
 
@@ -17262,7 +17402,7 @@ function acctModal(title,body,onConfirm,confirmLabel){
   document.getElementById('acct-modal-overlay')?.remove();
   const overlay=document.createElement('div');
   overlay.id='acct-modal-overlay';
-  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto;backdrop-filter:blur(6px)';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:clamp(10px,3vw,30px) clamp(8px,2vw,20px);overflow-y:auto;backdrop-filter:blur(6px);-webkit-overflow-scrolling:touch';
   overlay.innerHTML=`<div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:640px;padding:28px" onclick="event.stopPropagation()"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-family:var(--font-display);font-size:16px;color:var(--amber)">${title}</div><button onclick="document.getElementById('acct-modal-overlay').remove()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button></div><div id="acct-modal-body">${body}</div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px"><button onclick="document.getElementById('acct-modal-overlay').remove()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer">Cancel</button><button id="acct-modal-confirm" style="background:rgba(255,184,48,0.15);border:1px solid rgba(255,184,48,0.4);color:var(--amber);border-radius:8px;padding:8px 20px;font-size:12px;cursor:pointer;font-weight:600">${confirmLabel||'Confirm'}</button></div></div>`;
   overlay.onclick=e=>{if(e.target===overlay)overlay.remove();};
   document.body.appendChild(overlay);
@@ -17387,7 +17527,7 @@ function acctRecordPaymentForInvoice(invoiceId){
 function acctNewPOModal(){
   const vendors=vendorsLoad();
   acctModal('NEW PURCHASE ORDER',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-    <div class="form-group"><label class="form-label">Vendor *</label><select class="form-input" id="po-v"><option value="">— Select —</option>${vendors.map(v=>`<option value="${v.vendorId}|${v.name}">${v.name}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Vendor *</label><select class="form-input" id="po-v"><option value="">— Select vendor —</option>${vendors.length===0?'<option disabled>No vendors yet — add one in Vendors first</option>':vendors.map(v=>`<option value="${v.vendorId}|${v.name}">${_esc(v.name)}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Category *</label><select class="form-input" id="po-cat"><option value="cans">Cans / Ends</option><option value="labels">Labels</option><option value="ingredients">Ingredients</option><option value="packaging">Packaging</option><option value="pallets">Pallets</option><option value="shipping_materials">Shipping Materials</option><option value="testing">Lab / Testing</option><option value="freight">Freight</option><option value="overhead">Overhead</option></select></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description *</label><input class="form-input" id="po-desc" placeholder="e.g. 12oz Sleek Cans"></div>
     <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" type="number" id="po-qty" placeholder="0"></div>
@@ -17547,6 +17687,7 @@ function calcFreightRebill(shipment){
 
 // ── SHIPMENT PROFITABILITY ────────────────────────────────────
 function calcShipmentProfitability(shipmentId){
+  if(!shipmentId)return null;
   const shArr=typeof shipments!=='undefined'?shipments:[];
   const sh=shArr.find(s=>s.id===shipmentId);if(!sh)return null;
   const items=sh.items||[];const cogs=sh.cogs||{};
@@ -17715,7 +17856,7 @@ function renderAcctReports(){
   const storageCharges=calcStorageCharges(prevPer);
   el.innerHTML=`<div style="padding:24px;max-width:1200px">
     ${_acctSectionHeader('REPORTS CENTER','Financial reports — period: '+prevPer,_acctBtn('↻ Refresh','renderAcctReports()'))}
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px">
+    <div style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:20px;padding-bottom:6px;-webkit-overflow-scrolling:touch;scrollbar-width:none">
       ${['Customer P&L','Cash Forecast','Unbilled Items','Storage Billing','Sell-Through'].map((tab,i)=>`<button onclick="acctShowReport(${i},this)" data-rtab="${i}" style="background:${i===0?'rgba(255,184,48,0.15)':'var(--bg3)'};border:1px solid ${i===0?'rgba(255,184,48,0.4)':'var(--border2)'};color:${i===0?'var(--amber)':'var(--text3)'};border-radius:6px;padding:7px 16px;font-size:12px;cursor:pointer;font-weight:${i===0?'600':'400'}">${tab}</button>`).join('')}
     </div>
     <div id="rp0">${_renderCustomerPnLReport(allPnL,prevPer)}</div>
@@ -18035,7 +18176,7 @@ function acctViewCustomerPnL(customerName,period){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
       ${[['Shipments',pnl.shipmentCount,'var(--text)'],['Revenue',acctFmt(pnl.totalRevenueCombined),'var(--green)'],['Batch COGS',acctFmt(pnl.totalCogs),'var(--text3)'],['Labor',acctFmt(pnl.totalLabor),'var(--text3)'],['Freight',acctFmt(pnl.totalFreight),'var(--text3)'],['Materials',acctFmt(pnl.totalMaterials),'var(--text3)'],['Gross Profit',acctFmt(pnl.totalGrossProfit),pnl.totalGrossProfit>=0?'var(--green)':'var(--red)'],['Margin',pnl.grossMarginPct.toFixed(1)+'%',pnl.grossMarginPct>=20?'var(--green)':'var(--amber)'],['Invoiced',acctFmt(pnl.invoicedAmount),'var(--blue)'],['Collected',acctFmt(pnl.collectedAmount),'var(--green)'],['Open AR',acctFmt(pnl.openAR),'var(--amber)'],['Settlement Rev',acctFmt(pnl.settlementRevenue),'var(--purple)']].map(([label,val,c])=>`<div style="background:var(--bg3);border-radius:6px;padding:8px 10px"><div style="font-size:9px;color:var(--text3);font-family:var(--font-mono)">${label.toUpperCase()}</div><div style="font-size:14px;font-weight:600;color:${c};font-family:var(--font-mono)">${val}</div></div>`).join('')}
     </div>
-    ${pnl.rollforward?`<div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);margin-bottom:6px;letter-spacing:1px">INVENTORY ROLLFORWARD</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${[['Opening',pnl.rollforward.opening,'var(--text3)'],['Produced',pnl.rollforward.produced,'var(--blue)'],['Shipped',pnl.rollforward.shipped,'var(--amber)'],['Sold',pnl.rollforward.soldThrough,'var(--green)'],['Samples',pnl.rollforward.samples,'var(--text3)'],['W/O',pnl.rollforward.writeOffs,'var(--red)'],['Ending',pnl.rollforward.ending,'var(--purple)']].map(([l,v,c])=>`<div style="background:var(--bg3);border-radius:4px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text3)">${l}</div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:${c}">${v}</div></div>`).join('')}</div>`:''}`,
+    ${pnl.rollforward?'<div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);margin-bottom:6px;letter-spacing:1px">INVENTORY ROLLFORWARD</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">'+[['Opening',pnl.rollforward.opening,'var(--text3)'],['Produced',pnl.rollforward.produced,'var(--blue)'],['Shipped',pnl.rollforward.shipped,'var(--amber)'],['Sold',pnl.rollforward.soldThrough,'var(--green)'],['Samples',pnl.rollforward.samples,'var(--text3)'],['W/O',pnl.rollforward.writeOffs,'var(--red)'],['Ending',pnl.rollforward.ending,'var(--purple)']].map(function(a){return'<div style="background:var(--bg3);border-radius:4px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text3)">'+a[0]+'</div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:'+a[2]+'">'+a[1]+'</div></div>';}).join('')+'</div>':''},
   null,'Close');
 }
 
