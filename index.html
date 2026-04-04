@@ -7440,10 +7440,13 @@ function shOpenDetail(id) {
       <button onclick="shDetailSave('${s.id}')" class="btn btn-primary" style="flex:1">Save Updates</button>
       ${s.status==='ready_ship'?`<button onclick="document.getElementById('sh-detail-modal').classList.add('hidden');shOpenShipStage('${s.id}')" class="btn btn-ghost">→ Go to Ship Stage</button>`:''}
       ${s.status==='pending'||s.status==='working'?`<button onclick="document.getElementById('sh-detail-modal').classList.add('hidden');shOpenWorkStage('${s.id}')" class="btn btn-ghost" style="background:rgba(180,80,255,0.08);border-color:rgba(180,80,255,0.3);color:var(--purple)">⚡ Continue Working</button>`:''}
-      ${['pending','working','ready_ship'].includes(s.status)
-        ? `<button onclick="shDeleteShipment('${s.id}')" style="background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);color:var(--red);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer;font-weight:600">🗑 Delete Order</button>`
-        : `<button onclick="shVoidShipment('${s.id}')" style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);color:var(--red);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer">Void</button>`
-      }
+      ${(() => {
+        const deletable = ['pending','working','ready_ship'].includes(s.status) && !s.trackingNumber && !s.ssOrderId && !s.proNumber;
+        const locked = ['label_pending','in_transit','delivered','booked','voided'].includes(s.status) || s.trackingNumber || s.ssOrderId;
+        if (deletable) return `<button onclick="shDeleteShipment('${s.id}')" style="background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);color:var(--red);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer;font-weight:600">🗑 Delete Order</button>`;
+        if (locked) return `<span style="font-size:11px;color:var(--text3);padding:6px 10px;border:1px solid var(--border2);border-radius:8px">🔒 Label issued — cannot delete</span>`;
+        return `<button onclick="shVoidShipment('${s.id}')" style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);color:var(--red);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer">Void</button>`;
+      })()}
     </div>`;
   document.getElementById('sh-detail-modal').classList.remove('hidden');
 }
@@ -7471,10 +7474,16 @@ function shDeleteShipment(id) {
   shLoad();
   const s = shGetById(id);
   if (!s) return;
-  const unshipped = ['pending','working','ready_ship'].includes(s.status);
-  const msg = unshipped
-    ? `Delete "${s.recipientName||s.id}"? This order has not shipped. It will be permanently removed.`
-    : `This shipment has already been shipped. Delete anyway?`;
+
+  // Hard block — label issued or pushed to ShipStation
+  const labelIssued = s.trackingNumber || s.ssOrderId || s.proNumber
+    || ['label_pending','in_transit','delivered','booked'].includes(s.status);
+  if (labelIssued) {
+    alert('🔒 This shipment cannot be deleted — a label has been issued or it has been pushed to ShipStation. Void it instead if needed.');
+    return;
+  }
+
+  const msg = `Delete "${s.recipientName||s.brandName||s.id}"?\n\nThis order has not shipped and will be permanently removed. This cannot be undone.`;
   if (!confirm(msg)) return;
   // Stop any running clock for this shipment
   if (shWorkId === id) {
