@@ -6820,13 +6820,19 @@ function shAddWorker() {
   const el = document.getElementById('sh-work-worker');
   if (!el || !el.value) return;
   const name = el.value;
-  if (shWorkCrew.find(w => w.name === name)) { showToast('Already on crew'); return; }
   const opt  = el.options[el.selectedIndex];
   const rate = parseFloat(opt?.dataset?.rate || 0);
+
+  // If already on crew and NOT clocked out — block duplicate
+  const existing = shWorkCrew.find(w => w.name === name && !w.clockedOutAt);
+  if (existing) { showToast('Already clocked in'); return; }
+
+  // If previously clocked out — add a fresh shift entry (keep old one for records)
   shWorkCrew.push({ name, rate, clockInAt: Date.now(), totalSecs: 0, paused: false, pausedAt: null });
   el.value = '';
   shRenderWorkCrew();
   shWorkUpdateCOGS();
+  showToast('👷 ' + name + ' clocked back in');
 }
 
 function shRemoveWorker(name) {
