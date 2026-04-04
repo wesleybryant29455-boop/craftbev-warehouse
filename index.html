@@ -1787,7 +1787,7 @@ window.addEventListener('load', function() {
           <div class="form-group"><label class="form-label">Address 2</label><input class="form-input" id="sh-c1-addr2" placeholder="Suite, Apt, etc."></div>
           <div class="form-group"><label class="form-label">City *</label><input class="form-input" id="sh-c1-city" placeholder="City" oninput="shClearAddrValidation()"></div>
           <div class="form-group"><label class="form-label">State *</label><input class="form-input" id="sh-c1-state" placeholder="CO" maxlength="2" style="text-transform:uppercase" oninput="shClearAddrValidation()"></div>
-          <div class="form-group"><label class="form-label">ZIP *</label><input class="form-input" id="sh-c1-zip" placeholder="80201" onblur="shAutoValidateAddr('c1')"></div>
+          <div class="form-group"><label class="form-label">ZIP *</label><input class="form-input" id="sh-c1-zip" placeholder="80201" onblur="shAutoValidateAddr('c1'); shZipLookup(this.value)"></div>
           <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="sh-c1-phone" placeholder="(555) 000-0000"></div>
           <div class="form-group" style="grid-column:1/-1"><label class="form-label">Email</label><input class="form-input" type="email" id="sh-c1-email" placeholder="customer@email.com"></div>
         </div>
@@ -7807,27 +7807,103 @@ function shAddressAutocomplete(val) {
   clearTimeout(_shAutocompleteTimeout);
   const dropdown = document.getElementById('sh-addr-dropdown');
   if (!dropdown) return;
-  if (!val || val.length < 2) { dropdown.style.display = 'none'; return; }
-  _shAutocompleteTimeout = setTimeout(() => {
+  if (!val || val.length < 3) { dropdown.style.display = 'none'; return; }
+  _shAutocompleteTimeout = setTimeout(async () => {
     abLoad();
     const q = val.toLowerCase();
-    const matches = addressBook.filter(a =>
-      (a.name||'').toLowerCase().startsWith(q) ||
-      (a.company||'').toLowerCase().startsWith(q) ||
+    const bookMatches = addressBook.filter(a =>
       (a.name||'').toLowerCase().includes(q) ||
-      (a.company||'').toLowerCase().includes(q)
-    ).slice(0, 6);
-    if (!matches.length) { dropdown.style.display = 'none'; return; }
-    dropdown.innerHTML = matches.map(a => `
-      <div onclick="shAutofillFromBook('${a.id}')"
-        style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2);transition:background 0.1s"
-        onmouseover="this.style.background='rgba(126,211,33,0.08)'"
-        onmouseout="this.style.background='transparent'">
-        <div style="font-size:13px;font-weight:600;color:var(--text)">${a.name}${a.company?` <span style="font-weight:400;color:var(--text3);font-size:11px">· ${a.company}</span>`:''}</div>
-        <div style="font-size:11px;color:var(--text3)">${[a.addr1,a.city,(a.state||'')+(a.zip?' '+a.zip:'')].filter(Boolean).join(', ')}</div>
-      </div>`).join('');
-    dropdown.style.display = 'block';
-  }, 150);
+      (a.company||'').toLowerCase().includes(q) ||
+      (a.addr1||'').toLowerCase().includes(q)
+    ).slice(0, 3);
+
+    let osmResults = [];
+    try {
+      const encoded = encodeURIComponent(val + ' USA');
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=6&countrycodes=us`,
+        { headers: { 'Accept-Language': 'en', 'User-Agent': '420CraftWarehouse/1.0' } }
+      );
+      const data = await res.json();
+      osmResults = data.filter(r => r.address && (r.address.road || r.address.house_number));
+    } catch(e) {}
+
+    let html = '';
+    if (bookMatches.length) {
+      html += `<div style="padding:5px 12px;font-size:9px;font-family:monospace;color:var(--text3);letter-spacing:2px;background:var(--bg3)">📒 ADDRESS BOOK</div>`;
+      html += bookMatches.map(a => `
+        <div onclick="shAutofillFromBook('${a.id}')"
+          style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2)"
+          onmouseover="this.style.background='rgba(126,211,33,0.08)'"
+          onmouseout="this.style.background='transparent'">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${a.name}${a.company ? ` <span style="font-weight:400;color:var(--text3);font-size:11px">· ${a.company}</span>` : ''}</div>
+          <div style="font-size:11px;color:var(--text3)">${[a.addr1,a.city,(a.state||'')+(a.zip?' '+a.zip:'')].filter(Boolean).join(', ')}</div>
+        </div>`).join('');
+    }
+    if (osmResults.length) {
+      html += `<div style="padding:5px 12px;font-size:9px;font-family:monospace;color:var(--text3);letter-spacing:2px;background:var(--bg3)">📍 ADDRESS SUGGESTIONS</div>`;
+      html += osmResults.map((r) => {
+        const a = r.address;
+        const street = [a.house_number, a.road].filter(Boolean).join(' ');
+        const city   = a.city || a.town || a.village || a.county || '';
+        const state  = _osmStateAbbr(a.state || '');
+        const zip    = a.postcode || '';
+        if (!street) return '';
+        const display = [street, city, state, zip].filter(Boolean).join(', ');
+        const payload = JSON.stringify({street, city, state, zip});
+        return `<div onclick="shOsmAutofill(${JSON.stringify(payload)})"
+          style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2)"
+          onmouseover="this.style.background='rgba(52,152,219,0.08)'"
+          onmouseout="this.style.background='transparent'">
+          <div style="font-size:13px;color:var(--text)">${display}</div>
+        </div>`;
+      }).filter(Boolean).join('');
+    }
+    dropdown.innerHTML = html;
+    dropdown.style.display = html ? 'block' : 'none';
+  }, 400);
+}
+
+function _osmStateAbbr(name) {
+  const map = {'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA',
+    'Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA',
+    'Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS',
+    'Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA',
+    'Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT',
+    'Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM',
+    'New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK',
+    'Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC',
+    'South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT',
+    'Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY'};
+  return map[name] || name;
+}
+
+function shOsmAutofill(jsonStr) {
+  try {
+    const a = JSON.parse(jsonStr);
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+    set('sh-c1-addr1', a.street);
+    set('sh-c1-city',  a.city);
+    set('sh-c1-state', a.state);
+    set('sh-c1-zip',   a.zip);
+    document.getElementById('sh-addr-dropdown').style.display = 'none';
+    if (a.zip && (!a.city || !a.state)) shZipLookup(a.zip);
+  } catch(e) {}
+}
+
+async function shZipLookup(zip) {
+  if (!zip || zip.length < 5) return;
+  try {
+    const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const place = data.places && data.places[0];
+    if (!place) return;
+    const cityEl  = document.getElementById('sh-c1-city');
+    const stateEl = document.getElementById('sh-c1-state');
+    if (cityEl  && !cityEl.value)  cityEl.value  = place['place name'] || '';
+    if (stateEl && !stateEl.value) stateEl.value = place['state abbreviation'] || '';
+  } catch(e) {}
 }
 
 function shAutofillFromBook(id) {
@@ -8031,34 +8107,45 @@ async function shValidateAddress(prefix) {
   const resEl = document.getElementById(`sh-${p}-addr-result`);
   const corEl = document.getElementById(`sh-${p}-addr-correction`);
   if (!addr1||!city||!state||!zip) { if(resEl) resEl.innerHTML='<span style="color:var(--amber)">⚠ Fill address, city, state, ZIP first</span>'; return; }
-  if (resEl) resEl.innerHTML='<span style="color:var(--text3)">⏳ Validating with USPS...</span>';
-  if (!sheetsEnabled()) {
-    if(resEl) resEl.innerHTML='<span style="color:var(--amber)">⚠ Connect Google Sheets to enable USPS validation</span>';
+  if (resEl) resEl.innerHTML='<span style="color:var(--text3)">⏳ Checking address...</span>';
+
+  // Format validation (free, no API needed)
+  const zipValid   = /^\d{5}(-\d{4})?$/.test(zip);
+  const stateValid = /^[A-Z]{2}$/.test(state);
+  const addr1Valid = /\d/.test(addr1);
+  const errors = [];
+  if (!addr1Valid) errors.push('Street address needs a house/building number');
+  if (!zipValid)   errors.push('ZIP code must be 5 digits');
+  if (!stateValid) errors.push('State must be 2-letter abbreviation e.g. CO');
+
+  if (errors.length) {
+    if(resEl) resEl.innerHTML=`<span style="color:var(--red)">❌ ${errors[0]}</span>`;
+    if(corEl) corEl.style.display='none';
     return;
   }
-  const result = await shApiCall('POST','/shipments/validateaddress',{Name:name||'',Street1:addr1,Street2:addr2||'',City:city,State:state,PostalCode:zip,Country:'US',Residential:null});
-  if (result.error) { if(resEl) resEl.innerHTML=`<span style="color:var(--red)">❌ ${result.error}</span>`; return; }
-  const isValid = result.isValid!==false;
-  const corrAddr1 = result.Street1||result.street1||'';
-  const corrCity  = result.City||result.city||'';
-  const corrState = result.State||result.state||'';
-  const corrZip   = result.PostalCode||result.postalCode||zip;
-  const changed = corrAddr1&&(corrAddr1.toUpperCase()!==addr1.toUpperCase()||corrCity.toUpperCase()!==city.toUpperCase()||corrZip!==zip);
-  if (!isValid) {
-    if(resEl) resEl.innerHTML=`<span style="color:var(--red)">❌ Address not found — please verify</span>`;
-    if(corEl) corEl.style.display='none';
-  } else if (changed) {
-    if(resEl) resEl.innerHTML='<span style="color:var(--blue)">📬 USPS corrected address — see below</span>';
-    _shAddrCorrections[p]={addr1:corrAddr1,addr2:result.Street2||addr2,city:corrCity,state:corrState,zip:corrZip};
-    const detEl=document.getElementById(`sh-${p}-addr-correction-details`);
-    if(detEl) detEl.innerHTML=`
-      ${corrAddr1!==addr1?`<div>Street: <strong>${corrAddr1}</strong> <span style="color:var(--text3)">(was: ${addr1})</span></div>`:''}
-      ${corrCity.toUpperCase()!==city.toUpperCase()?`<div>City: <strong>${corrCity}</strong></div>`:''}
-      ${corrZip!==zip?`<div>ZIP: <strong>${corrZip}</strong> <span style="color:var(--text3)">(was: ${zip})</span></div>`:''}`;
-    if(corEl) corEl.style.display='block';
-  } else {
-    if(resEl) resEl.innerHTML='<span style="color:var(--green)">✅ Address verified by USPS</span>';
-    if(corEl) corEl.style.display='none';
+
+  // ZIP→city/state check via Zippopotam (free, no key)
+  try {
+    const zr = await fetch(`https://api.zippopotam.us/us/${zip}`);
+    if (zr.ok) {
+      const zd = await zr.json();
+      const place = zd.places && zd.places[0];
+      if (place) {
+        const expState = place['state abbreviation'];
+        if (expState && state !== expState) {
+          if(resEl) resEl.innerHTML=`<span style="color:var(--amber)">⚠ ZIP ${zip} is in ${expState}, not ${state} — please verify</span>`;
+          if(corEl) corEl.style.display='none';
+          return;
+        }
+        // Auto-fill city if empty
+        const cityEl = document.getElementById(`sh-${p}-city`);
+        if (cityEl && !cityEl.value) cityEl.value = place['place name'] || '';
+      }
+    }
+  } catch(e) {}
+
+  if(resEl) resEl.innerHTML='<span style="color:var(--green)">✅ Address format looks good</span>';
+  if(corEl) corEl.style.display='none';
   }
 }
 
