@@ -4177,10 +4177,13 @@ async function _sheetsFlush() {
         headers: { 'Content-Type': 'text/plain' }
       });
     } catch(e) {
-      // Network error - the Apps Script URL may be wrong or offline
+      // Network error — re-queue this item and retry in 30s
+      _syncQueue.unshift(item);
       _syncStatus = 'error';
-      _updateSyncIndicator('⚠ Sync error — check URL', 'var(--red)');
+      _updateSyncIndicator('⚠ Sync error — retrying...', 'var(--red)');
       console.warn('Sheets sync error:', e.message);
+      if (_syncTimer) clearTimeout(_syncTimer);
+      _syncTimer = setTimeout(_sheetsFlush, 30000); // retry in 30s
       return;
     }
   }
