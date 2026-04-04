@@ -1075,6 +1075,17 @@ window.addEventListener('load', function() {
     <div class="nav-item" onclick="showPage('sku-manager',this)">
       <span class="icon">🏷️</span> SKU Manager
     </div>
+    <div class="nav-section" style="color:var(--amber);border-color:rgba(255,184,48,0.2)">💰 Accounting</div>
+    <div class="nav-item" onclick="showPage('acct-home',this)"><span class="icon">🏦</span> Accounting Home</div>
+    <div class="nav-item" onclick="showPage('acct-deals',this)"><span class="icon">📝</span> Deals & Contracts</div>
+    <div class="nav-item" onclick="showPage('acct-costing',this)"><span class="icon">🧮</span> Batch Costing</div>
+    <div class="nav-item" onclick="showPage('acct-settlements',this)"><span class="icon">🤝</span> Settlements</div>
+    <div class="nav-item" onclick="showPage('acct-ar',this)"><span class="icon">💵</span> Accounts Receivable</div>
+    <div class="nav-item" onclick="showPage('acct-ap',this)"><span class="icon">🧾</span> AP & Purchase Orders</div>
+    <div class="nav-item" onclick="showPage('acct-vendors',this)"><span class="icon">🏪</span> Vendors</div>
+    <div class="nav-item" onclick="showPage('acct-inventory-val',this)"><span class="icon">📊</span> Inventory Valuation</div>
+    <div class="nav-item" onclick="showPage('acct-close',this)"><span class="icon">🔒</span> Close & Audit</div>
+    <div class="nav-item" onclick="showPage('acct-exceptions',this)"><span class="icon">⚠️</span> Exceptions<span id="acct-exception-badge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;font-family:var(--font-mono);margin-left:4px"></span></div>
     <div class="nav-section">Export</div>
     <div class="nav-item" onclick="showPage('notifications',this)">
       <span class="icon">📧</span> Notifications
@@ -2088,6 +2099,18 @@ window.addEventListener('load', function() {
   </div>
 
   <!-- ════════ BACKUP & RESTORE PAGE ════════ -->
+  <!-- ═══ ACCOUNTING PAGES ════════════════════════════════════════ -->
+  <div class="page" id="page-acct-home"><div id="acct-home-content"></div></div>
+  <div class="page" id="page-acct-deals"><div id="acct-deals-content"></div></div>
+  <div class="page" id="page-acct-costing"><div id="acct-costing-content"></div></div>
+  <div class="page" id="page-acct-settlements"><div id="acct-settlements-content"></div></div>
+  <div class="page" id="page-acct-ar"><div id="acct-ar-content"></div></div>
+  <div class="page" id="page-acct-ap"><div id="acct-ap-content"></div></div>
+  <div class="page" id="page-acct-vendors"><div id="acct-vendors-content"></div></div>
+  <div class="page" id="page-acct-inventory-val"><div id="acct-inventory-val-content"></div></div>
+  <div class="page" id="page-acct-close"><div id="acct-close-content"></div></div>
+  <div class="page" id="page-acct-exceptions"><div id="acct-exceptions-content"></div></div>
+
   <div class="page" id="page-backup">
     <div class="section-header">
       <div class="section-title">💾 BACKUP & RESTORE</div>
@@ -4417,7 +4440,12 @@ const pageTitles = {
   'notifications':'CUSTOMER NOTIFICATIONS','order-queue':'ORDER QUEUE',
   'batch-calc':'BATCH CALCULATOR',
   'schedule':'PRODUCTION SCHEDULE',
-  'settings':'SETTINGS'
+  'settings':'SETTINGS',
+  'acct-home':'ACCOUNTING HOME','acct-deals':'DEALS & CONTRACTS',
+  'acct-costing':'BATCH COSTING','acct-settlements':'SETTLEMENTS',
+  'acct-ar':'ACCOUNTS RECEIVABLE','acct-ap':'AP & PURCHASE ORDERS',
+  'acct-vendors':'VENDOR MANAGEMENT','acct-inventory-val':'INVENTORY VALUATION',
+  'acct-close':'CLOSE & AUDIT','acct-exceptions':'EXCEPTION CENTER',
 };
 function showPage(id, el) {
   // Auto-close sidebar on mobile whenever a page is shown
@@ -4449,6 +4477,16 @@ function showPage(id, el) {
   if (id === 'schedule') renderSchedule();
   if (id === 'settings') renderSettings();
   if (id === 'shipping') renderShipping();
+  if (id === 'acct-home')          renderAcctHome();
+  if (id === 'acct-deals')         renderAcctDeals();
+  if (id === 'acct-costing')       renderAcctCosting();
+  if (id === 'acct-settlements')   renderAcctSettlements();
+  if (id === 'acct-ar')            renderAcctAR();
+  if (id === 'acct-ap')            renderAcctAP();
+  if (id === 'acct-vendors')       renderAcctVendors();
+  if (id === 'acct-inventory-val') renderAcctInventoryVal();
+  if (id === 'acct-close')         renderAcctClose();
+  if (id === 'acct-exceptions')    renderAcctExceptions();
 }
 
 // ══════════════════════════════════════════
@@ -16448,6 +16486,976 @@ function _fixSkuBrands() {
   });
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// ACCOUNTING ENGINE — CHUNK 1: Foundation, Deals, Costing
+// ═══════════════════════════════════════════════════════════════════════
+
+const ACCT_KEYS = {
+  DEALS:'420craft_acct_deals', PRICE_BOOKS:'420craft_acct_price_books',
+  COST_SNAPSHOTS:'420craft_acct_cost_snapshots', SETTLEMENTS:'420craft_acct_settlements',
+  INVOICES:'420craft_acct_invoices', PAYMENTS:'420craft_acct_payments',
+  CREDIT_MEMOS:'420craft_acct_credit_memos', VENDORS:'420craft_acct_vendors',
+  PURCHASE_ORDERS:'420craft_acct_pos', VENDOR_BILLS:'420craft_acct_bills',
+  COA:'420craft_acct_coa', CLOSE_PERIODS:'420craft_acct_close_periods',
+  ACCT_AUDIT:'420craft_acct_audit_trail', SYNC_LOG:'420craft_acct_sync_log',
+  SELL_THROUGH:'420craft_acct_sell_through', RESERVATIONS:'420craft_acct_reservations',
+};
+
+function acctLoad(key){try{return JSON.parse(localStorage.getItem(key)||'[]');}catch(e){return [];}}
+function acctLoadObj(key){try{return JSON.parse(localStorage.getItem(key)||'{}');}catch(e){return {};}}
+function acctSave(key,data){
+  localStorage.setItem(key,JSON.stringify(data));
+  if(typeof sheetsQueue==='function'&&typeof sheetsEnabled==='function'&&sheetsEnabled())
+    sheetsQueue('save_acct_data',{key:key.replace('420craft_',''),data});
+}
+function acctId(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,6).toUpperCase();}
+function acctNow(){return new Date().toISOString();}
+function acctToday(){return new Date().toISOString().slice(0,10);}
+function acctFmt(n){return '$'+(parseFloat(n)||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');}
+function acctFmtN(n){return(parseFloat(n)||0).toFixed(2);}
+function acctPeriod(d){return(d||acctToday()).slice(0,7);}
+function _addDays(ds,days){const d=new Date(ds);d.setDate(d.getDate()+(parseInt(days)||0));return d.toISOString().slice(0,10);}
+function _termsDays(t){if(!t)return 30;const m=t.match(/(\d+)/);return m?parseInt(m[1]):30;}
+function _prevPeriod(p){const[y,m]=p.split('-').map(Number);const d=new Date(y,m-1,1);d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,7);}
+function _daysBetween(d1,d2){return Math.abs((new Date(d2)-new Date(d1))/86400000);}
+function _brandFromSku(sku){const s=(sku||'').toLowerCase();if(s.includes('appgirls')||s.includes('app girls'))return'AppGirls';if(s.includes('blind tiger'))return'Blind Tiger';if(s.includes('gata'))return'Gata Juice';if(s.includes('reef shark'))return'Reef Shark';if(s.includes('simple garden'))return'Simple Garden';if(s.includes('wyatt'))return'Wyatt Purp';return'Other';}
+
+function acctAudit(action,entity,entityId,changes,note){
+  const log=acctLoad(ACCT_KEYS.ACCT_AUDIT);
+  const user=localStorage.getItem('420craft_auth_user')?JSON.parse(localStorage.getItem('420craft_auth_user')||'{}').name||'System':'System';
+  log.push({id:acctId('AUDIT'),ts:acctNow(),action,entity,entityId,changes:changes||null,note:note||'',user});
+  if(log.length>5000)log.splice(0,log.length-5000);
+  localStorage.setItem(ACCT_KEYS.ACCT_AUDIT,JSON.stringify(log));
+}
+
+const DEFAULT_COA=[
+  {code:'1100',name:'Accounts Receivable',type:'asset',sub:'current'},
+  {code:'1200',name:'Raw Materials Inventory',type:'asset',sub:'current'},
+  {code:'1210',name:'Packaging Inventory',type:'asset',sub:'current'},
+  {code:'1220',name:'Work In Process',type:'asset',sub:'current'},
+  {code:'1230',name:'Finished Goods Inventory',type:'asset',sub:'current'},
+  {code:'1240',name:'Customer-Owned Inventory Memo',type:'asset',sub:'memo'},
+  {code:'2000',name:'Accounts Payable',type:'liability',sub:'current'},
+  {code:'2100',name:'Accrued Expenses',type:'liability',sub:'current'},
+  {code:'2200',name:'Deferred Revenue',type:'liability',sub:'current'},
+  {code:'2300',name:'Sales Tax Payable',type:'liability',sub:'current'},
+  {code:'2400',name:'Customer Deposit Liability',type:'liability',sub:'current'},
+  {code:'4000',name:'Wholesale Revenue',type:'revenue',sub:'operating'},
+  {code:'4010',name:'Manufacturing / Co-Pack Revenue',type:'revenue',sub:'operating'},
+  {code:'4020',name:'Private Label Revenue',type:'revenue',sub:'operating'},
+  {code:'4030',name:'Settlement / Profit-Share Revenue',type:'revenue',sub:'operating'},
+  {code:'4040',name:'Freight Rebill Revenue',type:'revenue',sub:'operating'},
+  {code:'4050',name:'Storage Revenue',type:'revenue',sub:'operating'},
+  {code:'4070',name:'Pass-Through Revenue',type:'revenue',sub:'other'},
+  {code:'5000',name:'Ingredient COGS',type:'cogs',sub:'direct'},
+  {code:'5010',name:'Packaging COGS',type:'cogs',sub:'direct'},
+  {code:'5020',name:'Label COGS',type:'cogs',sub:'direct'},
+  {code:'5030',name:'Direct Labor',type:'cogs',sub:'direct'},
+  {code:'5040',name:'Freight Out',type:'cogs',sub:'direct'},
+  {code:'5050',name:'Freight In',type:'cogs',sub:'direct'},
+  {code:'5060',name:'Testing / QA',type:'cogs',sub:'direct'},
+  {code:'5070',name:'Samples / Promo',type:'expense',sub:'operating'},
+  {code:'5080',name:'Spoilage / Write-Off',type:'expense',sub:'operating'},
+];
+function coaLoad(){const s=acctLoad(ACCT_KEYS.COA);if(s.length)return s;acctSave(ACCT_KEYS.COA,DEFAULT_COA);return DEFAULT_COA;}
+
+const DEAL_TYPES={'wholesale':'Standard Wholesale','distributor':'Distributor / Reseller','copak':'Co-Pack / Toll','white_label':'White-Label Fixed Fee','white_label_pt':'White-Label + Pass-Throughs','profit_share':'Sell-Through / Profit-Share','reserved_stock':'Reserved Inventory','cust_supplied':'Customer-Supplied Components','hybrid':'Hybrid Deal'};
+const SETTLEMENT_BASIS={'produced':'Units Produced','shipped':'Units Shipped','delivered':'Units Delivered','invoiced':'Units Invoiced','sold_through':'Units Sold-Through','fixed_fee':'Fixed Monthly Fee','hybrid':'Fixed + Variable Share'};
+const INVOICE_TYPES={'shipment':'Shipment Invoice','settlement':'Settlement Invoice','manufacturing':'Manufacturing Invoice','pass_through':'Pass-Through Invoice','freight_rebill':'Freight Rebill','storage':'Storage Invoice','credit_memo':'Credit Memo','debit_memo':'Debit Memo'};
+
+function dealsLoad(){return acctLoad(ACCT_KEYS.DEALS);}
+function dealsSave(d){acctSave(ACCT_KEYS.DEALS,d);}
+
+function dealCreate(data){
+  const deals=dealsLoad();
+  const deal={
+    dealId:acctId('DEAL'),customerId:data.customerId||'',customerName:data.customerName||'',
+    brandId:data.brandId||'',brandName:data.brandName||'',channelType:data.channelType||'wholesale',
+    dealType:data.dealType||'wholesale',status:data.status||'draft',
+    effectiveStart:data.effectiveStart||acctToday(),effectiveEnd:data.effectiveEnd||'',
+    owner:data.owner||'',notes:data.notes||'',versionNo:data.versionNo||1,
+    supersedesDealId:data.supersedesDealId||null,createdAt:acctNow(),approvedAt:null,approvedBy:null,
+    pricePerCan:parseFloat(data.pricePerCan)||0,pricePerCase:parseFloat(data.pricePerCase)||0,
+    pricePerPallet:parseFloat(data.pricePerPallet)||0,fixedMonthlyFee:parseFloat(data.fixedMonthlyFee)||0,
+    minimumMonthly:parseFloat(data.minimumMonthly)||0,setupFee:parseFloat(data.setupFee)||0,
+    ourSharePct:parseFloat(data.ourSharePct)||0,custSharePct:parseFloat(data.custSharePct)||0,
+    floorAtZero:data.floorAtZero!==false,carryforwardNeg:data.carryforwardNeg||false,
+    baseRecovery:parseFloat(data.baseRecovery)||0,
+    settlementBasis:data.settlementBasis||'shipped',settlementCadence:data.settlementCadence||'monthly',
+    paymentTerms:data.paymentTerms||'Net30',invoiceCadence:data.invoiceCadence||'on_shipment',
+    ownershipTransfer:data.ownershipTransfer||'at_shipment',
+    freightAbsorbed:data.freightAbsorbed||false,freightRebill:data.freightRebill!==false,
+    freightMarkup:parseFloat(data.freightMarkup)||0,
+    storageEnabled:data.storageEnabled||false,storageGraceDays:parseInt(data.storageGraceDays)||30,
+    storageRateType:data.storageRateType||'per_case_month',storageRate:parseFloat(data.storageRate)||0,
+    weOwnLabels:data.weOwnLabels!==false,weOwnIngredients:data.weOwnIngredients!==false,
+    weOwnPackaging:data.weOwnPackaging!==false,weOwnFinishedGoods:data.weOwnFinishedGoods!==false,
+    customerSuppliedComponents:data.customerSuppliedComponents||[],
+    passThroughMarkup:data.passThroughMarkup||false,passThroughMarkupPct:parseFloat(data.passThroughMarkupPct)||0,
+    custReportsSellThrough:data.custReportsSellThrough||false,custCanUploadCSV:data.custCanUploadCSV||false,
+    canReserveInventory:data.canReserveInventory||false,
+    squareEligible:data.squareEligible||false,qboSyncEnabled:data.qboSyncEnabled!==false,
+    thcRestricted:data.thcRestricted||false,complianceNotes:data.complianceNotes||'',
+    priceBookLines:data.priceBookLines||[],deductions:data.deductions||[],
+  };
+  deals.push(deal);
+  acctSave(ACCT_KEYS.DEALS,deals);
+  acctAudit('create','deal',deal.dealId,{customerName:deal.customerName},'Deal created');
+  return deal;
+}
+
+function dealGetActive(customerId,brandId,asOfDate){
+  const deals=dealsLoad();const d=asOfDate||acctToday();
+  return deals.filter(deal=>deal.status==='active'&&
+    (!customerId||deal.customerId===customerId||deal.customerName===customerId)&&
+    (!brandId||!deal.brandId||deal.brandId===brandId||deal.brandName===brandId)&&
+    (!deal.effectiveEnd||deal.effectiveEnd>=d)&&deal.effectiveStart<=d);
+}
+
+function dealApprove(dealId){
+  const deals=dealsLoad();const deal=deals.find(d=>d.dealId===dealId);if(!deal)return false;
+  deal.status='active';deal.approvedAt=acctNow();
+  acctSave(ACCT_KEYS.DEALS,deals);acctAudit('approve','deal',dealId,{status:'active'},'Deal approved');
+  return deal;
+}
+
+function costSnapshotCreate(batchCode,runData,manualLines){
+  const snaps=acctLoad(ACCT_KEYS.COST_SNAPSHOTS);
+  const lines=[];
+  if(runData&&runData.crew){
+    runData.crew.forEach(c=>{
+      const mins=c.totalMins||0,rate=parseFloat(c.rate)||0,cost=(mins/60)*rate;
+      if(cost>0)lines.push({componentId:acctId('CL'),componentName:c.name+' Labor',category:'direct_labor',qtyUsed:mins,unit:'minutes',unitCost:rate/60,extendedCost:cost,paidBy:'us',reimbursable:true,includedInGross:true,includedInNet:true,source:'production_run'});
+    });
+  }
+  if(runData&&runData.expendables){
+    runData.expendables.forEach(e=>{
+      lines.push({componentId:acctId('CL'),componentName:e.name,category:'consumables',qtyUsed:e.qty||1,unit:e.unit||'unit',unitCost:parseFloat(e.unitCost)||0,extendedCost:(e.qty||1)*(parseFloat(e.unitCost)||0),paidBy:'us',reimbursable:true,includedInGross:true,includedInNet:true,source:'production_run'});
+    });
+  }
+  if(manualLines)manualLines.forEach(ml=>lines.push({componentId:acctId('CL'),...ml}));
+  const materialTotal=lines.filter(l=>['ingredients','packaging','labels','consumables'].includes(l.category)).reduce((a,l)=>a+(l.extendedCost||0),0);
+  const laborTotal=lines.filter(l=>l.category==='direct_labor').reduce((a,l)=>a+(l.extendedCost||0),0);
+  const overheadTotal=lines.filter(l=>l.category==='overhead').reduce((a,l)=>a+(l.extendedCost||0),0);
+  const testingTotal=lines.filter(l=>l.category==='testing').reduce((a,l)=>a+(l.extendedCost||0),0);
+  const totalCost=materialTotal+laborTotal+overheadTotal+testingTotal;
+  const totalCases=(runData&&runData.totalCases)||1;
+  const snap={snapshotId:acctId('SNAP'),batchCode,runId:runData?runData.id:null,snapshotDate:acctNow(),costMethod:'actual',currency:'USD',materialTotal,laborTotal,overheadTotal,testingTotal,totalCost,grossCostBasis:totalCost,netCostBasis:totalCost,costPerCase:totalCases>0?totalCost/totalCases:0,costPerCan:totalCases>0?totalCost/(totalCases*24):0,costPerPallet:totalCases>0?(totalCost/totalCases)*56:0,totalCases,lines,locked:false,createdFrom:runData?'production_run':'manual',notes:''};
+  snaps.push(snap);acctSave(ACCT_KEYS.COST_SNAPSHOTS,snaps);
+  acctAudit('create','cost_snapshot',snap.snapshotId,{batchCode,totalCost},'Cost snapshot created');
+  return snap;
+}
+
+function costSnapshotLock(snapshotId){
+  const snaps=acctLoad(ACCT_KEYS.COST_SNAPSHOTS);const s=snaps.find(x=>x.snapshotId===snapshotId);
+  if(s){s.locked=true;s.lockedAt=acctNow();acctSave(ACCT_KEYS.COST_SNAPSHOTS,snaps);acctAudit('lock','cost_snapshot',snapshotId,null,'Snapshot locked — immutable');}
+  return s;
+}
+function costSnapshotGetForBatch(batchCode){return acctLoad(ACCT_KEYS.COST_SNAPSHOTS).filter(s=>s.batchCode===batchCode);}
+
+function sellThroughLoad(){return acctLoad(ACCT_KEYS.SELL_THROUGH);}
+function sellThroughRecord(customerId,brandName,period,data){
+  const records=sellThroughLoad();
+  const existing=records.find(r=>r.customerId===customerId&&r.brandName===brandName&&r.period===period);
+  const record=existing||{id:acctId('ST'),customerId,brandName,period,createdAt:acctNow(),status:'draft'};
+  const gross=parseFloat(data.grossRevenue)||0,allow=parseFloat(data.allowances)||0;
+  Object.assign(record,{unitsSold:parseInt(data.unitsSold)||0,caseSold:parseInt(data.caseSold)||0,grossRevenue:gross,returns:parseInt(data.returns)||0,promos:parseInt(data.promos)||0,allowances:allow,netRevenue:parseFloat(data.netRevenue)||(gross-allow),custReportedAt:acctNow(),reconciled:false,reconciledAt:null,exceptions:[],notes:data.notes||''});
+  if(existing)Object.assign(existing,record);else records.push(record);
+  acctSave(ACCT_KEYS.SELL_THROUGH,records);
+  acctAudit('create','sell_through',record.id,record,'Sell-through for '+brandName+' '+period);
+  return record;
+}
+function sellThroughGetForPeriod(customerId,brandName,period){return sellThroughLoad().find(r=>r.customerId===customerId&&r.brandName===brandName&&r.period===period);}
+
+function inventoryRollforward(customerId,brandName,period){
+  const mv=typeof movements!=='undefined'?movements:[];
+  const inPeriod=ts=>ts&&ts.slice(0,7)===period;
+  const forBrand=m=>{if(!brandName)return true;const dest=m.Destination;if(dest&&dest.company&&dest.company.toLowerCase().includes(brandName.toLowerCase()))return true;if(m.SKU&&m.SKU.toLowerCase().includes(brandName.toLowerCase()))return true;return false;};
+  const beforePeriod=mv.filter(m=>m.Timestamp&&m.Timestamp.slice(0,7)<period&&forBrand(m));
+  const opening=beforePeriod.reduce((a,m)=>{const qty=parseInt(m.Quantity)||0;return a+(m.Direction==='Inbound'?qty:-qty);},0);
+  const periodMv=mv.filter(m=>inPeriod(m.Timestamp)&&forBrand(m));
+  const produced=periodMv.filter(m=>m.Movement_Type==='New Batch').reduce((a,m)=>a+(parseInt(m.Quantity)||0),0);
+  const returned=periodMv.filter(m=>m.Movement_Type==='Return').reduce((a,m)=>a+(parseInt(m.Quantity)||0),0);
+  const shipped=periodMv.filter(m=>m.Direction==='Outbound'&&m.Movement_Type==='Outbound').reduce((a,m)=>a+(parseInt(m.Quantity)||0),0);
+  const samples=periodMv.filter(m=>['Pull to Sample','Send Sample'].includes(m.Movement_Type)).reduce((a,m)=>a+(parseInt(m.Quantity)||0),0);
+  const writeOffs=periodMv.filter(m=>['Write-Off','Damage','Expired','Destruction','Recall'].includes(m.Movement_Type)).reduce((a,m)=>a+(parseInt(m.Quantity)||0),0);
+  const stRecord=sellThroughGetForPeriod(customerId,brandName,period);
+  const soldThrough=stRecord?(stRecord.caseSold||0):shipped;
+  const ending=opening+produced+returned-shipped-samples-writeOffs;
+  return{period,opening,produced,returned,shipped,soldThrough,samples,writeOffs,ending};
+}
+
+function inventoryValuation(){
+  const bd=typeof batchData!=='undefined'?batchData:[];
+  const snaps=acctLoad(ACCT_KEYS.COST_SNAPSHOTS);
+  return bd.map(batch=>{
+    const onHand=parseInt(batch.OnHand||batch['On Hand'])||0;
+    const snap=snaps.filter(s=>s.batchCode===(batch.Batch||batch.BatchCode)).pop();
+    const costPerCase=snap?snap.costPerCase:0;
+    return{batchCode:batch.Batch||batch.BatchCode||'',sku:batch.SKU||'',mg:batch.MG||'',onHand,costPerCase,totalValue:onHand*costPerCase,status:batch.Status||'active',productionDate:batch.ProductionDate||'',hasSnapshot:!!snap};
+  }).filter(b=>b.onHand>0);
+}
+
+function inventoryValuationSummary(){
+  const lines=inventoryValuation();
+  const totalValue=lines.reduce((a,l)=>a+l.totalValue,0);
+  const totalCases=lines.reduce((a,l)=>a+l.onHand,0);
+  const byBrand={};
+  lines.forEach(l=>{const brand=_brandFromSku(l.sku);if(!byBrand[brand])byBrand[brand]={cases:0,value:0};byBrand[brand].cases+=l.onHand;byBrand[brand].value+=l.totalValue;});
+  return{totalValue,totalCases,byBrand,lines};
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ACCOUNTING ENGINE — CHUNK 2: Settlement, Invoice, AR, AP, Vendor, Close
+// ═══════════════════════════════════════════════════════════════════════
+
+function settlementsLoad(){return acctLoad(ACCT_KEYS.SETTLEMENTS);}
+
+function settlementCreate(customerId,brandName,period){
+  const settlements=settlementsLoad();
+  const existing=settlements.find(s=>s.customerId===customerId&&s.brandName===brandName&&s.period===period);
+  if(existing&&existing.status==='finalized')return{error:'Period already finalized',existing};
+  const deals=dealGetActive(customerId,brandName,period+'-01');
+  const deal=deals[0]||null;
+  if(!deal)return{error:'No active deal for '+customerId+' / '+brandName+' in '+period};
+  const rf=inventoryRollforward(customerId,brandName,period);
+  let settlementUnits=0;
+  switch(deal.settlementBasis){case'produced':settlementUnits=rf.produced;break;case'shipped':settlementUnits=rf.shipped;break;case'sold_through':settlementUnits=rf.soldThrough;break;default:settlementUnits=rf.shipped;}
+  const baseRecovery=(deal.baseRecovery||deal.pricePerCase||0)*settlementUnits;
+  let profitSharePool=0,ourProfitShare=0;
+  if(deal.dealType==='profit_share'||deal.ourSharePct>0){
+    const stRecord=sellThroughGetForPeriod(customerId,brandName,period);
+    if(stRecord){
+      const netRevenue=stRecord.netRevenue||stRecord.grossRevenue||0;
+      const totalDeductions=(deal.deductions||[]).reduce((a,d)=>{if(d.type==='pct')return a+(netRevenue*(d.value/100));return a+(d.value||0);},0);
+      profitSharePool=Math.max(0,netRevenue-totalDeductions-baseRecovery);
+      ourProfitShare=profitSharePool*((deal.ourSharePct||0)/100);
+      if(deal.floorAtZero)ourProfitShare=Math.max(0,ourProfitShare);
+    }
+  }
+  let storageCharge=0;
+  if(deal.storageEnabled){
+    const reservations=acctLoad(ACCT_KEYS.RESERVATIONS).filter(r=>r.customerId===customerId&&r.brandName===brandName&&r.status==='active');
+    reservations.forEach(res=>{
+      const days=Math.max(0,_daysBetween(res.graceExpiry||res.startDate,period+'-28')-(deal.storageGraceDays||0));
+      if(days>0){if(deal.storageRateType==='per_case_month')storageCharge+=(res.reservedCases||0)*(deal.storageRate||0);else if(deal.storageRateType==='per_case_day')storageCharge+=(res.reservedCases||0)*(deal.storageRate||0)*days;else if(deal.storageRateType==='flat')storageCharge+=deal.storageRate||0;}
+    });
+  }
+  const netDue=baseRecovery+ourProfitShare+storageCharge;
+  const settlement=existing||{id:acctId('SETT'),customerId,brandName,period,createdAt:acctNow()};
+  Object.assign(settlement,{dealId:deal.dealId,dealType:deal.dealType,settlementBasis:deal.settlementBasis,status:'draft',rollforward:rf,settlementUnits,baseRecovery,profitSharePool,ourProfitShare,passThrough:0,storageCharge,credits:0,priorPayments:0,custOffsets:0,netDue,updatedAt:acctNow(),notes:'',exceptions:[]});
+  if(!deal.custReportsSellThrough&&deal.dealType==='profit_share')settlement.exceptions.push('No sell-through report expected but deal is profit-share');
+  const stRec=sellThroughGetForPeriod(customerId,brandName,period);
+  if(deal.custReportsSellThrough&&!stRec)settlement.exceptions.push('Customer sell-through missing for '+period);
+  if(rf.ending<0)settlement.exceptions.push('Negative ending inventory — data error possible');
+  if(existing){const idx=settlements.findIndex(s=>s.id===existing.id);settlements[idx]=settlement;}else settlements.push(settlement);
+  acctSave(ACCT_KEYS.SETTLEMENTS,settlements);
+  acctAudit('create','settlement',settlement.id,{netDue,period},'Settlement calculated');
+  return settlement;
+}
+
+function settlementFinalize(settlementId){
+  const settlements=settlementsLoad();const s=settlements.find(x=>x.id===settlementId);
+  if(!s)return null;if(s.status==='finalized')return{error:'Already finalized'};
+  s.status='finalized';s.finalizedAt=acctNow();
+  acctSave(ACCT_KEYS.SETTLEMENTS,settlements);acctAudit('update','settlement',settlementId,{status:'finalized'},'Settlement finalized');
+  return s;
+}
+
+function invoicesLoad(){return acctLoad(ACCT_KEYS.INVOICES);}
+
+function _nextInvoiceNo(){
+  const invs=acctLoad(ACCT_KEYS.INVOICES);
+  const year=new Date().getFullYear().toString().slice(2);
+  return'INV-'+year+'-'+(invs.length+1).toString().padStart(4,'0');
+}
+
+function invoiceCreate(type,data){
+  const invoices=invoicesLoad();
+  const inv={invoiceId:acctId('INV'),invoiceNo:_nextInvoiceNo(),type,status:'draft',customerId:data.customerId||'',customerName:data.customerName||'',brandName:data.brandName||'',dealId:data.dealId||'',invoiceDate:data.invoiceDate||acctToday(),dueDate:data.dueDate||_addDays(acctToday(),30),terms:data.terms||'Net30',lines:data.lines||[],subtotal:0,taxAmount:parseFloat(data.taxAmount)||0,totalAmount:0,paidAmount:0,openAmount:0,currency:'USD',refOrderId:data.refOrderId||'',refShipmentId:data.refShipmentId||'',refSettlementId:data.refSettlementId||'',notes:data.notes||'',createdAt:acctNow(),sentAt:null,paidAt:null,qboSyncStatus:'pending',qboInvoiceId:null};
+  inv.subtotal=inv.lines.reduce((a,l)=>a+(parseFloat(l.amount)||0),0);
+  inv.totalAmount=inv.subtotal+inv.taxAmount;inv.openAmount=inv.totalAmount-inv.paidAmount;
+  invoices.push(inv);acctSave(ACCT_KEYS.INVOICES,invoices);
+  acctAudit('create','invoice',inv.invoiceId,{totalAmount:inv.totalAmount},'Invoice '+inv.invoiceNo+' created');
+  return inv;
+}
+
+function invoiceFromSettlement(settlementId){
+  const sett=settlementsLoad().find(s=>s.id===settlementId);if(!sett)return null;
+  const lines=[];
+  if(sett.baseRecovery>0)lines.push({lineId:acctId('IL'),description:'Base Manufacturing Recovery — '+sett.settlementUnits+' units',glCode:'4010',qty:sett.settlementUnits,unitPrice:sett.baseRecovery/(sett.settlementUnits||1),amount:sett.baseRecovery,type:'manufacturing_revenue'});
+  if(sett.ourProfitShare>0)lines.push({lineId:acctId('IL'),description:'Profit-Share Settlement — '+sett.period,glCode:'4030',qty:1,unitPrice:sett.ourProfitShare,amount:sett.ourProfitShare,type:'profit_share_revenue'});
+  if(sett.storageCharge>0)lines.push({lineId:acctId('IL'),description:'Storage Fee — '+sett.period,glCode:'4050',qty:1,unitPrice:sett.storageCharge,amount:sett.storageCharge,type:'storage_revenue'});
+  const deal=dealsLoad().find(d=>d.dealId===sett.dealId)||{};
+  return invoiceCreate('settlement',{customerId:sett.customerId,customerName:sett.customerId,brandName:sett.brandName,dealId:sett.dealId,refSettlementId:settlementId,lines,terms:deal.paymentTerms||'Net30',dueDate:_addDays(acctToday(),_termsDays(deal.paymentTerms)),notes:'Settlement Invoice — '+sett.brandName+' '+sett.period});
+}
+
+function paymentsLoad(){return acctLoad(ACCT_KEYS.PAYMENTS);}
+
+function paymentRecord(invoiceId,amount,paymentDate,method,ref){
+  const invoices=invoicesLoad();const inv=invoices.find(i=>i.invoiceId===invoiceId);
+  if(!inv)return{error:'Invoice not found'};
+  const pmt={paymentId:acctId('PMT'),invoiceId,invoiceNo:inv.invoiceNo,customerId:inv.customerId,customerName:inv.customerName,amount:parseFloat(amount)||0,paymentDate:paymentDate||acctToday(),method:method||'check',reference:ref||'',appliedAt:acctNow(),qboSyncStatus:'pending',qboPaymentId:null};
+  inv.paidAmount=(inv.paidAmount||0)+pmt.amount;inv.openAmount=inv.totalAmount-inv.paidAmount;
+  inv.status=inv.openAmount<=0?'paid':inv.openAmount<inv.totalAmount?'partial':inv.status;
+  if(inv.status==='paid')inv.paidAt=acctNow();
+  const pmts=paymentsLoad();pmts.push(pmt);
+  acctSave(ACCT_KEYS.PAYMENTS,pmts);acctSave(ACCT_KEYS.INVOICES,invoices);
+  acctAudit('create','payment',pmt.paymentId,{invoiceId,amount:pmt.amount},'Payment recorded');
+  return pmt;
+}
+
+function arAgingReport(){
+  const invoices=invoicesLoad().filter(i=>!['void','paid'].includes(i.status));
+  const today=new Date();const buckets={current:[],['1-30']:[],['31-60']:[],['61-90']:[],['90+']: []};
+  invoices.forEach(inv=>{
+    const due=new Date(inv.dueDate||inv.invoiceDate);const days=Math.floor((today-due)/86400000);
+    if(days<=0)buckets.current.push(inv);else if(days<=30)buckets['1-30'].push(inv);else if(days<=60)buckets['31-60'].push(inv);else if(days<=90)buckets['61-90'].push(inv);else buckets['90+'].push(inv);
+  });
+  return buckets;
+}
+
+function vendorsLoad(){return acctLoad(ACCT_KEYS.VENDORS);}
+
+function vendorCreate(data){
+  const vendors=vendorsLoad();
+  const v={vendorId:acctId('VEN'),name:data.name||'',contact:data.contact||'',email:data.email||'',phone:data.phone||'',address:data.address||'',paymentTerms:data.paymentTerms||'Net30',leadTimeDays:parseInt(data.leadTimeDays)||7,categories:data.categories||[],accountNo:data.accountNo||'',preferred:data.preferred||false,status:'active',notes:data.notes||'',createdAt:acctNow(),spendToDate:0,openBalance:0,priceHistory:[],qboVendorId:null,qboSyncStatus:'pending'};
+  vendors.push(v);acctSave(ACCT_KEYS.VENDORS,vendors);
+  acctAudit('create','vendor',v.vendorId,{name:v.name},'Vendor created');
+  return v;
+}
+
+function posLoad(){return acctLoad(ACCT_KEYS.PURCHASE_ORDERS);}
+
+function _nextPONo(){const pos=acctLoad(ACCT_KEYS.PURCHASE_ORDERS);const year=new Date().getFullYear().toString().slice(2);return'PO-'+year+'-'+(pos.length+1).toString().padStart(4,'0');}
+
+function poCreate(data){
+  const pos=posLoad();
+  const po={poId:acctId('PO'),poNo:_nextPONo(),status:'draft',vendorId:data.vendorId||'',vendorName:data.vendorName||'',category:data.category||'',customerId:data.customerId||'',brandName:data.brandName||'',dealId:data.dealId||'',batchRef:data.batchRef||'',requester:data.requester||'',approver:null,approvedAt:null,approvalNotes:'',lines:data.lines||[],subtotal:0,estFreight:parseFloat(data.estFreight)||0,estTax:parseFloat(data.estTax)||0,totalEstimated:0,expectedReceiveDate:data.expectedReceiveDate||'',actualReceiveDate:null,receivedLines:[],linkedBillId:null,isPassThrough:data.isPassThrough||false,notes:data.notes||'',createdAt:acctNow(),updatedAt:acctNow(),qboPoId:null,qboSyncStatus:'pending'};
+  po.subtotal=po.lines.reduce((a,l)=>a+((l.qty||0)*(l.unitCost||0)),0);
+  po.totalEstimated=po.subtotal+po.estFreight+po.estTax;
+  pos.push(po);acctSave(ACCT_KEYS.PURCHASE_ORDERS,pos);
+  acctAudit('create','po',po.poId,{poNo:po.poNo,total:po.totalEstimated},'PO created');
+  return po;
+}
+
+function poApprove(poId,approver,notes){
+  const pos=posLoad();const po=pos.find(p=>p.poId===poId);if(!po)return null;
+  if(!['pending_approval','submitted'].includes(po.status))return{error:'PO not in approvable state'};
+  po.status='approved';po.approver=approver;po.approvedAt=acctNow();po.approvalNotes=notes||'';po.updatedAt=acctNow();
+  acctSave(ACCT_KEYS.PURCHASE_ORDERS,pos);
+  acctAudit('approve','po',poId,{approver,total:po.totalEstimated},'PO approved');
+  return po;
+}
+
+function poReceive(poId,receivedLines){
+  const pos=posLoad();const po=pos.find(p=>p.poId===poId);if(!po)return null;
+  po.receivedLines=receivedLines;
+  const totalReceived=receivedLines.reduce((a,r)=>a+(r.qtyReceived||0),0);
+  const totalOrdered=po.lines.reduce((a,l)=>a+(l.qty||0),0);
+  po.status=totalReceived>=totalOrdered?'fully_received':'partially_received';
+  po.actualReceiveDate=acctNow();po.updatedAt=acctNow();
+  acctSave(ACCT_KEYS.PURCHASE_ORDERS,pos);acctAudit('update','po',poId,{status:po.status},'PO received');
+  return po;
+}
+
+function billCreate(poId,billData){
+  const bills=acctLoad(ACCT_KEYS.VENDOR_BILLS);const pos=posLoad();const po=pos.find(p=>p.poId===poId);
+  const bill={billId:acctId('BILL'),billNo:billData.billNo||'',poId,vendorId:po?po.vendorId:billData.vendorId||'',vendorName:po?po.vendorName:billData.vendorName||'',billDate:billData.billDate||acctToday(),dueDate:billData.dueDate||_addDays(acctToday(),30),lines:billData.lines||(po?po.lines:[]),subtotal:0,taxAmount:parseFloat(billData.taxAmount)||0,freightAmount:parseFloat(billData.freightAmount)||0,totalAmount:0,paidAmount:0,openAmount:0,status:'open',matchStatus:'unmatched',variances:[],notes:billData.notes||'',createdAt:acctNow(),qboBillId:null,qboSyncStatus:'pending'};
+  bill.subtotal=bill.lines.reduce((a,l)=>a+((l.qty||0)*(l.unitCost||l.actualUnitCost||0)),0);
+  bill.totalAmount=bill.subtotal+bill.taxAmount+bill.freightAmount;bill.openAmount=bill.totalAmount;
+  if(po&&po.status==='fully_received'){
+    const poTotal=po.totalEstimated;const variance=Math.abs(bill.totalAmount-poTotal);
+    const variancePct=poTotal>0?(variance/poTotal*100):0;
+    bill.matchStatus=variancePct<5?'2way_matched':'variance';
+    if(variancePct>=5)bill.variances.push({type:'amount_variance',poAmount:poTotal,billAmount:bill.totalAmount,variance,variancePct:variancePct.toFixed(1)});
+  }
+  if(po){po.linkedBillId=bill.billId;po.status='billed';acctSave(ACCT_KEYS.PURCHASE_ORDERS,pos);}
+  bills.push(bill);acctSave(ACCT_KEYS.VENDOR_BILLS,bills);
+  acctAudit('create','bill',bill.billId,{poId,total:bill.totalAmount},'Vendor bill created');
+  return bill;
+}
+
+function closePeriodsLoad(){return acctLoad(ACCT_KEYS.CLOSE_PERIODS);}
+
+function closePeriodCreate(period){
+  const periods=closePeriodsLoad();if(periods.find(p=>p.period===period))return{error:'Period already exists'};
+  const cp={id:acctId('CLOSE'),period,status:'open',checklist:[
+    {id:'c1',task:'All production runs finalized',done:false},
+    {id:'c2',task:'All New Batches logged with COAs',done:false},
+    {id:'c3',task:'All shipments submitted and classified',done:false},
+    {id:'c4',task:'All material receipts booked',done:false},
+    {id:'c5',task:'All vendor bills entered or accrued',done:false},
+    {id:'c6',task:'All sell-through reports imported',done:false},
+    {id:'c7',task:'All settlements drafted',done:false},
+    {id:'c8',task:'Unsettled disputes flagged',done:false},
+    {id:'c9',task:'Inventory valuation run',done:false},
+    {id:'c10',task:'Inventory audit variances reviewed',done:false},
+    {id:'c11',task:'Storage fees accrued',done:false},
+    {id:'c12',task:'Freight rebills reviewed',done:false},
+    {id:'c13',task:'AR aging reviewed',done:false},
+    {id:'c14',task:'AP aging reviewed',done:false},
+    {id:'c15',task:'Sync failures reviewed',done:false},
+  ],notes:'',createdAt:acctNow(),lockedAt:null,lockedBy:null,overrides:[],exceptions:[]};
+  periods.push(cp);acctSave(ACCT_KEYS.CLOSE_PERIODS,periods);
+  acctAudit('create','close_period',cp.id,{period},'Close period created');
+  return cp;
+}
+
+function closePeriodLock(periodId,lockedBy){
+  const periods=closePeriodsLoad();const cp=periods.find(p=>p.id===periodId);if(!cp)return null;
+  cp.status='locked';cp.lockedAt=acctNow();cp.lockedBy=lockedBy||'system';
+  acctSave(ACCT_KEYS.CLOSE_PERIODS,periods);acctAudit('lock','close_period',periodId,{lockedBy},'Period LOCKED — '+cp.period);
+  return cp;
+}
+
+function closePeriodUnlock(periodId,user,reason){
+  const periods=closePeriodsLoad();const cp=periods.find(p=>p.id===periodId);if(!cp)return null;
+  const prev=cp.status;cp.status='unlocked_override';cp.overrides.push({ts:acctNow(),user,reason,prevStatus:prev});
+  acctSave(ACCT_KEYS.CLOSE_PERIODS,periods);acctAudit('unlock','close_period',periodId,{user,reason},'OVERRIDE: Period unlocked by '+user);
+  return cp;
+}
+
+function isPeriodLocked(period){const cp=closePeriodsLoad().find(p=>p.period===period);return cp&&cp.status==='locked';}
+
+function closePeriodChecklistUpdate(periodId,checkId,done){
+  const periods=closePeriodsLoad();const cp=periods.find(p=>p.id===periodId);if(!cp)return null;
+  const item=cp.checklist.find(c=>c.id===checkId);if(item)item.done=done;
+  const allDone=cp.checklist.every(c=>c.done);
+  if(allDone)cp.status='ready_to_lock';else if(cp.status==='open')cp.status='in_progress';
+  acctSave(ACCT_KEYS.CLOSE_PERIODS,periods);return cp;
+}
+
+function runExceptionEngine(){
+  const exceptions=[];
+  const bd=typeof batchData!=='undefined'?batchData:[];
+  const sh=typeof shipments!=='undefined'?shipments:[];
+  const snaps=acctLoad(ACCT_KEYS.COST_SNAPSHOTS);
+  const invs=invoicesLoad();const pos=posLoad();const bills=acctLoad(ACCT_KEYS.VENDOR_BILLS);
+  const today=acctToday();
+  bd.filter(b=>(parseInt(b.OnHand||b['On Hand'])||0)>0).forEach(b=>{
+    const code=b.Batch||b.BatchCode||'';if(!code)return;
+    if(!snaps.find(s=>s.batchCode===code))exceptions.push({id:acctId('EX'),sev:'warning',category:'costing',title:'Missing cost snapshot',detail:'Batch '+code+' has no cost snapshot',entityType:'batch',entityId:code,ts:acctNow()});
+    if(!b.COA_Link&&!b['COA Link'])exceptions.push({id:acctId('EX'),sev:'error',category:'compliance',title:'Missing COA link',detail:'Batch '+code+' has no COA attached',entityType:'batch',entityId:code,ts:acctNow()});
+    if((parseInt(b.OnHand||b['On Hand'])||0)<0)exceptions.push({id:acctId('EX'),sev:'error',category:'inventory',title:'Negative inventory',detail:'Batch '+code+' shows negative on-hand',entityType:'batch',entityId:code,ts:acctNow()});
+  });
+  sh.filter(s=>['ready_ship','in_transit','delivered'].includes(s.status)).forEach(s=>{if(!s.cogs||!s.cogs.labor)exceptions.push({id:acctId('EX'),sev:'warning',category:'shipping',title:'Shipment missing labor cost',detail:'Shipment '+s.id+' has no work stage labor',entityType:'shipment',entityId:s.id,ts:acctNow()});});
+  invs.filter(i=>!['paid','void'].includes(i.status)&&i.dueDate<today).forEach(i=>{const days=Math.floor((new Date(today)-new Date(i.dueDate))/86400000);exceptions.push({id:acctId('EX'),sev:days>60?'error':'warning',category:'ar',title:'Overdue invoice',detail:'Invoice '+i.invoiceNo+' overdue '+days+' days — '+acctFmt(i.openAmount)+' open',entityType:'invoice',entityId:i.invoiceId,ts:acctNow()});});
+  bills.filter(b=>b.matchStatus==='variance').forEach(b=>{b.variances.forEach(v=>{exceptions.push({id:acctId('EX'),sev:'warning',category:'ap',title:'Bill/PO variance',detail:'Bill '+b.billNo+' has '+v.variancePct+'% variance vs PO',entityType:'bill',entityId:b.billId,ts:acctNow()});});});
+  pos.filter(p=>p.status==='approved'&&p.approvedAt&&_daysBetween(p.approvedAt,today)>14).forEach(p=>{exceptions.push({id:acctId('EX'),sev:'warning',category:'ap',title:'PO stale — approved not issued',detail:'PO '+p.poNo+' approved '+Math.floor(_daysBetween(p.approvedAt,today))+' days ago',entityType:'po',entityId:p.poId,ts:acctNow()});});
+  const psDeals=dealsLoad().filter(d=>d.status==='active'&&d.custReportsSellThrough);
+  const prevPer=_prevPeriod(acctPeriod(today));
+  psDeals.forEach(d=>{if(!sellThroughGetForPeriod(d.customerId||d.customerName,d.brandName,prevPer))exceptions.push({id:acctId('EX'),sev:'warning',category:'settlement',title:'Missing sell-through report',detail:d.brandName+' sell-through for '+prevPer+' not received',entityType:'deal',entityId:d.dealId,ts:acctNow()});});
+  const badgeEl=document.getElementById('acct-exception-badge');
+  if(badgeEl){const errors=exceptions.filter(e=>e.sev==='error').length;if(exceptions.length>0){badgeEl.style.display='inline';badgeEl.textContent=exceptions.length;badgeEl.style.background=errors>0?'var(--red)':'var(--amber)';}else badgeEl.style.display='none';}
+  return exceptions;
+}
+
+function acctKPIs(){
+  const period=acctPeriod(acctToday());const invs=invoicesLoad();const pmts=paymentsLoad();const pos=posLoad();const bills=acctLoad(ACCT_KEYS.VENDOR_BILLS);const setts=settlementsLoad();const today=acctToday();
+  const mtdInv=invs.filter(i=>i.invoiceDate&&i.invoiceDate.slice(0,7)===period&&i.type!=='credit_memo');
+  const revMTD=mtdInv.reduce((a,i)=>a+(i.totalAmount||0),0);
+  const arOpen=invs.filter(i=>!['paid','void'].includes(i.status)).reduce((a,i)=>a+(i.openAmount||0),0);
+  const apOpen=bills.filter(b=>!['paid','void'].includes(b.status)).reduce((a,b)=>a+(b.openAmount||0),0);
+  const openPOs=pos.filter(p=>!['closed','voided','paid'].includes(p.status)).length;
+  const openPOValue=pos.filter(p=>!['closed','voided','paid'].includes(p.status)).reduce((a,p)=>a+(p.totalEstimated||0),0);
+  const pendingSett=setts.filter(s=>s.status!=='finalized').length;
+  const pendingSettValue=setts.filter(s=>s.status!=='finalized').reduce((a,s)=>a+(s.netDue||0),0);
+  const invVal=inventoryValuationSummary();
+  const cashMTD=pmts.filter(p=>p.paymentDate&&p.paymentDate.slice(0,7)===period).reduce((a,p)=>a+(p.amount||0),0);
+  const overdueInvs=invs.filter(i=>!['paid','void'].includes(i.status)&&i.dueDate<today);
+  const overdueAmt=overdueInvs.reduce((a,i)=>a+(i.openAmount||0),0);
+  return{revMTD,arOpen,apOpen,openPOs,openPOValue,pendingSett,pendingSettValue,inventoryValue:invVal.totalValue,inventoryCases:invVal.totalCases,cashMTD,overdueInvs:overdueInvs.length,overdueAmt,period};
+}
+
+function acctSeedIfEmpty(){
+  const deals=dealsLoad();if(deals.length>0)return;
+  const vendors=vendorsLoad();
+  if(!vendors.length){
+    [['Great Western (Cans)',['cans']],['RPC Labels',['labels']],['Flagship Food',['ingredients']],['Pak Technologies',['packaging']],['Amazon Freight',['freight']]].forEach(([name,categories])=>vendorCreate({name,paymentTerms:'Net30',leadTimeDays:7,categories}));
+  }
+  const seedDeals=[
+    {customerName:'AppGirls',brandName:'AppGirls',channelType:'private_label',dealType:'profit_share',effectiveStart:'2025-01-01',baseRecovery:1.00,ourSharePct:50,custSharePct:50,settlementBasis:'sold_through',settlementCadence:'monthly',paymentTerms:'Net30',ownershipTransfer:'at_sell_through',custReportsSellThrough:true,custCanUploadCSV:true,canReserveInventory:true,storageEnabled:true,storageGraceDays:30,storageRateType:'per_case_month',storageRate:0.50,floorAtZero:true,notes:'AppGirls profit-share — base recovery + 50/50 upside on sell-through'},
+    {customerName:'Blind Tiger',brandName:'Blind Tiger',channelType:'white_label',dealType:'white_label_pt',effectiveStart:'2025-01-01',pricePerCase:38.00,settlementBasis:'shipped',paymentTerms:'Net30',weOwnLabels:false,customerSuppliedComponents:[{name:'Labels',excludeFromOurCostBasis:true,excludeFromReimbursement:false,paidBy:'customer'}],freightRebill:true,notes:'White-label. Customer supplies labels.'},
+    {customerName:'Gata Juice',brandName:'Gata Juice',channelType:'wholesale',dealType:'wholesale',effectiveStart:'2025-01-01',pricePerCase:42.00,settlementBasis:'shipped',paymentTerms:'Net30',freightRebill:true,freightMarkup:5,notes:'Standard wholesale. Freight rebilled +5%.'},
+    {customerName:'Reef Shark',brandName:'Reef Shark Seltzer',channelType:'wholesale',dealType:'reserved_stock',effectiveStart:'2025-01-01',pricePerCase:40.00,settlementBasis:'shipped',paymentTerms:'Net15',canReserveInventory:true,storageEnabled:true,storageGraceDays:45,storageRateType:'per_case_month',storageRate:0.35,notes:'Reserved inventory deal. Storage after 45-day grace.'},
+  ];
+  seedDeals.forEach(d=>dealCreate({...d,status:'active'}));
+  const months=[_prevPeriod(_prevPeriod(acctPeriod(acctToday()))),_prevPeriod(acctPeriod(acctToday()))];
+  months.forEach((period,i)=>{
+    const cases=[85,92][i],gross=cases*24*3.00,allow=[120,80][i];
+    sellThroughRecord('AppGirls','AppGirls',period,{caseSold:cases,unitsSold:cases*24,grossRevenue:gross,returns:[2,0][i],promos:[5,3][i],allowances:allow,netRevenue:gross-allow,notes:'Seeded sell-through'});
+  });
+  const venList=vendorsLoad();
+  if(venList.length){
+    const canVen=venList[0];
+    const po=poCreate({vendorId:canVen.vendorId,vendorName:canVen.name,category:'cans',requester:'Seth Allen',lines:[{lineId:acctId('IL'),description:'12oz Cans — Sleek',qty:50000,unit:'cans',unitCost:0.12,extCost:6000,category:'packaging',glCode:'5010'}],estFreight:320,expectedReceiveDate:_addDays(acctToday(),10),notes:'Seed PO — restock cans'});
+    const fresh=posLoad();const seededPO=fresh.find(p=>p.poId===po.poId);
+    if(seededPO){seededPO.status='approved';seededPO.approver='Owner';seededPO.approvedAt=acctNow();}
+    acctSave(ACCT_KEYS.PURCHASE_ORDERS,fresh);
+  }
+  showToast('💰 Accounting initialized with seed data');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ACCOUNTING ENGINE — CHUNK 3: Render Functions & Modals
+// ═══════════════════════════════════════════════════════════════════════
+
+function _acctCard(title,value,sub,color,icon){return`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px 18px;min-width:0"><div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:6px">${icon||''} ${title}</div><div style="font-family:var(--font-display);font-size:22px;color:${color||'var(--green)'};letter-spacing:1px">${value}</div>${sub?`<div style="font-size:11px;color:var(--text3);margin-top:3px">${sub}</div>`:''}</div>`;}
+function _acctSectionHeader(title,sub,actions){return`<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap"><div><div style="font-size:10px;font-family:var(--font-mono);color:var(--amber);letter-spacing:3px;margin-bottom:4px">💰 ACCOUNTING</div><div style="font-family:var(--font-display);font-size:20px;color:var(--text);letter-spacing:1px">${title}</div>${sub?`<div style="font-size:12px;color:var(--text3);margin-top:4px">${sub}</div>`:''}</div><div style="display:flex;gap:8px;flex-wrap:wrap">${actions||''}</div></div>`;}
+function _acctBtn(label,onclick){return`<button onclick="${onclick}" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;font-weight:600">${label}</button>`;}
+function _acctBtnGreen(label,onclick){return`<button onclick="${onclick}" style="background:rgba(57,232,122,0.12);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;font-weight:600">${label}</button>`;}
+
+function renderAcctHome(){
+  acctSeedIfEmpty();
+  const kpi=acctKPIs();const exceptions=runExceptionEngine();
+  const errors=exceptions.filter(e=>e.sev==='error').length,warnings=exceptions.filter(e=>e.sev==='warning').length;
+  const el=document.getElementById('acct-home-content');if(!el)return;
+  const aging=arAgingReport();const agingTotal=Object.values(aging).reduce((a,v)=>a+v.reduce((b,i)=>b+(i.openAmount||0),0),0);
+  const invVal=inventoryValuationSummary();
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('ACCOUNTING HOME','Live financial overview — '+kpi.period,_acctBtn('⚠ Exceptions ('+exceptions.length+')','renderAcctExceptions();showPage("acct-exceptions",document.querySelector("[onclick*=acct-exceptions]"))')+_acctBtnGreen('+ New Invoice','acctNewInvoiceModal()'))}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:24px">
+      ${_acctCard('REVENUE MTD',acctFmt(kpi.revMTD),kpi.period,'var(--green)','💵')}
+      ${_acctCard('OPEN AR',acctFmt(kpi.arOpen),kpi.overdueInvs+' overdue','var(--blue)','📄')}
+      ${_acctCard('OPEN AP',acctFmt(kpi.apOpen),'vendor bills','var(--amber)','🧾')}
+      ${_acctCard('INVENTORY VALUE',acctFmt(kpi.inventoryValue),kpi.inventoryCases+' cases','var(--purple)','📦')}
+      ${_acctCard('CASH COLLECTED',acctFmt(kpi.cashMTD),'month to date','var(--green)','🏦')}
+      ${_acctCard('PENDING SETTLEMENTS',kpi.pendingSett,acctFmt(kpi.pendingSettValue)+' est.','var(--amber)','🤝')}
+      ${_acctCard('OPEN POs',kpi.openPOs,acctFmt(kpi.openPOValue)+' committed','var(--text2)','📋')}
+      ${_acctCard('EXCEPTIONS',errors+' err · '+warnings+' warn','click to review',errors>0?'var(--red)':'var(--amber)','⚠️')}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+      <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:18px">
+        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">📄 AR AGING</div>
+        ${(()=>{const rows=[['Current',aging.current],['1–30',aging['1-30']],['31–60',aging['31-60']],['61–90',aging['61-90']],['90+',aging['90+']]];const grand=rows.reduce((a,[,v])=>a+v.reduce((b,i)=>b+(i.openAmount||0),0),0);if(!grand)return'<div style="color:var(--text3);font-size:12px">No open invoices 🎉</div>';return'<table style="width:100%;border-collapse:collapse;font-size:12px">'+rows.map(([label,inv])=>{const amt=inv.reduce((a,i)=>a+(i.openAmount||0),0);const c=label==='90+'?'var(--red)':label.includes('61')?'var(--amber)':'var(--text)';return amt>0?`<tr><td style="padding:4px 0;color:var(--text3)">${label}</td><td style="text-align:right;font-family:var(--font-mono);color:${c}">${acctFmt(amt)}</td><td style="padding-left:8px;color:var(--text3);font-size:10px">${inv.length} inv</td></tr>`:''}).join('')+`<tr><td style="padding:6px 0;font-weight:700;border-top:1px solid var(--border2)">Total</td><td style="text-align:right;font-weight:700;border-top:1px solid var(--border2);font-family:var(--font-mono);color:var(--blue)">${acctFmt(grand)}</td><td></td></tr></table>`;})()}
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:18px">
+        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">⏱ RECENT ACTIVITY</div>
+        ${(()=>{const log=acctLoad(ACCT_KEYS.ACCT_AUDIT).slice(-6).reverse();if(!log.length)return'<div style="color:var(--text3);font-size:12px">No activity yet</div>';return log.map(l=>`<div style="display:flex;gap:8px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border2)"><div style="font-size:16px;flex-shrink:0">${{create:'✅',update:'✏️',approve:'🎯',lock:'🔒',unlock:'⚠️'}[l.action]||'📝'}</div><div><div style="font-size:12px;color:var(--text)">${l.note||l.action+' '+l.entity}</div><div style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${l.ts.slice(0,16).replace('T',' ')} · ${l.user}</div></div></div>`).join('');})()}
+      </div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:18px;margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px">📦 INVENTORY VALUE BY BRAND</div>
+        <button onclick="showPage('acct-inventory-val',document.querySelector('[onclick*=acct-inventory-val]'))" style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer">Full Report →</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
+        ${Object.entries(invVal.byBrand).sort((a,b)=>b[1].value-a[1].value).map(([brand,d])=>`<div style="background:var(--bg3);border-radius:8px;padding:10px 12px"><div style="font-size:11px;font-weight:600;margin-bottom:2px">${brand}</div><div style="font-size:15px;font-family:var(--font-mono);color:var(--green)">${acctFmt(d.value)}</div><div style="font-size:10px;color:var(--text3)">${d.cases} cases</div></div>`).join('')}
+        ${invVal.totalValue>0?`<div style="background:rgba(57,232,122,0.06);border:1px solid rgba(57,232,122,0.2);border-radius:8px;padding:10px 12px"><div style="font-size:11px;font-weight:600;color:var(--green);margin-bottom:2px">TOTAL</div><div style="font-size:15px;font-family:var(--font-mono);color:var(--green)">${acctFmt(invVal.totalValue)}</div><div style="font-size:10px;color:var(--text3)">${invVal.totalCases} cases</div></div>`:'<div style="color:var(--text3);font-size:12px;padding:12px">Create cost snapshots in Batch Costing to see inventory values</div>'}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">
+      ${[['📝 Deals','acct-deals'],['🧮 Batch Costing','acct-costing'],['🤝 Settlements','acct-settlements'],['💵 AR','acct-ar'],['🧾 AP & POs','acct-ap'],['🏪 Vendors','acct-vendors'],['📊 Inventory Val','acct-inventory-val'],['🔒 Close Center','acct-close'],['⚠️ Exceptions','acct-exceptions']].map(([label,page])=>`<button onclick="showPage('${page}',document.querySelector('[onclick*=${page}]'))" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:12px;font-size:12px;cursor:pointer;text-align:left">${label}</button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderAcctDeals(){
+  const deals=dealsLoad();const el=document.getElementById('acct-deals-content');if(!el)return;
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('DEALS & CONTRACTS',deals.length+' deals — commercial agreements driving all settlement, billing, and cost calculations',_acctBtnGreen('+ New Deal','acctNewDealModal()'))}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      ${['all','active','draft','expired'].map(s=>`<button onclick="acctDealFilter('${s}',this)" style="background:${s==='all'?'rgba(255,184,48,0.15)':'var(--bg3)'};border:1px solid ${s==='all'?'rgba(255,184,48,0.4)':'var(--border2)'};color:${s==='all'?'var(--amber)':'var(--text3)'};border-radius:6px;padding:5px 14px;font-size:11px;cursor:pointer;font-family:var(--font-mono)" data-filter="${s}">${s.toUpperCase()}</button>`).join('')}
+    </div>
+    <div id="acct-deals-list">${deals.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No deals yet — click <strong style="color:var(--amber)">+ New Deal</strong> to start</div>':deals.map(d=>_renderDealCard(d)).join('')}</div>
+  </div>`;
+}
+
+function acctDealFilter(status,btn){
+  document.querySelectorAll('[data-filter]').forEach(b=>{b.style.background='var(--bg3)';b.style.borderColor='var(--border2)';b.style.color='var(--text3)';});
+  btn.style.background='rgba(255,184,48,0.15)';btn.style.borderColor='rgba(255,184,48,0.4)';btn.style.color='var(--amber)';
+  const deals=status==='all'?dealsLoad():dealsLoad().filter(d=>d.status===status);
+  document.getElementById('acct-deals-list').innerHTML=deals.map(d=>_renderDealCard(d)).join('')||`<div style="text-align:center;padding:32px;color:var(--text3)">No ${status} deals</div>`;
+}
+
+function _renderDealCard(d){
+  const sc={active:'var(--green)',draft:'var(--amber)',expired:'var(--text3)',superseded:'var(--text3)'}[d.status]||'var(--text3)';
+  return`<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${sc};border-radius:10px;padding:16px 18px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+          <span style="font-weight:700;font-size:14px">${d.customerName}</span>
+          ${d.brandName&&d.brandName!==d.customerName?`<span style="color:var(--text3);font-size:12px">· ${d.brandName}</span>`:''}
+          <span style="font-size:10px;font-family:var(--font-mono);background:var(--bg3);padding:2px 8px;border-radius:4px;color:${sc}">${d.status.toUpperCase()}</span>
+          <span style="font-size:10px;color:var(--text3)">${DEAL_TYPES[d.dealType]||d.dealType}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text3)">${d.effectiveStart} → ${d.effectiveEnd||'ongoing'} · ${SETTLEMENT_BASIS[d.settlementBasis]||d.settlementBasis} · ${d.paymentTerms}${d.ourSharePct>0?` · <span style="color:var(--green)">${d.ourSharePct}% profit share</span>`:''}${d.pricePerCase?` · $${d.pricePerCase}/case`:''}</div>
+        ${d.customerSuppliedComponents?.length?`<div style="font-size:11px;color:var(--amber);margin-top:4px">⚠ Customer-supplied: ${d.customerSuppliedComponents.map(c=>c.name).join(', ')}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;align-items:flex-start">
+        ${d.status==='draft'?`<button onclick="dealApprove('${d.dealId}');renderAcctDeals()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Approve</button>`:''}
+        ${d.status==='active'?`<button onclick="acctSettleNow('${d.dealId}')" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">⚡ Settle</button>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAcctCosting(){
+  const snaps=acctLoad(ACCT_KEYS.COST_SNAPSHOTS);const bd=typeof batchData!=='undefined'?batchData:[];
+  const el=document.getElementById('acct-costing-content');if(!el)return;
+  const batchesNoSnap=bd.filter(b=>{const c=b.Batch||b.BatchCode||'';return c&&(parseInt(b.OnHand||b['On Hand'])||0)>0&&!snaps.find(s=>s.batchCode===c);});
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('BATCH COSTING',snaps.length+' cost snapshots — immutable historical cost records per batch',_acctBtnGreen('+ New Snapshot','acctNewCostSnapshotModal()'))}
+    ${batchesNoSnap.length>0?`<div style="background:rgba(255,184,48,0.08);border:1px solid rgba(255,184,48,0.25);border-radius:10px;padding:14px 18px;margin-bottom:16px"><div style="font-size:12px;color:var(--amber);font-weight:600;margin-bottom:4px">⚠ ${batchesNoSnap.length} active batches missing cost snapshots</div><div style="font-size:11px;color:var(--text3)">${batchesNoSnap.slice(0,5).map(b=>b.Batch||b.BatchCode).join(', ')}${batchesNoSnap.length>5?' and '+(batchesNoSnap.length-5)+' more':''}</div></div>`:`<div style="background:rgba(57,232,122,0.06);border:1px solid rgba(57,232,122,0.2);border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:12px;color:var(--green)">✅ All active batches have cost snapshots</div>`}
+    ${snaps.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No cost snapshots yet. They are created automatically when production runs complete, or manually here.</div>':snaps.slice().reverse().map(s=>`
+      <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px 18px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div><div style="font-weight:700;font-size:13px;font-family:var(--font-mono);color:var(--green);margin-bottom:4px">${s.batchCode}</div>
+            <div style="font-size:12px;color:var(--text3)">${s.totalCases} cases · ${s.snapshotDate.slice(0,10)} · ${s.createdFrom} · ${s.locked?'🔒 LOCKED':'editable'}</div></div>
+          <div style="text-align:right"><div style="font-family:var(--font-display);font-size:20px;color:var(--amber)">${acctFmt(s.totalCost)}</div>
+            <div style="font-size:11px;color:var(--text3)">$${(s.costPerCase||0).toFixed(2)}/case · $${(s.costPerCan||0).toFixed(4)}/can</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px">
+          ${[['Materials',s.materialTotal,'var(--blue)'],['Labor',s.laborTotal,'var(--green)'],['Overhead',s.overheadTotal,'var(--amber)'],['Testing',s.testingTotal,'var(--purple)']].map(([label,val,c])=>val>0?`<div style="background:var(--bg3);border-radius:6px;padding:8px;font-size:11px"><div style="color:var(--text3);margin-bottom:2px">${label}</div><div style="font-family:var(--font-mono);color:${c}">${acctFmt(val)}</div></div>`:'').join('')}
+        </div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          ${!s.locked?`<button onclick="costSnapshotLock('${s.snapshotId}');renderAcctCosting()" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);color:var(--red);border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">🔒 Lock</button>`:''}
+          <button onclick="acctViewCostSnapshot('${s.snapshotId}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">View Lines</button>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderAcctSettlements(){
+  const setts=settlementsLoad();const el=document.getElementById('acct-settlements-content');if(!el)return;
+  const prevPer=_prevPeriod(acctPeriod(acctToday()));
+  const psDeals=dealsLoad().filter(d=>d.status==='active'&&d.custReportsSellThrough);
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('SETTLEMENTS','Profit-share and contract settlement statements',_acctBtn('Calculate Settlement','acctCalcSettlementModal()')+_acctBtnGreen('Enter Sell-Through','acctEnterSellThroughModal()'))}
+    ${psDeals.length>0?`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px;margin-bottom:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">📊 SELL-THROUGH STATUS — ${prevPer}</div>
+      ${psDeals.map(d=>{const rec=sellThroughGetForPeriod(d.customerId||d.customerName,d.brandName,prevPer);return`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border2);font-size:12px"><span>${d.brandName}</span>${rec?`<span style="color:var(--green)">✅ ${rec.caseSold} cases · ${acctFmt(rec.netRevenue)}</span>`:`<span style="color:var(--red)">⚠ Missing — <button onclick="acctEnterSellThroughFor('${d.customerId||d.customerName}','${d.brandName}','${prevPer}')" style="background:none;border:none;color:var(--amber);cursor:pointer;font-size:12px">Enter now</button></span>`}</div>`;}).join('')}
+    </div>`:''}
+    ${setts.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No settlements yet. Use <strong style="color:var(--amber)">Calculate Settlement</strong> to generate a customer statement.</div>':setts.slice().reverse().map(s=>_renderSettlementCard(s)).join('')}
+  </div>`;
+}
+
+function _renderSettlementCard(s){
+  const sc={draft:'var(--text3)',reviewed:'var(--blue)',finalized:'var(--green)',invoiced:'var(--purple)'}[s.status]||'var(--text3)';
+  const rf=s.rollforward||{};
+  return`<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${sc};border-radius:10px;padding:16px 18px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div><div style="font-weight:700;font-size:14px;margin-bottom:4px">${s.brandName} · ${s.period}</div>
+        <div style="font-size:12px;color:var(--text3)">${DEAL_TYPES[s.dealType]||s.dealType} · ${SETTLEMENT_BASIS[s.settlementBasis]||s.settlementBasis} <span style="margin-left:8px;font-family:var(--font-mono);background:var(--bg3);padding:1px 6px;border-radius:4px;color:${sc}">${s.status.toUpperCase()}</span></div></div>
+      <div style="text-align:right"><div style="font-family:var(--font-display);font-size:22px;color:var(--green)">${acctFmt(s.netDue)}</div><div style="font-size:11px;color:var(--text3)">net due</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;font-size:11px;margin-bottom:10px">
+      ${[['Opening',rf.opening||0,'var(--text3)'],['Produced',rf.produced||0,'var(--blue)'],['Shipped',rf.shipped||0,'var(--amber)'],['Sold-Thru',rf.soldThrough||0,'var(--green)'],['Samples',rf.samples||0,'var(--text3)'],['Write-Off',rf.writeOffs||0,'var(--red)'],['Ending',rf.ending||0,'var(--purple)']].map(([label,val,c])=>`<div style="background:var(--bg3);border-radius:6px;padding:5px 8px;text-align:center"><div style="color:var(--text3);font-size:9px">${label}</div><div style="color:${c};font-family:var(--font-mono);font-weight:700">${val}</div></div>`).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;margin-bottom:10px">
+      <div style="background:var(--bg3);border-radius:6px;padding:6px 8px"><span style="color:var(--text3)">Base: </span><span style="font-family:var(--font-mono)">${acctFmt(s.baseRecovery)}</span></div>
+      <div style="background:var(--bg3);border-radius:6px;padding:6px 8px"><span style="color:var(--text3)">Profit Share: </span><span style="font-family:var(--font-mono);color:var(--green)">${acctFmt(s.ourProfitShare)}</span></div>
+      <div style="background:var(--bg3);border-radius:6px;padding:6px 8px"><span style="color:var(--text3)">Storage: </span><span style="font-family:var(--font-mono)">${acctFmt(s.storageCharge)}</span></div>
+    </div>
+    ${s.exceptions?.length?`<div style="font-size:11px;color:var(--red);margin-bottom:8px">⚠ ${s.exceptions.join(' · ')}</div>`:''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${s.status==='draft'?`<button onclick="settlementFinalize('${s.id}');renderAcctSettlements()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Finalize</button>`:''}
+      ${s.status==='finalized'?`<button onclick="acctInvoiceFromSettlement('${s.id}')" style="background:rgba(176,108,255,0.1);border:1px solid rgba(176,108,255,0.3);color:var(--purple);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">📄 Create Invoice</button>`:''}
+    </div>
+  </div>`;
+}
+
+function renderAcctAR(){
+  const invs=invoicesLoad();const aging=arAgingReport();const el=document.getElementById('acct-ar-content');if(!el)return;
+  const totalOpen=invs.filter(i=>!['paid','void'].includes(i.status)).reduce((a,i)=>a+(i.openAmount||0),0);
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('ACCOUNTS RECEIVABLE',invs.length+' invoices · '+acctFmt(totalOpen)+' open',_acctBtnGreen('+ New Invoice','acctNewInvoiceModal()')+_acctBtn('Record Payment','acctRecordPaymentModal()'))}
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">
+      ${[['Current',aging.current,'var(--green)'],['1-30',aging['1-30'],'var(--text)'],['31-60',aging['31-60'],'var(--amber)'],['61-90',aging['61-90'],'var(--red)'],['90+',aging['90+'],'var(--red)']].map(([label,inv,c])=>{const amt=inv.reduce((a,i)=>a+(i.openAmount||0),0);return`<div style="background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);margin-bottom:4px">${label} DAYS</div><div style="font-family:var(--font-mono);font-size:16px;color:${c}">${acctFmt(amt)}</div><div style="font-size:10px;color:var(--text3)">${inv.length} inv</div></div>`;}).join('')}
+    </div>
+    ${invs.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No invoices yet. Generate from shipments or settlements.</div>':invs.slice().reverse().map(inv=>{const c={draft:'var(--text3)',sent:'var(--blue)',partial:'var(--amber)',paid:'var(--green)',overdue:'var(--red)',void:'var(--text3)'}[inv.status]||'var(--text3)';const isOverdue=!['paid','void'].includes(inv.status)&&inv.dueDate<acctToday();return`<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${c};border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-family:var(--font-mono);font-size:12px">${inv.invoiceNo}</span><span style="font-size:12px;color:var(--text3)">${inv.customerName}${inv.brandName?' · '+inv.brandName:''}</span><span style="font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:4px;background:var(--bg3);color:${c}">${inv.status.toUpperCase()}</span>${isOverdue?'<span style="font-size:10px;color:var(--red)">OVERDUE</span>':''}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${INVOICE_TYPES[inv.type]||inv.type} · Due ${inv.dueDate} · ${inv.terms}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-family:var(--font-mono);font-size:16px;color:${inv.openAmount>0?'var(--amber)':'var(--green)'}">${acctFmt(inv.openAmount)}</div><div style="font-size:10px;color:var(--text3)">of ${acctFmt(inv.totalAmount)}</div></div><div style="display:flex;gap:5px;flex-shrink:0">${!['paid','void'].includes(inv.status)?`<button onclick="acctRecordPaymentForInvoice('${inv.invoiceId}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Pay</button>`:''}</div></div>`;}).join('')}
+  </div>`;
+}
+
+function renderAcctAP(){
+  const pos=posLoad();const bills=acctLoad(ACCT_KEYS.VENDOR_BILLS);const el=document.getElementById('acct-ap-content');if(!el)return;
+  const totalAP=bills.filter(b=>!['paid','void'].includes(b.status)).reduce((a,b)=>a+(b.openAmount||0),0);
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('AP & PURCHASE ORDERS',pos.length+' POs · '+bills.length+' bills · '+acctFmt(totalAP)+' open AP',_acctBtnGreen('+ New PO','acctNewPOModal()')+_acctBtn('Enter Bill','acctNewBillFromPOModal()'))}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:20px">
+      ${['draft','approved','issued','partially_received','fully_received','billed'].map(status=>{const count=pos.filter(p=>p.status===status).length;const c={draft:'var(--text3)',approved:'var(--green)',issued:'var(--blue)',partially_received:'var(--amber)',fully_received:'var(--teal)',billed:'var(--purple)'}[status]||'var(--text3)';return count>0?`<div style="background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:16px;font-family:var(--font-mono);color:${c}">${count}</div><div style="font-size:9px;color:var(--text3);font-family:var(--font-mono)">${status.replace(/_/g,' ').toUpperCase()}</div></div>`:'';}).join('')}
+    </div>
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">PURCHASE ORDERS</div>
+    ${pos.length===0?'<div style="text-align:center;padding:24px;color:var(--text3);background:var(--card);border-radius:10px;margin-bottom:16px">No POs yet</div>':pos.slice().reverse().slice(0,20).map(po=>{const c={draft:'var(--text3)',submitted:'var(--text3)',pending_approval:'var(--amber)',approved:'var(--green)',issued:'var(--blue)',partially_received:'var(--amber)',fully_received:'var(--teal)',billed:'var(--purple)',closed:'var(--text3)'}[po.status]||'var(--text3)';return`<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${c};border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-family:var(--font-mono);font-size:12px">${po.poNo}</span><span style="color:var(--text3);font-size:12px">${po.vendorName}</span><span style="font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:4px;background:var(--bg3);color:${c}">${po.status.replace(/_/g,' ').toUpperCase()}</span>${po.isPassThrough?'<span style="font-size:10px;color:var(--blue)">PASS-THROUGH</span>':''}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${po.category} · ${po.createdAt.slice(0,10)}</div></div><div style="font-family:var(--font-mono);font-size:16px;color:var(--amber);flex-shrink:0">${acctFmt(po.totalEstimated)}</div><div style="display:flex;gap:5px;flex-shrink:0">${po.status==='draft'?`<button onclick="acctSubmitPO('${po.poId}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Submit</button>`:''} ${po.status==='pending_approval'?`<button onclick="acctApprovePO('${po.poId}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Approve</button>`:''} ${['approved','issued'].includes(po.status)?`<button onclick="acctReceivePO('${po.poId}')" style="background:rgba(52,152,219,0.1);border:1px solid rgba(52,152,219,0.3);color:var(--blue);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Receive</button>`:''} ${po.status==='fully_received'?`<button onclick="acctBillFromPO('${po.poId}')" style="background:rgba(176,108,255,0.1);border:1px solid rgba(176,108,255,0.3);color:var(--purple);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Enter Bill</button>`:''}</div></div>`;}).join('')}
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin:20px 0 10px">VENDOR BILLS</div>
+    ${bills.length===0?'<div style="text-align:center;padding:24px;color:var(--text3);background:var(--card);border-radius:10px">No bills yet</div>':bills.slice().reverse().slice(0,10).map(b=>{const mc={unmatched:'var(--text3)','2way_matched':'var(--green)','3way_matched':'var(--teal)',variance:'var(--red)'}[b.matchStatus]||'var(--text3)';return`<div style="background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;margin-bottom:5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:0;font-size:12px"><span style="font-family:var(--font-mono)">${b.billNo||b.billId.slice(0,10)}</span><span style="color:var(--text3);margin-left:8px">${b.vendorName}</span><span style="margin-left:8px;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg3);color:${mc}">${b.matchStatus.replace(/_/g,' ').toUpperCase()}</span></div><div style="font-family:var(--font-mono);font-size:14px">${acctFmt(b.totalAmount)}</div><div style="font-size:10px;color:var(--text3)">Due ${b.dueDate}</div></div>`;}).join('')}
+  </div>`;
+}
+
+function renderAcctVendors(){
+  const vendors=vendorsLoad();const el=document.getElementById('acct-vendors-content');if(!el)return;
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('VENDOR MANAGEMENT',vendors.length+' vendors',_acctBtnGreen('+ New Vendor','acctNewVendorModal()'))}
+    ${vendors.length===0?'<div style="text-align:center;padding:48px;color:var(--text3)">No vendors yet</div>':`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px">${vendors.map(v=>`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px 16px"><div style="font-weight:700;font-size:13px;margin-bottom:4px">${v.name}${v.preferred?' <span style="font-size:10px;color:var(--green)">★ Preferred</span>':''}</div><div style="font-size:11px;color:var(--text3);margin-bottom:8px">${(v.categories||[]).join(', ')||'No categories'} · ${v.paymentTerms} · Lead: ${v.leadTimeDays}d</div>${v.email?`<div style="font-size:11px;color:var(--blue)">${v.email}</div>`:''}<div style="display:flex;gap:6px;margin-top:10px"><button onclick="acctNewPOForVendor('${v.vendorId}')" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">+ PO</button></div></div>`).join('')}</div>`}
+  </div>`;
+}
+
+function renderAcctInventoryVal(){
+  const{lines,totalValue,totalCases,byBrand}=inventoryValuationSummary();const el=document.getElementById('acct-inventory-val-content');if(!el)return;
+  el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('INVENTORY VALUATION','On-hand valued at actual batch cost',_acctBtn('↻ Refresh','renderAcctInventoryVal()'))}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+      ${_acctCard('TOTAL VALUE',acctFmt(totalValue),totalCases+' cases on hand','var(--green)','📦')}
+      ${_acctCard('AVG $/CASE',acctFmt(totalCases>0?totalValue/totalCases:0),'weighted average','var(--amber)','🧮')}
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px;margin-bottom:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">BY BRAND</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr style="color:var(--text3);font-size:10px;font-family:var(--font-mono)"><th style="text-align:left;padding:4px">Brand</th><th style="text-align:right;padding:4px">Cases</th><th style="text-align:right;padding:4px">Value</th><th style="text-align:right;padding:4px">$/Case</th></tr>
+        ${Object.entries(byBrand).sort((a,b)=>b[1].value-a[1].value).map(([brand,d])=>`<tr style="border-top:1px solid var(--border2)"><td style="padding:6px 4px">${brand}</td><td style="text-align:right;font-family:var(--font-mono)">${d.cases}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--green)">${acctFmt(d.value)}</td><td style="text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt(d.cases>0?d.value/d.cases:0)}</td></tr>`).join('')}
+      </table>
+    </div>
+    ${lines.length===0?'<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No batches with cost snapshots. Create snapshots in Batch Costing.</div>':`<table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--card);border-radius:10px;overflow:hidden"><tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)"><th style="text-align:left;padding:8px 14px">Batch Code</th><th style="padding:8px">SKU</th><th style="padding:8px">MG</th><th style="text-align:right;padding:8px">Cases</th><th style="text-align:right;padding:8px">$/Case</th><th style="text-align:right;padding:8px">Value</th><th style="padding:8px">Snap</th></tr>${lines.map(l=>`<tr style="border-top:1px solid var(--border2)"><td style="padding:8px 14px;font-family:var(--font-mono);font-size:10px;color:var(--green)">${l.batchCode}</td><td style="padding:8px;font-size:11px">${l.sku}</td><td style="padding:8px;font-size:11px;color:var(--text3)">${l.mg}</td><td style="padding:8px;text-align:right;font-family:var(--font-mono)">${l.onHand}</td><td style="padding:8px;text-align:right;font-family:var(--font-mono);color:var(--amber)">${acctFmt(l.costPerCase)}</td><td style="padding:8px;text-align:right;font-family:var(--font-mono);color:var(--green)">${acctFmt(l.totalValue)}</td><td style="padding:8px;font-size:10px;color:${l.hasSnapshot?'var(--green)':'var(--red)'}">${l.hasSnapshot?'✅':'⚠ Missing'}</td></tr>`).join('')}</table>`}
+  </div>`;
+}
+
+function renderAcctClose(){
+  const periods=closePeriodsLoad();const curPer=acctPeriod(acctToday());const el=document.getElementById('acct-close-content');if(!el)return;
+  if(!periods.find(p=>p.period===curPer))closePeriodCreate(curPer);
+  const allPeriods=closePeriodsLoad();
+  el.innerHTML=`<div style="padding:24px;max-width:900px">
+    ${_acctSectionHeader('CLOSE & AUDIT CENTER','Month-end close checklist and period lock controls',_acctBtnGreen('+ Open Period','acctOpenPeriod()'))}
+    ${allPeriods.slice().reverse().map(cp=>{const sc={open:'var(--text3)',in_progress:'var(--amber)',ready_to_lock:'var(--green)',locked:'var(--blue)',unlocked_override:'var(--red)'}[cp.status]||'var(--text3)';return`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:18px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div><div style="font-family:var(--font-display);font-size:18px">${cp.period}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${cp.checklist.filter(c=>c.done).length}/${cp.checklist.length} complete</div></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;font-family:var(--font-mono);padding:3px 10px;border-radius:6px;background:var(--bg3);color:${sc}">${cp.status.replace(/_/g,' ').toUpperCase()}</span>
+          ${cp.status!=='locked'?`<button onclick="closePeriodLock('${cp.id}','Admin');renderAcctClose()" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);color:var(--red);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">🔒 Lock Period</button>`:`<button onclick="acctUnlockPeriodPrompt('${cp.id}')" style="background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.3);color:var(--amber);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">⚠ Override Unlock</button>`}
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${cp.checklist.map(item=>`<div onclick="closePeriodChecklistUpdate('${cp.id}','${item.id}',${!item.done});renderAcctClose()" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;background:${item.done?'rgba(57,232,122,0.06)':'var(--bg3)'};border:1px solid ${item.done?'rgba(57,232,122,0.2)':'var(--border2)'}"><span style="font-size:16px;flex-shrink:0">${item.done?'✅':'⬜'}</span><span style="font-size:11px;color:${item.done?'var(--green)':'var(--text2)'}">${item.task}</span></div>`).join('')}
+      </div>
+      ${cp.overrides?.length?`<div style="margin-top:10px;font-size:11px;color:var(--red)">⚠ ${cp.overrides.length} override(s): ${cp.overrides.map(o=>o.user+' — '+o.reason).join(' · ')}</div>`:''}
+    </div>`;}).join('')}
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">📋 AUDIT TRAIL</div>
+      ${acctLoad(ACCT_KEYS.ACCT_AUDIT).slice(-15).reverse().map(l=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2);font-size:11px"><span style="color:var(--text3);font-family:var(--font-mono);min-width:130px;flex-shrink:0">${l.ts.slice(0,16).replace('T',' ')}</span><span style="color:var(--text2);flex:1">${l.note||l.action+' '+l.entity}</span><span style="color:var(--text3);flex-shrink:0">${l.user}</span></div>`).join('')||'<div style="color:var(--text3);padding:8px">No audit entries yet</div>'}
+    </div>
+  </div>`;
+}
+
+function renderAcctExceptions(){
+  const exceptions=runExceptionEngine();const el=document.getElementById('acct-exceptions-content');if(!el)return;
+  const bySev={error:exceptions.filter(e=>e.sev==='error'),warning:exceptions.filter(e=>e.sev==='warning')};
+  el.innerHTML=`<div style="padding:24px;max-width:1000px">
+    ${_acctSectionHeader('EXCEPTION CENTER',exceptions.length+' exceptions · '+bySev.error.length+' errors · '+bySev.warning.length+' warnings',_acctBtn('↻ Refresh','renderAcctExceptions()'))}
+    ${exceptions.length===0?`<div style="text-align:center;padding:64px;background:rgba(57,232,122,0.06);border:1px solid rgba(57,232,122,0.2);border-radius:12px"><div style="font-size:48px;margin-bottom:12px">✅</div><div style="font-size:16px;font-weight:600;color:var(--green)">No Exceptions</div><div style="font-size:12px;color:var(--text3);margin-top:4px">All systems clean</div></div>`:['error','warning'].map(sev=>bySev[sev].length?`<div style="margin-bottom:20px"><div style="font-size:10px;font-family:var(--font-mono);color:${sev==='error'?'var(--red)':'var(--amber)'};letter-spacing:2px;margin-bottom:8px">${sev.toUpperCase()}S (${bySev[sev].length})</div>${bySev[sev].map(ex=>`<div style="background:var(--card);border:1px solid ${sev==='error'?'rgba(255,77,109,0.3)':'rgba(255,184,48,0.25)'};border-left:3px solid ${sev==='error'?'var(--red)':'var(--amber)'};border-radius:8px;padding:12px 14px;margin-bottom:6px"><div style="font-weight:600;font-size:12px;color:${sev==='error'?'var(--red)':'var(--amber)'};margin-bottom:2px">${ex.title}</div><div style="font-size:11px;color:var(--text3)">${ex.detail}</div><div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:4px">${ex.category.toUpperCase()} · ${ex.entityType} · ${ex.ts.slice(0,10)}</div></div>`).join('')}</div>`:'').join('')}
+  </div>`;
+}
+
+// ── MODALS ─────────────────────────────────────────────────────────────
+function acctModal(title,body,onConfirm,confirmLabel){
+  document.getElementById('acct-modal-overlay')?.remove();
+  const overlay=document.createElement('div');
+  overlay.id='acct-modal-overlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto;backdrop-filter:blur(6px)';
+  overlay.innerHTML=`<div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:640px;padding:28px" onclick="event.stopPropagation()"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-family:var(--font-display);font-size:16px;color:var(--amber)">${title}</div><button onclick="document.getElementById('acct-modal-overlay').remove()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button></div><div id="acct-modal-body">${body}</div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px"><button onclick="document.getElementById('acct-modal-overlay').remove()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer">Cancel</button><button id="acct-modal-confirm" style="background:rgba(255,184,48,0.15);border:1px solid rgba(255,184,48,0.4);color:var(--amber);border-radius:8px;padding:8px 20px;font-size:12px;cursor:pointer;font-weight:600">${confirmLabel||'Confirm'}</button></div></div>`;
+  overlay.onclick=e=>{if(e.target===overlay)overlay.remove();};
+  document.body.appendChild(overlay);
+  if(onConfirm)document.getElementById('acct-modal-confirm').onclick=()=>{onConfirm();overlay.remove();};
+}
+
+function acctNewDealModal(){
+  acctModal('NEW DEAL / CONTRACT',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group"><label class="form-label">Customer Name *</label><input class="form-input" id="nd-customer" placeholder="e.g. AppGirls"></div>
+    <div class="form-group"><label class="form-label">Brand Name</label><input class="form-input" id="nd-brand" placeholder="Same as customer if blank"></div>
+    <div class="form-group"><label class="form-label">Deal Type *</label><select class="form-input" id="nd-type" onchange="acctDealTypeToggle()">${Object.entries(DEAL_TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Channel</label><select class="form-input" id="nd-channel"><option value="wholesale">Wholesale</option><option value="distributor">Distributor</option><option value="private_label">Private Label</option><option value="dtc">DTC</option><option value="consignment">Consignment</option></select></div>
+    <div class="form-group"><label class="form-label">Effective Start *</label><input class="form-input" type="date" id="nd-start" value="${acctToday()}"></div>
+    <div class="form-group"><label class="form-label">Price Per Case ($)</label><input class="form-input" type="number" id="nd-price-case" step="0.01" placeholder="0.00"></div>
+    <div class="form-group"><label class="form-label">Payment Terms</label><select class="form-input" id="nd-terms"><option value="Net15">Net 15</option><option value="Net30" selected>Net 30</option><option value="Net45">Net 45</option><option value="COD">COD</option></select></div>
+    <div class="form-group"><label class="form-label">Settlement Basis</label><select class="form-input" id="nd-settlement">${Object.entries(SETTLEMENT_BASIS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div>
+    <div class="form-group" id="nd-share-row" style="display:none"><label class="form-label">Our Profit Share %</label><input class="form-input" type="number" id="nd-share" step="1" placeholder="50"></div>
+    <div class="form-group" id="nd-base-row" style="display:none"><label class="form-label">Base Recovery ($/unit)</label><input class="form-input" type="number" id="nd-base" step="0.01" placeholder="1.00"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><textarea class="form-input" id="nd-notes" style="height:50px" placeholder="Key deal terms..."></textarea></div>
+  </div>`,()=>{
+    const cust=document.getElementById('nd-customer').value.trim();
+    if(!cust){showToast('⚠ Customer name required');return;}
+    dealCreate({customerName:cust,brandName:document.getElementById('nd-brand').value.trim()||cust,dealType:document.getElementById('nd-type').value,channelType:document.getElementById('nd-channel').value,effectiveStart:document.getElementById('nd-start').value,pricePerCase:parseFloat(document.getElementById('nd-price-case').value)||0,paymentTerms:document.getElementById('nd-terms').value,ourSharePct:parseFloat(document.getElementById('nd-share')?.value)||0,baseRecovery:parseFloat(document.getElementById('nd-base')?.value)||0,settlementBasis:document.getElementById('nd-settlement').value,notes:document.getElementById('nd-notes').value});
+    showToast('✅ Deal created — approve to activate');renderAcctDeals();
+  },'Create Deal');
+  setTimeout(acctDealTypeToggle,50);
+}
+
+function acctDealTypeToggle(){const t=document.getElementById('nd-type')?.value;const show=['profit_share','hybrid'].includes(t);if(document.getElementById('nd-share-row'))document.getElementById('nd-share-row').style.display=show?'':'none';if(document.getElementById('nd-base-row'))document.getElementById('nd-base-row').style.display=show?'':'none';}
+
+function acctCalcSettlementModal(){
+  const deals=dealsLoad().filter(d=>d.status==='active');
+  acctModal('CALCULATE SETTLEMENT',`<div style="display:grid;gap:12px">
+    <div class="form-group"><label class="form-label">Customer / Deal *</label><select class="form-input" id="cs-deal"><option value="">— Select active deal —</option>${deals.map(d=>`<option value="${d.dealId}">${d.customerName} — ${d.brandName} (${DEAL_TYPES[d.dealType]||d.dealType})</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Settlement Period *</label><input class="form-input" type="month" id="cs-period" value="${_prevPeriod(acctPeriod(acctToday()))}"></div>
+  </div>`,()=>{
+    const dealId=document.getElementById('cs-deal').value;const period=document.getElementById('cs-period').value;
+    if(!dealId||!period){showToast('⚠ Select deal and period');return;}
+    const deal=dealsLoad().find(d=>d.dealId===dealId);if(!deal)return;
+    const result=settlementCreate(deal.customerId||deal.customerName,deal.brandName,period);
+    if(result.error){showToast('❌ '+result.error);return;}
+    showToast('✅ Settlement calculated — '+acctFmt(result.netDue)+' net due');renderAcctSettlements();
+  },'Calculate');
+}
+
+function acctEnterSellThroughModal(){
+  const deals=dealsLoad().filter(d=>d.status==='active'&&d.custReportsSellThrough);
+  if(!deals.length){showToast('No profit-share deals require sell-through');return;}
+  const period=_prevPeriod(acctPeriod(acctToday()));
+  acctModal('ENTER SELL-THROUGH',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Brand *</label><select class="form-input" id="st-deal"><option value="">— Select —</option>${deals.map(d=>`<option value="${d.customerId||d.customerName}|${d.brandName}">${d.brandName}</option>`).join('')}</select></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Period *</label><input class="form-input" type="month" id="st-period" value="${period}"></div>
+    <div class="form-group"><label class="form-label">Cases Sold</label><input class="form-input" type="number" id="st-cases" placeholder="0"></div>
+    <div class="form-group"><label class="form-label">Gross Revenue ($)</label><input class="form-input" type="number" id="st-gross" step="0.01" placeholder="0.00"></div>
+    <div class="form-group"><label class="form-label">Returns (cases)</label><input class="form-input" type="number" id="st-returns" placeholder="0"></div>
+    <div class="form-group"><label class="form-label">Allowances ($)</label><input class="form-input" type="number" id="st-allow" step="0.01" placeholder="0.00"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><input class="form-input" id="st-notes" placeholder="Source, exceptions..."></div>
+  </div>`,()=>{
+    const[custId,brandName]=(document.getElementById('st-deal').value||'|').split('|');
+    const per=document.getElementById('st-period').value;
+    if(!custId||!per){showToast('⚠ Select brand and period');return;}
+    const gross=parseFloat(document.getElementById('st-gross').value)||0,allow=parseFloat(document.getElementById('st-allow').value)||0;
+    sellThroughRecord(custId,brandName,per,{caseSold:parseInt(document.getElementById('st-cases').value)||0,grossRevenue:gross,returns:parseInt(document.getElementById('st-returns').value)||0,allowances:allow,netRevenue:gross-allow,notes:document.getElementById('st-notes').value});
+    showToast('✅ Sell-through recorded for '+brandName+' '+per);renderAcctSettlements();
+  },'Save');
+}
+
+function acctEnterSellThroughFor(custId,brandName,period){
+  acctModal('ENTER SELL-THROUGH — '+brandName+' '+period,`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group"><label class="form-label">Cases Sold</label><input class="form-input" type="number" id="stf-cases" placeholder="0"></div>
+    <div class="form-group"><label class="form-label">Gross Revenue ($)</label><input class="form-input" type="number" id="stf-gross" step="0.01" placeholder="0.00"></div>
+    <div class="form-group"><label class="form-label">Returns</label><input class="form-input" type="number" id="stf-returns" placeholder="0"></div>
+    <div class="form-group"><label class="form-label">Allowances ($)</label><input class="form-input" type="number" id="stf-allow" step="0.01" placeholder="0.00"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><input class="form-input" id="stf-notes"></div>
+  </div>`,()=>{
+    const gross=parseFloat(document.getElementById('stf-gross').value)||0,allow=parseFloat(document.getElementById('stf-allow').value)||0;
+    sellThroughRecord(custId,brandName,period,{caseSold:parseInt(document.getElementById('stf-cases').value)||0,grossRevenue:gross,returns:parseInt(document.getElementById('stf-returns').value)||0,allowances:allow,netRevenue:gross-allow,notes:document.getElementById('stf-notes').value});
+    showToast('✅ Sell-through saved');renderAcctSettlements();
+  },'Save');
+}
+
+function acctNewInvoiceModal(){
+  acctModal('NEW INVOICE',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group"><label class="form-label">Type</label><select class="form-input" id="ni-type">${Object.entries(INVOICE_TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Customer *</label><input class="form-input" id="ni-cust" placeholder="Customer name"></div>
+    <div class="form-group"><label class="form-label">Brand</label><input class="form-input" id="ni-brand" placeholder="Brand"></div>
+    <div class="form-group"><label class="form-label">Invoice Date</label><input class="form-input" type="date" id="ni-date" value="${acctToday()}"></div>
+    <div class="form-group"><label class="form-label">Terms</label><select class="form-input" id="ni-terms"><option value="Net15">Net 15</option><option value="Net30" selected>Net 30</option><option value="Net45">Net 45</option><option value="COD">COD</option></select></div>
+    <div class="form-group"><label class="form-label">Amount ($) *</label><input class="form-input" type="number" id="ni-amount" step="0.01" placeholder="0.00"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description</label><input class="form-input" id="ni-desc" placeholder="Invoice description"></div>
+  </div>`,()=>{
+    const cust=document.getElementById('ni-cust').value.trim();const amount=parseFloat(document.getElementById('ni-amount').value)||0;
+    if(!cust||!amount){showToast('⚠ Customer and amount required');return;}
+    const terms=document.getElementById('ni-terms').value;
+    invoiceCreate(document.getElementById('ni-type').value,{customerName:cust,brandName:document.getElementById('ni-brand').value.trim(),invoiceDate:document.getElementById('ni-date').value,terms,dueDate:_addDays(document.getElementById('ni-date').value,_termsDays(terms)),lines:[{lineId:acctId('IL'),description:document.getElementById('ni-desc').value,glCode:'4000',qty:1,unitPrice:amount,amount,type:'product_revenue'}]});
+    showToast('✅ Invoice created');renderAcctAR();
+  },'Create Invoice');
+}
+
+function acctRecordPaymentModal(){
+  const openInvs=invoicesLoad().filter(i=>!['paid','void'].includes(i.status));
+  if(!openInvs.length){showToast('No open invoices');return;}
+  acctModal('RECORD PAYMENT',`<div style="display:grid;gap:12px">
+    <div class="form-group"><label class="form-label">Invoice *</label><select class="form-input" id="rp-inv">${openInvs.map(i=>`<option value="${i.invoiceId}">${i.invoiceNo} — ${i.customerName} — ${acctFmt(i.openAmount)}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" type="number" id="rp-amt" step="0.01" placeholder="0.00"></div>
+    <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="rp-date" value="${acctToday()}"></div>
+    <div class="form-group"><label class="form-label">Method</label><select class="form-input" id="rp-method"><option value="check">Check</option><option value="ach">ACH</option><option value="wire">Wire</option><option value="card">Card</option></select></div>
+    <div class="form-group"><label class="form-label">Reference #</label><input class="form-input" id="rp-ref" placeholder="Check #, trace #..."></div>
+  </div>`,()=>{paymentRecord(document.getElementById('rp-inv').value,document.getElementById('rp-amt').value,document.getElementById('rp-date').value,document.getElementById('rp-method').value,document.getElementById('rp-ref').value);showToast('✅ Payment recorded');renderAcctAR();},'Record Payment');
+}
+
+function acctRecordPaymentForInvoice(invoiceId){
+  const inv=invoicesLoad().find(i=>i.invoiceId===invoiceId);if(!inv)return;
+  acctModal('PAY — '+inv.invoiceNo,`<div style="margin-bottom:12px;font-size:12px;color:var(--text3)">Balance: <strong style="color:var(--amber)">${acctFmt(inv.openAmount)}</strong></div><div style="display:grid;gap:12px">
+    <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" type="number" id="rp2-amt" step="0.01" value="${acctFmtN(inv.openAmount)}"></div>
+    <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="rp2-date" value="${acctToday()}"></div>
+    <div class="form-group"><label class="form-label">Method</label><select class="form-input" id="rp2-method"><option value="check">Check</option><option value="ach">ACH</option><option value="wire">Wire</option><option value="card">Card</option></select></div>
+    <div class="form-group"><label class="form-label">Ref #</label><input class="form-input" id="rp2-ref"></div>
+  </div>`,()=>{paymentRecord(invoiceId,document.getElementById('rp2-amt').value,document.getElementById('rp2-date').value,document.getElementById('rp2-method').value,document.getElementById('rp2-ref').value);showToast('✅ Payment applied');renderAcctAR();},'Apply Payment');
+}
+
+function acctNewPOModal(){
+  const vendors=vendorsLoad();
+  acctModal('NEW PURCHASE ORDER',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group"><label class="form-label">Vendor *</label><select class="form-input" id="po-v"><option value="">— Select —</option>${vendors.map(v=>`<option value="${v.vendorId}|${v.name}">${v.name}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Category *</label><select class="form-input" id="po-cat"><option value="cans">Cans / Ends</option><option value="labels">Labels</option><option value="ingredients">Ingredients</option><option value="packaging">Packaging</option><option value="pallets">Pallets</option><option value="shipping_materials">Shipping Materials</option><option value="testing">Lab / Testing</option><option value="freight">Freight</option><option value="overhead">Overhead</option></select></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description *</label><input class="form-input" id="po-desc" placeholder="e.g. 12oz Sleek Cans"></div>
+    <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" type="number" id="po-qty" placeholder="0"></div>
+    <div class="form-group"><label class="form-label">Unit Cost ($)</label><input class="form-input" type="number" id="po-cost" step="0.001" placeholder="0.000"></div>
+    <div class="form-group"><label class="form-label">Est. Freight ($)</label><input class="form-input" type="number" id="po-freight" step="0.01" placeholder="0.00"></div>
+    <div class="form-group"><label class="form-label">Expected Receive</label><input class="form-input" type="date" id="po-recv" value="${_addDays(acctToday(),7)}"></div>
+    <div class="form-group"><label class="form-label">Requester</label><input class="form-input" id="po-req" placeholder="Name"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><input class="form-input" id="po-notes" placeholder="Special instructions..."></div>
+  </div>`,()=>{
+    const[vendorId,vendorName]=(document.getElementById('po-v').value||'|').split('|');
+    const qty=parseFloat(document.getElementById('po-qty').value)||0,cost=parseFloat(document.getElementById('po-cost').value)||0;
+    poCreate({vendorId,vendorName,category:document.getElementById('po-cat').value,requester:document.getElementById('po-req').value,estFreight:parseFloat(document.getElementById('po-freight').value)||0,expectedReceiveDate:document.getElementById('po-recv').value,notes:document.getElementById('po-notes').value,lines:[{lineId:acctId('IL'),description:document.getElementById('po-desc').value,qty,unit:'units',unitCost:cost,extCost:qty*cost,category:document.getElementById('po-cat').value,glCode:'5010'}]});
+    showToast('✅ PO created');renderAcctAP();
+  },'Create PO');
+}
+
+function acctNewVendorModal(){
+  acctModal('NEW VENDOR',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Name *</label><input class="form-input" id="nv-name" placeholder="Company name"></div>
+    <div class="form-group"><label class="form-label">Contact</label><input class="form-input" id="nv-contact" placeholder="Sales rep"></div>
+    <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="nv-email" placeholder="orders@vendor.com"></div>
+    <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="nv-phone" placeholder="555-000-0000"></div>
+    <div class="form-group"><label class="form-label">Terms</label><select class="form-input" id="nv-terms"><option value="Net30">Net 30</option><option value="Net15">Net 15</option><option value="COD">COD</option><option value="Prepaid">Prepaid</option></select></div>
+    <div class="form-group"><label class="form-label">Lead Time (days)</label><input class="form-input" type="number" id="nv-lead" value="7"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Categories</label><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">${['cans','labels','ingredients','packaging','pallets','shipping_materials','testing','freight','overhead'].map(c=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" id="nv-c-${c}" value="${c}"> ${c.replace(/_/g,' ')}</label>`).join('')}</div></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><input class="form-input" id="nv-notes" placeholder="Account number, notes..."></div>
+  </div>`,()=>{
+    const name=document.getElementById('nv-name').value.trim();if(!name){showToast('⚠ Name required');return;}
+    const cats=['cans','labels','ingredients','packaging','pallets','shipping_materials','testing','freight','overhead'].filter(c=>document.getElementById('nv-c-'+c)?.checked);
+    vendorCreate({name,contact:document.getElementById('nv-contact').value,email:document.getElementById('nv-email').value,phone:document.getElementById('nv-phone').value,paymentTerms:document.getElementById('nv-terms').value,leadTimeDays:parseInt(document.getElementById('nv-lead').value)||7,categories:cats,notes:document.getElementById('nv-notes').value});
+    showToast('✅ Vendor added');renderAcctVendors();
+  },'Add Vendor');
+}
+
+function acctNewCostSnapshotModal(){
+  const bd=typeof batchData!=='undefined'?batchData:[];
+  const noSnap=bd.filter(b=>{const c=b.Batch||b.BatchCode||'';return c&&(parseInt(b.OnHand||b['On Hand'])||0)>0&&!acctLoad(ACCT_KEYS.COST_SNAPSHOTS).find(s=>s.batchCode===c);});
+  acctModal('NEW COST SNAPSHOT',`<div style="display:grid;gap:12px">
+    <div class="form-group"><label class="form-label">Batch *</label><select class="form-input" id="cs-bat" onchange="this.value==='__m'?document.getElementById('cs-mrow').style.display='':document.getElementById('cs-mrow').style.display='none'"><option value="">— Select batch —</option>${noSnap.map(b=>{const c=b.Batch||b.BatchCode||'';return`<option value="${c}">${c} (${b.SKU} · ${b.OnHand||0} on hand)</option>`;}).join('')}<option value="__m">Enter manually</option></select></div>
+    <div class="form-group" id="cs-mrow" style="display:none"><label class="form-label">Manual Batch Code</label><input class="form-input" id="cs-mcode" placeholder="BATCH-CODE"></div>
+    <div class="form-group"><label class="form-label">Total Cases</label><input class="form-input" type="number" id="cs-cases" placeholder="0"></div>
+    <div class="form-group"><label class="form-label">Material Cost ($)</label><input class="form-input" type="number" id="cs-mat" step="0.01" placeholder="Ingredients, cans, labels..."></div>
+    <div class="form-group"><label class="form-label">Labor Cost ($)</label><input class="form-input" type="number" id="cs-labor" step="0.01" placeholder="Crew labor total"></div>
+    <div class="form-group"><label class="form-label">Testing / Other ($)</label><input class="form-input" type="number" id="cs-other" step="0.01" placeholder="QA, overhead..."></div>
+  </div>`,()=>{
+    const sel=document.getElementById('cs-bat').value;const code=sel==='__m'?document.getElementById('cs-mcode').value.trim():sel;
+    if(!code){showToast('⚠ Batch code required');return;}
+    const cases=parseInt(document.getElementById('cs-cases').value)||1;
+    const mat=parseFloat(document.getElementById('cs-mat').value)||0;
+    const labor=parseFloat(document.getElementById('cs-labor').value)||0;
+    const other=parseFloat(document.getElementById('cs-other').value)||0;
+    const lines=[];
+    if(mat>0)lines.push({componentName:'Materials',category:'ingredients',qtyUsed:cases,unit:'cases',unitCost:mat/cases,extendedCost:mat,paidBy:'us',reimbursable:true,includedInGross:true,includedInNet:true});
+    if(labor>0)lines.push({componentName:'Direct Labor',category:'direct_labor',qtyUsed:cases,unit:'cases',unitCost:labor/cases,extendedCost:labor,paidBy:'us',reimbursable:true,includedInGross:true,includedInNet:true});
+    if(other>0)lines.push({componentName:'Testing & Other',category:'testing',qtyUsed:1,unit:'batch',unitCost:other,extendedCost:other,paidBy:'us',reimbursable:true,includedInGross:true,includedInNet:true});
+    costSnapshotCreate(code,{totalCases:cases},lines);
+    showToast('✅ Cost snapshot created for '+code);renderAcctCosting();
+  },'Create Snapshot');
+}
+
+function acctViewCostSnapshot(snapshotId){
+  const snap=acctLoad(ACCT_KEYS.COST_SNAPSHOTS).find(s=>s.snapshotId===snapshotId);if(!snap)return;
+  acctModal('COST LINES — '+snap.batchCode,`<table style="width:100%;border-collapse:collapse;font-size:11px"><tr style="color:var(--text3);font-size:10px"><th style="text-align:left;padding:4px">Component</th><th style="text-align:left;padding:4px">Category</th><th style="text-align:right;padding:4px">Cost</th><th style="text-align:center;padding:4px">In Net</th></tr>${(snap.lines||[]).map(l=>`<tr style="border-top:1px solid var(--border2)"><td style="padding:6px 4px">${l.componentName}</td><td style="padding:6px 4px;color:var(--text3)">${l.category}</td><td style="padding:6px 4px;text-align:right;font-family:var(--font-mono)">${acctFmt(l.extendedCost)}</td><td style="padding:6px 4px;text-align:center">${l.includedInNet?'✅':'❌'}</td></tr>`).join('')}<tr style="border-top:1px solid var(--border2);font-weight:700"><td style="padding:6px 4px">TOTAL</td><td></td><td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);color:var(--amber)">${acctFmt(snap.totalCost)}</td><td></td></tr></table>`,null,'Close');
+}
+
+function acctInvoiceFromSettlement(settId){const inv=invoiceFromSettlement(settId);if(!inv){showToast('❌ Could not create invoice');return;}showToast('✅ Invoice '+inv.invoiceNo+' created: '+acctFmt(inv.totalAmount));showPage('acct-ar',document.querySelector('[onclick*=acct-ar]'));}
+function acctSettleNow(dealId){const deal=dealsLoad().find(d=>d.dealId===dealId);if(!deal)return;const period=_prevPeriod(acctPeriod(acctToday()));const result=settlementCreate(deal.customerId||deal.customerName,deal.brandName,period);if(result.error){showToast('❌ '+result.error);return;}showToast('✅ Settlement: '+acctFmt(result.netDue));showPage('acct-settlements',document.querySelector('[onclick*=acct-settlements]'));}
+function acctSubmitPO(poId){const pos=posLoad();const po=pos.find(p=>p.poId===poId);if(po){po.status='pending_approval';po.updatedAt=acctNow();acctSave(ACCT_KEYS.PURCHASE_ORDERS,pos);acctAudit('update','po',poId,{},'PO submitted');}showToast('✅ PO submitted');renderAcctAP();}
+function acctApprovePO(poId){const r=poApprove(poId,'Admin','Approved');if(r?.error){showToast('❌ '+r.error);return;}showToast('✅ PO approved');renderAcctAP();}
+function acctReceivePO(poId){const pos=posLoad();const po=pos.find(p=>p.poId===poId);if(!po)return;poReceive(poId,po.lines.map(l=>({lineId:l.lineId,qtyReceived:l.qty,actualUnitCost:l.unitCost})));showToast('✅ PO received');renderAcctAP();}
+function acctBillFromPO(poId){billCreate(poId,{billNo:'BILL-'+Date.now(),billDate:acctToday(),dueDate:_addDays(acctToday(),30)});showToast('✅ Bill created');renderAcctAP();}
+function acctNewBillFromPOModal(){showToast('Manual bill entry — select a fully received PO and click Enter Bill');}
+function acctNewPOForVendor(vid){acctNewPOModal();}
+function acctOpenPeriod(){const m=prompt('Enter period (YYYY-MM):');if(!m||!/^\d{4}-\d{2}$/.test(m)){showToast('⚠ Invalid format');return;}const r=closePeriodCreate(m);if(r.error){showToast('ℹ '+r.error);return;}showToast('✅ Period '+m+' opened');renderAcctClose();}
+function acctUnlockPeriodPrompt(periodId){const reason=prompt('Reason for override unlock:');if(!reason)return;closePeriodUnlock(periodId,'Admin',reason);showToast('⚠ Period unlocked — audit logged');renderAcctClose();}
+function acctOnProdRunComplete(run){if(!run||!run.batchCode)return;if(costSnapshotGetForBatch(run.batchCode).length)return;costSnapshotCreate(run.batchCode,run,[]);showToast('📸 Cost snapshot auto-created for '+run.batchCode);}
+
+// Auto-init on load
+setTimeout(()=>{try{acctSeedIfEmpty();runExceptionEngine();}catch(e){console.warn('Acct init:',e);}},2000);
 
 </script>
 </body>
