@@ -4102,17 +4102,13 @@ window.addEventListener('load', function() {
 // Set your Apps Script Web App URL here after deploying
 if (!localStorage.getItem('420craft_shipstation_key')) localStorage.setItem('420craft_shipstation_key', '');
 // Auto-clear known broken Apps Script URL
-const _BROKEN_URL = 'https://script.google.com/macros/s/AKfycbw0IkQLmpyutcUt65ch6Fp3e_2FFlupfraS2GxgA3T2g3-qOMwJTzVxEnXUgSghai9R/exec';
-const _WORKING_URL = 'https://script.google.com/macros/s/AKfycbzerlZt3zQbeKWf0Q2SD9C4ppMr9wTE1UTlwADbqyj184pmGYPHmZp7QMzSYUuQZx-z/exec';
-if (localStorage.getItem('420craft_sheets_url') === _BROKEN_URL) {
+const _WORKING_URL = 'https://script.google.com/macros/s/AKfycbzpcVVcqvIIsc7s44irnf3I0D6gg9eyJKx1mLOoqJnlWpGvcyu3pw0SR2KbXuL9-awI/exec';
+// Auto-migrate any old script URL to the current version
+const _storedUrl = localStorage.getItem('420craft_sheets_url');
+if (!_storedUrl || !_storedUrl.includes('AKfycbzpcVV')) {
   localStorage.setItem('420craft_sheets_url', _WORKING_URL);
 }
 let SHEETS_URL = localStorage.getItem('420craft_sheets_url') || _WORKING_URL;
-// Migrate old URLs to v5.1 automatically
-if (SHEETS_URL.includes('AKfycbyPAa8dmu') || SHEETS_URL.includes('AKfycbza-r2ogp')) {
-  SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzerlZt3zQbeKWf0Q2SD9C4ppMr9wTE1UTlwADbqyj184pmGYPHmZp7QMzSYUuQZx-z/exec';
-  localStorage.setItem('420craft_sheets_url', SHEETS_URL);
-}
 let _syncQueue = [];
 let _syncTimer = null;
 let _syncStatus = 'idle'; // idle | syncing | error | ok
@@ -4216,15 +4212,30 @@ function sheetsSyncAll() {
     skuData,
     batchData,
     movements,
-    operators:       operatorLoad(),
-    consumables:     consumableLoad(),
-    prodRuns:        prodRunLoad(),
-    schedule:        scheduleLoad(),
-    postponeLog:     JSON.parse(localStorage.getItem('420craft_postpone_log') || '[]'),
-    custRequests:    JSON.parse(localStorage.getItem('420craft_production_requests') || '[]'),
-    settings:        mergedSettings,
-    runIntelligence: schedIntelligenceLoad(),
-    barcodeMap:      barcodeMapLoad(),
+    operators:          operatorLoad(),
+    consumables:        consumableLoad(),
+    prodRuns:           prodRunLoad(),
+    schedule:           scheduleLoad(),
+    postponeLog:        JSON.parse(localStorage.getItem('420craft_postpone_log') || '[]'),
+    custRequests:       JSON.parse(localStorage.getItem('420craft_production_requests') || '[]'),
+    settings:           mergedSettings,
+    runIntelligence:    schedIntelligenceLoad(),
+    barcodeMap:         barcodeMapLoad(),
+    shipments:          JSON.parse(localStorage.getItem('420craft_shipments') || '[]'),
+    addressBook:        JSON.parse(localStorage.getItem('420craft_address_book') || '[]'),
+    shippingMaterials:  JSON.parse(localStorage.getItem('420craft_shipping_materials') || '[]'),
+    brands:             JSON.parse(localStorage.getItem('420craft_brands') || '[]'),
+    flavorCatalog:      JSON.parse(localStorage.getItem('420craft_flavor_catalog') || '[]'),
+    flavorConfig:       JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}'),
+    yieldConfig:        JSON.parse(localStorage.getItem('420craft_yield_config') || '{}'),
+    shiftConfig:        JSON.parse(localStorage.getItem('420craft_shift_config') || 'null'),
+    auditLog:           JSON.parse(localStorage.getItem('420craft_audit_log') || '[]'),
+    batchLog:           JSON.parse(localStorage.getItem('420craft_batch_log') || '[]'),
+    customerOrders:     JSON.parse(localStorage.getItem('420craft_customer_orders') || '[]'),
+    destProfiles:       JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]'),
+    ntContacts:         JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]'),
+    ntHistory:          JSON.parse(localStorage.getItem('420craft_nt_history') || '[]'),
+    orderingManager:    JSON.parse(localStorage.getItem('420craft_ordering_manager') || 'null'),
   });
 }
 
@@ -4362,14 +4373,29 @@ function saveData() {
   // Auto-sync to Google Sheets
   sheetsQueue('sync_all', {
     skuData, batchData, movements,
-    operators:       operatorLoad(),
-    consumables:     consumableLoad(),
-    prodRuns:        prodRunLoad(),
-    schedule:        scheduleLoad(),
-    postponeLog:     JSON.parse(localStorage.getItem('420craft_postpone_log') || '[]'),
-    custRequests:    JSON.parse(localStorage.getItem('420craft_production_requests') || '[]'),
-    settings:        settingsLoad(),
-    runIntelligence: schedIntelligenceLoad(),
+    operators:         operatorLoad(),
+    consumables:       consumableLoad(),
+    prodRuns:          prodRunLoad(),
+    schedule:          scheduleLoad(),
+    postponeLog:       JSON.parse(localStorage.getItem('420craft_postpone_log') || '[]'),
+    custRequests:      JSON.parse(localStorage.getItem('420craft_production_requests') || '[]'),
+    settings:          settingsLoad(),
+    runIntelligence:   schedIntelligenceLoad(),
+    shipments:         JSON.parse(localStorage.getItem('420craft_shipments') || '[]'),
+    addressBook:       JSON.parse(localStorage.getItem('420craft_address_book') || '[]'),
+    shippingMaterials: JSON.parse(localStorage.getItem('420craft_shipping_materials') || '[]'),
+    brands:            JSON.parse(localStorage.getItem('420craft_brands') || '[]'),
+    flavorCatalog:     JSON.parse(localStorage.getItem('420craft_flavor_catalog') || '[]'),
+    flavorConfig:      JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}'),
+    yieldConfig:       JSON.parse(localStorage.getItem('420craft_yield_config') || '{}'),
+    shiftConfig:       JSON.parse(localStorage.getItem('420craft_shift_config') || 'null'),
+    auditLog:          JSON.parse(localStorage.getItem('420craft_audit_log') || '[]'),
+    batchLog:          JSON.parse(localStorage.getItem('420craft_batch_log') || '[]'),
+    customerOrders:    JSON.parse(localStorage.getItem('420craft_customer_orders') || '[]'),
+    destProfiles:      JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]'),
+    ntContacts:        JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]'),
+    ntHistory:         JSON.parse(localStorage.getItem('420craft_nt_history') || '[]'),
+    orderingManager:   JSON.parse(localStorage.getItem('420craft_ordering_manager') || 'null'),
   });
 }
 
@@ -5679,7 +5705,7 @@ function loadBrandCatalog() {
 
 function saveBrandCatalog() {
   localStorage.setItem('420craft_brands', JSON.stringify(brandCatalog));
-  if (sheetsEnabled()) sheetsQueue('sync_all', { brands: brandCatalog });
+  if (sheetsEnabled()) sheetsQueue('save_brands', { brands: brandCatalog });
 }
 
 function bpGetBrand() {
@@ -7772,6 +7798,7 @@ function abLoad() {
 }
 function abSave() {
   localStorage.setItem('420craft_address_book', JSON.stringify(addressBook));
+  if (sheetsEnabled()) sheetsQueue('save_address_book', { addressBook });
 }
 
 // Auto-save address to book when shipment submitted
@@ -8486,6 +8513,7 @@ function smLoad() {
 
 function smSave() {
   localStorage.setItem('420craft_shipping_materials', JSON.stringify(shippingMaterials));
+  if (sheetsEnabled()) sheetsQueue('save_shipping_materials', { shippingMaterials });
 }
 
 function _smSeed() {
@@ -8817,7 +8845,69 @@ function backupExport() {
     _backupStyleSheet(wsCons, conRows.length);
     XLSX.utils.book_append_sheet(wb, wsCons, 'Consumables');
 
-    // ── Sheet 7: Summary ──────────────────────────────
+    // ── Sheet 7: Shipments ───────────────────────────
+    const shipmentsData = JSON.parse(localStorage.getItem('420craft_shipments') || '[]');
+    if (shipmentsData.length) {
+      const shipRows = shipmentsData.map(s => ({
+        'ID': s.id||'',
+        'Status': s.status||'',
+        'Type': s.type||'',
+        'Recipient': s.recipientName||s.brandName||'',
+        'Company': s.company||'',
+        'Address': [s.recipientAddr1,s.recipientCity,s.recipientState,s.recipientZip].filter(Boolean).join(', '),
+        'Items': (s.items||[]).map(i=>`${i.qty}x ${i.sku} ${i.mg}`).join('; '),
+        'Tracking': s.trackingNumber||s.proNumber||'',
+        'Carrier': s.carrier||'',
+        'Shipped Date': s.shippedDate||'',
+        'Created': s.createdAt||'',
+        'Total COGS': s.cogs?.totalCogs||0,
+        'Workers': (s.cogs?.labor||[]).map(l=>l.worker).join(', ')||s.lastWorker||'',
+        'Notes': s.notes||'',
+      }));
+      const wsShip = XLSX.utils.json_to_sheet(shipRows);
+      _backupStyleSheet(wsShip, shipRows.length);
+      XLSX.utils.book_append_sheet(wb, wsShip, 'Shipments');
+    }
+
+    // ── Sheet 8: Address Book ─────────────────────────
+    abLoad();
+    if (addressBook.length) {
+      const abRows = addressBook.map(a => ({
+        'ID': a.id||'',
+        'Name': a.name||'',
+        'Company': a.company||'',
+        'Address 1': a.addr1||'',
+        'Address 2': a.addr2||'',
+        'City': a.city||'',
+        'State': a.state||'',
+        'ZIP': a.zip||'',
+        'Phone': a.phone||'',
+        'Email': a.email||'',
+        'Created': a.createdAt||'',
+      }));
+      const wsAB = XLSX.utils.json_to_sheet(abRows);
+      _backupStyleSheet(wsAB, abRows.length);
+      XLSX.utils.book_append_sheet(wb, wsAB, 'Address Book');
+    }
+
+    // ── Sheet 9: Shipping Materials ───────────────────
+    smLoad();
+    if (shippingMaterials.length) {
+      const smRows = shippingMaterials.map(m => ({
+        'ID': m.id||'',
+        'Name': m.name||'',
+        'Category': m.category||'',
+        'Unit': m.unit||'',
+        'Unit Cost': m.unitCost||0,
+        'Stock On Hand': m.stockOnHand||0,
+        'Reorder Point': m.reorderPoint||0,
+      }));
+      const wsSM = XLSX.utils.json_to_sheet(smRows);
+      _backupStyleSheet(wsSM, smRows.length);
+      XLSX.utils.book_append_sheet(wb, wsSM, 'Shipping Materials');
+    }
+
+    // ── Sheet 10: Summary ─────────────────────────────
     const totalOnHand = skuData.reduce((a,s)=>a+(s.OnHand||0),0);
     const totalBatches = batchData.length;
     const activeBatches = batchData.filter(b=>(b.OnHand||0)>0).length;
@@ -8848,6 +8938,112 @@ function backupExport() {
     wsSummary['A1'].s = { font: { bold: true, sz: 14 } };
     wsSummary['!cols'] = [{wch:30},{wch:40}];
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+    // ── Sheet: Brands ────────────────────────────────
+    const brandsData = JSON.parse(localStorage.getItem('420craft_brands') || '[]');
+    if (brandsData.length) {
+      const brandRows = brandsData.map(b => ({
+        'ID': b.id||'', 'Brand Name': b.name||'', 'Contact': b.contact||'',
+        'Email': b.email||'', 'Phone': b.phone||'', 'Active': b.active!==false,
+      }));
+      const wsBrands = XLSX.utils.json_to_sheet(brandRows);
+      _backupStyleSheet(wsBrands, brandRows.length);
+      XLSX.utils.book_append_sheet(wb, wsBrands, 'Brands');
+    }
+
+    // ── Sheet: Flavor Catalog ─────────────────────────
+    const flavorCat = JSON.parse(localStorage.getItem('420craft_flavor_catalog') || '[]');
+    if (flavorCat.length) {
+      const flRows = flavorCat.map(f => ({
+        'ID': f.id||'', 'Flavor Name': f.name||'', 'Base': f.base||'',
+        'Category': f.category||'', 'Notes': f.notes||'',
+      }));
+      const wsFl = XLSX.utils.json_to_sheet(flRows);
+      _backupStyleSheet(wsFl, flRows.length);
+      XLSX.utils.book_append_sheet(wb, wsFl, 'Flavor Catalog');
+    }
+
+    // ── Sheet: Flavor Config (JSON) ───────────────────
+    const flavorCfg = JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}');
+    const yieldCfg  = JSON.parse(localStorage.getItem('420craft_yield_config') || '{}');
+    const shiftCfg  = JSON.parse(localStorage.getItem('420craft_shift_config') || 'null');
+    const cfgRows = [
+      ['Key', 'Type', 'Value'],
+      ['flavor_config', 'json', JSON.stringify(flavorCfg)],
+      ['yield_config',  'json', JSON.stringify(yieldCfg)],
+      ['shift_config',  'json', JSON.stringify(shiftCfg)],
+      ['ordering_manager', 'json', localStorage.getItem('420craft_ordering_manager')||''],
+    ];
+    const wsCfg = XLSX.utils.aoa_to_sheet(cfgRows);
+    wsCfg['!cols'] = [{wch:25},{wch:10},{wch:80}];
+    XLSX.utils.book_append_sheet(wb, wsCfg, 'Config');
+
+    // ── Sheet: Audit Log ──────────────────────────────
+    const auditLog = JSON.parse(localStorage.getItem('420craft_audit_log') || '[]');
+    if (auditLog.length) {
+      const auditRows = auditLog.map(a => ({
+        'Timestamp': a.ts||a.timestamp||'', 'Type': a.type||'',
+        'SKU': a.sku||'', 'Batch Code': a.batchCode||'',
+        'Physical Count': a.physicalCount||'', 'Book Count': a.bookCount||'',
+        'Variance': a.variance||'', 'Qty': a.qty||'',
+        'Operator': a.operator||'', 'Notes': a.notes||'',
+      }));
+      const wsAudit = XLSX.utils.json_to_sheet(auditRows);
+      _backupStyleSheet(wsAudit, auditRows.length);
+      XLSX.utils.book_append_sheet(wb, wsAudit, 'Audit Log');
+    }
+
+    // ── Sheet: Customer Orders ────────────────────────
+    const custOrders = JSON.parse(localStorage.getItem('420craft_customer_orders') || '[]');
+    if (custOrders.length) {
+      const coRows = custOrders.map(o => ({
+        'ID': o.id||'', 'Brand': o.brand||'', 'Status': o.status||'',
+        'Items': JSON.stringify(o.items||[]), 'Created': o.createdAt||'',
+        'Notes': o.notes||'',
+      }));
+      const wsCO = XLSX.utils.json_to_sheet(coRows);
+      _backupStyleSheet(wsCO, coRows.length);
+      XLSX.utils.book_append_sheet(wb, wsCO, 'Customer Orders');
+    }
+
+    // ── Sheet: Destination Profiles ───────────────────
+    const destProfs = JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]');
+    if (destProfs.length) {
+      const dpRows = destProfs.map(p => ({
+        'ID': p.id||'', 'Name': p.name||'', 'Company': p.company||'',
+        'Addr1': p.addr1||'', 'City': p.city||'', 'State': p.state||'',
+        'ZIP': p.zip||'', 'Phone': p.phone||'', 'Email': p.email||'',
+        'Freight Account': p.freightAcct||'', 'Notes': p.notes||'',
+      }));
+      const wsDP = XLSX.utils.json_to_sheet(dpRows);
+      _backupStyleSheet(wsDP, dpRows.length);
+      XLSX.utils.book_append_sheet(wb, wsDP, 'Dest Profiles');
+    }
+
+    // ── Sheet: Batch Scan Log ─────────────────────────
+    const batchLog = JSON.parse(localStorage.getItem('420craft_batch_log') || '[]');
+    if (batchLog.length) {
+      const blRows = batchLog.map(b => ({
+        'Timestamp': b.ts||'', 'Batch Code': b.code||b.batchCode||'',
+        'SKU': b.sku||'', 'Action': b.action||'', 'Operator': b.operator||'',
+      }));
+      const wsBL = XLSX.utils.json_to_sheet(blRows);
+      _backupStyleSheet(wsBL, blRows.length);
+      XLSX.utils.book_append_sheet(wb, wsBL, 'Batch Scan Log');
+    }
+
+    // ── Sheet: Network Contacts (NT) ──────────────────
+    const ntContacts = JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]');
+    if (ntContacts.length) {
+      const ntRows = ntContacts.map(c => ({
+        'ID': c.id||'', 'Name': c.name||'', 'Company': c.company||'',
+        'Role': c.role||'', 'Email': c.email||'', 'Phone': c.phone||'',
+        'Notes': c.notes||'', 'Created': c.createdAt||'',
+      }));
+      const wsNT = XLSX.utils.json_to_sheet(ntRows);
+      _backupStyleSheet(wsNT, ntRows.length);
+      XLSX.utils.book_append_sheet(wb, wsNT, 'Network Contacts');
+    }
 
     // ── Download ──────────────────────────────────────
     XLSX.writeFile(wb, '420craft-backup-' + date + '.xlsx');
@@ -9015,6 +9211,53 @@ function backupImport() {
         lastShipping: r['Last Shipping']||0, lastOrderQty: r['Last Order Qty']||0,
       }));
       localStorage.setItem('420craft_consumables', JSON.stringify(cons));
+    }
+
+    // Restore shipments
+    if (wb.SheetNames.includes('Shipments')) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Shipments']);
+      // Keep as-is since shipments have complex nested structure — just save raw
+      if (rows.length) {
+        // We can't fully reconstruct nested objects from flat sheet, so keep existing
+        // unless localStorage is empty
+        const existing = localStorage.getItem('420craft_shipments');
+        if (!existing || JSON.parse(existing).length === 0) {
+          // Minimal restore from flat data
+          const restored = rows.map(r => ({
+            id: r['ID']||'', status: r['Status']||'pending',
+            type: r['Type']||'wholesale', recipientName: r['Recipient']||'',
+            trackingNumber: r['Tracking']||'', carrier: r['Carrier']||'',
+            shippedDate: r['Shipped Date']||'', createdAt: r['Created']||'',
+          }));
+          localStorage.setItem('420craft_shipments', JSON.stringify(restored));
+        }
+      }
+    }
+
+    // Restore address book
+    if (wb.SheetNames.includes('Address Book')) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Address Book']);
+      const ab = rows.map(r => ({
+        id: r['ID']||('AB-'+Date.now()+Math.random()),
+        name: r['Name']||'', company: r['Company']||'',
+        addr1: r['Address 1']||'', addr2: r['Address 2']||'',
+        city: r['City']||'', state: r['State']||'',
+        zip: String(r['ZIP']||''), phone: r['Phone']||'',
+        email: r['Email']||'', createdAt: r['Created']||'',
+      }));
+      localStorage.setItem('420craft_address_book', JSON.stringify(ab));
+    }
+
+    // Restore shipping materials
+    if (wb.SheetNames.includes('Shipping Materials')) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Shipping Materials']);
+      const sm = rows.map(r => ({
+        id: r['ID']||('sm-'+Date.now()+Math.random()),
+        name: r['Name']||'', category: r['Category']||'',
+        unit: r['Unit']||'', unitCost: r['Unit Cost']||0,
+        stockOnHand: r['Stock On Hand']||0, reorderPoint: r['Reorder Point']||0,
+      }));
+      localStorage.setItem('420craft_shipping_materials', JSON.stringify(sm));
     }
 
     saveData();
@@ -13768,6 +14011,7 @@ function auditLoadLog() {
 }
 function auditSaveLog(log) {
   localStorage.setItem('420craft_audit_log', JSON.stringify(log));
+  if (sheetsEnabled()) sheetsQueue('save_audit_log', { auditLog: log });
 }
 
 function renderAudit() {
@@ -15100,6 +15344,7 @@ function logSaveDestProfile() {
   if (exists >= 0) profiles[exists] = profile;
   else profiles.unshift(profile);
   localStorage.setItem('420craft_dest_profiles', JSON.stringify(profiles));
+  if (sheetsEnabled()) sheetsQueue('save_dest_profiles', { destProfiles: profiles });
 
   // Refresh dropdown
   _logPopulateDestProfiles();
