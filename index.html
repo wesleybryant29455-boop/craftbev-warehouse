@@ -6806,6 +6806,8 @@ function shOpenWorkStage(id) {
   // Start clock ticking
   if (shWorkTimer) clearInterval(shWorkTimer);
   shWorkTimer = setInterval(shWorkTick, 1000);
+  // Auto-start PICK phase so clock begins immediately
+  if (!shWorkPhase) shStartPhase('pick');
 }
 
 function shUpdateWorkerRate() {
@@ -8164,13 +8166,17 @@ function shAcceptCorrection(prefix) {
 
 // ── FIFO Batch Allocation ─────────────────
 function shFifoBatches(sku, mg, qtyNeeded) {
-  const allBatches = JSON.parse(localStorage.getItem('420craft_batches') || '[]');
+  // Use in-memory batchData first, fall back to localStorage
+  let allBatches = (typeof batchData !== 'undefined' && batchData.length)
+    ? batchData
+    : JSON.parse(localStorage.getItem('420craft_batches') || '[]');
   const matching = allBatches
     .filter(b => {
       const bSku = b.SKU || '';
-      const bMg  = b.MG || b['MG Strength'] || b.MG_Strength || '';
+      const bMg  = b.MG || b['MG Strength'] || b.MG_Strength || b['MG Strength'] || '';
       const oh   = parseInt(b['On Hand'] || b.OnHand || 0);
-      return bSku === sku && bMg === mg && oh > 0;
+      // Normalize comparison - trim and case-insensitive
+      return bSku.trim() === sku.trim() && bMg.trim() === mg.trim() && oh > 0;
     })
     .sort((a, b) => {
       const da = new Date(a['Production Date'] || a.ProductionDate || '2099-01-01');
