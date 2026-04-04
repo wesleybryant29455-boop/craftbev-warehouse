@@ -6563,11 +6563,17 @@ function shRenderList() {
             </div>
           </div>
         </div>
-        <div style="text-align:right;flex-shrink:0">
+        <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
           <div style="font-size:12px;font-weight:700;color:${sc.col};margin-bottom:2px">${sc.label}</div>
           <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${s.createdAt?new Date(s.createdAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''}</div>
           ${perCan ? `<div style="font-size:10px;color:var(--amber);font-family:var(--font-mono)">$${perCan}/can</div>` : ''}
           ${cogs>0 ? `<div style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">COGS $${parseFloat(cogs).toFixed(2)}</div>` : ''}
+          ${(() => {
+            const deletable = ['pending','working','ready_ship'].includes(s.status) && !s.trackingNumber && !s.ssOrderId && !s.proNumber;
+            return deletable
+              ? `<button onclick="event.stopPropagation();shDeleteShipment('${s.id}')" style="background:rgba(231,76,60,0.12);border:1px solid rgba(231,76,60,0.35);color:var(--red);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;margin-top:2px">🗑 Delete</button>`
+              : '';
+          })()}
         </div>
       </div>
     </div>`;
