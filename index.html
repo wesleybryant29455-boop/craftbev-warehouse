@@ -1779,11 +1779,18 @@ window.addEventListener('load', function() {
             <label class="form-label">Name *</label>
             <input class="form-input" id="sh-c1-name" placeholder="Contact name" autocomplete="off"
               oninput="shAddressAutocomplete(this.value)"
-              onfocus="shAddressAutocomplete(this.value)">
-            <div id="sh-addr-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--green);border-radius:0 0 8px 8px;z-index:999;max-height:200px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5)"></div>
+              onfocus="shAddressAutocomplete(this.value)"
+              onblur="setTimeout(()=>{ const d=document.getElementById('sh-addr-dropdown'); if(d)d.style.display='none'; },200)">
+            <div id="sh-addr-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--green);border-radius:0 0 8px 8px;z-index:1100;max-height:260px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5)"></div>
           </div>
           <div class="form-group"><label class="form-label">Company</label><input class="form-input" id="sh-c1-company" placeholder="Company name"></div>
-          <div class="form-group"><label class="form-label">Address *</label><input class="form-input" id="sh-c1-addr1" placeholder="Street address" oninput="shClearAddrValidation()"></div>
+          <div class="form-group" style="position:relative">
+            <label class="form-label">Address *</label>
+            <input class="form-input" id="sh-c1-addr1" placeholder="Street address" autocomplete="off"
+              oninput="shAddrLineAutocomplete(this.value); shClearAddrValidation()"
+              onblur="setTimeout(()=>{ const d=document.getElementById('sh-addr1-dropdown'); if(d)d.style.display='none'; },200)">
+            <div id="sh-addr1-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--blue);border-radius:0 0 8px 8px;z-index:1100;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5)"></div>
+          </div>
           <div class="form-group"><label class="form-label">Address 2</label><input class="form-input" id="sh-c1-addr2" placeholder="Suite, Apt, etc."></div>
           <div class="form-group"><label class="form-label">City *</label><input class="form-input" id="sh-c1-city" placeholder="City" oninput="shClearAddrValidation()"></div>
           <div class="form-group"><label class="form-label">State *</label><input class="form-input" id="sh-c1-state" placeholder="CO" maxlength="2" style="text-transform:uppercase" oninput="shClearAddrValidation()"></div>
@@ -8011,6 +8018,48 @@ function shOsmAutofill(jsonStr) {
   } catch(e) {}
 }
 
+// Address line autocomplete using OpenStreetMap
+let _shAddr1Timeout = null;
+async function shAddrLineAutocomplete(val) {
+  clearTimeout(_shAddr1Timeout);
+  const dropdown = document.getElementById('sh-addr1-dropdown');
+  if (!dropdown) return;
+  if (!val || val.length < 4) { dropdown.style.display = 'none'; return; }
+  _shAddr1Timeout = setTimeout(async () => {
+    let osmResults = [];
+    try {
+      const encoded = encodeURIComponent(val + ' USA');
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=6&countrycodes=us`,
+        { headers: { 'Accept-Language': 'en', 'User-Agent': '420CraftWarehouse/1.0' } }
+      );
+      const data = await res.json();
+      osmResults = data.filter(r => r.address && r.address.road && r.address.house_number);
+    } catch(e) {}
+
+    if (!osmResults.length) { dropdown.style.display = 'none'; return; }
+
+    dropdown.innerHTML = osmResults.map(r => {
+      const a = r.address;
+      const street = [a.house_number, a.road].filter(Boolean).join(' ');
+      const city   = a.city || a.town || a.village || a.county || '';
+      const state  = _osmStateAbbr(a.state || '');
+      const zip    = a.postcode || '';
+      if (!street) return '';
+      const display = [street, city, state, zip].filter(Boolean).join(', ');
+      const payload = JSON.stringify({street, city, state, zip});
+      return `<div onclick="shOsmAutofill(${JSON.stringify(payload)}); document.getElementById('sh-addr1-dropdown').style.display='none';"
+        style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2)"
+        onmouseover="this.style.background='rgba(52,152,219,0.08)'"
+        onmouseout="this.style.background='transparent'">
+        <div style="font-size:13px;color:var(--text)">📍 ${display}</div>
+      </div>`;
+    }).filter(Boolean).join('');
+
+    dropdown.style.display = dropdown.innerHTML ? 'block' : 'none';
+  }, 400);
+}
+
 async function shZipLookup(zip) {
   if (!zip || zip.length < 5) return;
   try {
@@ -8054,12 +8103,16 @@ function shAutofillFromBook(id) {
   }
 }
 
-// Close autocomplete when clicking outside
+// Close autocomplete dropdowns when clicking outside
 document.addEventListener('click', e => {
-  const dropdown = document.getElementById('sh-addr-dropdown');
-  if (dropdown && !dropdown.contains(e.target) && e.target.id !== 'sh-c1-name') {
-    dropdown.style.display = 'none';
-  }
+  ['sh-addr-dropdown','sh-addr1-dropdown'].forEach(id => {
+    const dropdown = document.getElementById(id);
+    if (dropdown && !dropdown.contains(e.target)
+        && e.target.id !== 'sh-c1-name'
+        && e.target.id !== 'sh-c1-addr1') {
+      dropdown.style.display = 'none';
+    }
+  });
 });
 
 // ══════════════════════════════════════════
