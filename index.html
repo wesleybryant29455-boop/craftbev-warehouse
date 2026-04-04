@@ -7938,24 +7938,31 @@ function shAddressAutocomplete(val) {
   if (!dropdown) return;
   if (!val || val.length < 2) { dropdown.style.display = 'none'; return; }
   _shAutocompleteTimeout = setTimeout(() => {
-    abLoad();
-    const q = val.toLowerCase();
-    const bookMatches = addressBook.filter(a =>
-      (a.name||'').toLowerCase().includes(q) ||
-      (a.company||'').toLowerCase().includes(q)
-    ).slice(0, 8);
+    try {
+      abLoad();
+      const q = val.toLowerCase();
+      const bookMatches = (Array.isArray(addressBook) ? addressBook : []).filter(a =>
+        (a.name||'').toLowerCase().includes(q) ||
+        (a.company||'').toLowerCase().includes(q)
+      ).slice(0, 8);
 
-    if (!bookMatches.length) { dropdown.style.display = 'none'; return; }
+      const dd = document.getElementById('sh-addr-dropdown');
+      if (!dd) return;
+      if (!bookMatches.length) { dd.style.display = 'none'; return; }
 
-    dropdown.innerHTML = bookMatches.map(a => `
-      <div onclick="shAutofillFromBook('${a.id}')"
-        style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2)"
-        onmouseover="this.style.background='rgba(126,211,33,0.08)'"
-        onmouseout="this.style.background='transparent'">
-        <div style="font-size:13px;font-weight:600;color:var(--text)">${a.name}${a.company ? ` <span style="font-weight:400;color:var(--text3);font-size:11px">· ${a.company}</span>` : ''}</div>
-        <div style="font-size:11px;color:var(--text3)">${[a.addr1,a.city,(a.state||'')+(a.zip?' '+a.zip:'')].filter(Boolean).join(', ')}</div>
-      </div>`).join('');
-    dropdown.style.display = 'block';
+      dd.innerHTML = bookMatches.map(a => `
+        <div onclick="shAutofillFromBook('${a.id}')"
+          style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2)"
+          onmouseover="this.style.background='rgba(126,211,33,0.08)'"
+          onmouseout="this.style.background='transparent'">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${a.name||''}${a.company ? ` <span style="font-weight:400;color:var(--text3);font-size:11px">· ${a.company}</span>` : ''}</div>
+          <div style="font-size:11px;color:var(--text3)">${[a.addr1,a.city,(a.state||'')+(a.zip?' '+a.zip:'')].filter(Boolean).join(', ')}</div>
+        </div>`).join('');
+      dd.style.display = 'block';
+    } catch(e) {
+      const dd = document.getElementById('sh-addr-dropdown');
+      if (dd) dd.style.display = 'none';
+    }
   }, 150);
 }
 
@@ -8061,40 +8068,57 @@ async function shAddrLineAutocomplete(val) {
   const dropdown = document.getElementById('sh-addr1-dropdown');
   if (!dropdown) return;
   if (!val || val.length < 4) { dropdown.style.display = 'none'; return; }
+  const searchVal = val; // capture value at time of call
   _shAddr1Timeout = setTimeout(async () => {
-    let osmResults = [];
     try {
-      const encoded = encodeURIComponent(val + ' USA');
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=6&countrycodes=us`,
-        { headers: { 'Accept-Language': 'en', 'User-Agent': '420CraftWarehouse/1.0' } }
-      );
-      const data = await res.json();
-      osmResults = data.filter(r => r.address && r.address.road && r.address.house_number);
-    } catch(e) {}
+      // Bail if field value changed since we started (user kept typing/deleting)
+      const currentVal = document.getElementById('sh-c1-addr1')?.value || '';
+      if (currentVal !== searchVal) return;
 
-    _shAddr1Results = osmResults; // store for shPickAddr1
-    if (!osmResults.length) { dropdown.style.display = 'none'; return; }
+      let osmResults = [];
+      try {
+        const encoded = encodeURIComponent(searchVal + ' USA');
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=6&countrycodes=us`,
+          { headers: { 'Accept-Language': 'en', 'User-Agent': '420CraftWarehouse/1.0' } }
+        );
+        const data = await res.json();
+        osmResults = (Array.isArray(data) ? data : []).filter(r => r.address && r.address.road && r.address.house_number);
+      } catch(e) { osmResults = []; }
 
-    dropdown.innerHTML = osmResults.map(r => {
-      const a = r.address;
-      const street = [a.house_number, a.road].filter(Boolean).join(' ');
-      const city   = a.city || a.town || a.village || a.county || '';
-      const state  = _osmStateAbbr(a.state || '');
-      const zip    = a.postcode || '';
-      if (!street) return '';
-      const display = [street, city, state, zip].filter(Boolean).join(', ');
-      const idx = osmResults.indexOf(r);
-      return `<div onclick="shPickAddr1(${idx})"
-        style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2)"
-        onmouseover="this.style.background='rgba(52,152,219,0.08)'"
-        onmouseout="this.style.background='transparent'">
-        <div style="font-size:13px;color:var(--text)">📍 ${display}</div>
-      </div>`;
-    }).filter(Boolean).join('');
+      // Bail if field changed while we were fetching
+      const afterVal = document.getElementById('sh-c1-addr1')?.value || '';
+      if (afterVal !== searchVal) return;
 
-    dropdown.style.display = dropdown.innerHTML ? 'block' : 'none';
-  }, 400);
+      const dd = document.getElementById('sh-addr1-dropdown');
+      if (!dd) return;
+
+      _shAddr1Results = osmResults;
+      if (!osmResults.length) { dd.style.display = 'none'; return; }
+
+      dd.innerHTML = osmResults.map((r, idx) => {
+        const a = r.address || {};
+        const street = [a.house_number, a.road].filter(Boolean).join(' ');
+        const city   = a.city || a.town || a.village || a.county || '';
+        const state  = _osmStateAbbr(a.state || '');
+        const zip    = a.postcode || '';
+        if (!street) return '';
+        const display = [street, city, state, zip].filter(Boolean).join(', ');
+        return `<div onclick="shPickAddr1(${idx})"
+          style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border2)"
+          onmouseover="this.style.background='rgba(52,152,219,0.08)'"
+          onmouseout="this.style.background='transparent'">
+          <div style="font-size:13px;color:var(--text)">📍 ${display}</div>
+        </div>`;
+      }).filter(Boolean).join('');
+
+      dd.style.display = dd.innerHTML ? 'block' : 'none';
+    } catch(e) {
+      // Silently ignore any errors — never crash the form
+      const dd = document.getElementById('sh-addr1-dropdown');
+      if (dd) dd.style.display = 'none';
+    }
+  }, 500);
 }
 
 async function shZipLookup(zip) {
