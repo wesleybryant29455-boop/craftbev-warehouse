@@ -6823,20 +6823,40 @@ function shAddWorker() {
   if (shWorkCrew.find(w => w.name === name)) { showToast('Already on crew'); return; }
   const opt  = el.options[el.selectedIndex];
   const rate = parseFloat(opt?.dataset?.rate || 0);
-  shWorkCrew.push({ name, rate, clockInAt: Date.now(), totalSecs: 0 });
+  shWorkCrew.push({ name, rate, clockInAt: Date.now(), totalSecs: 0, paused: false, pausedAt: null });
   el.value = '';
   shRenderWorkCrew();
   shWorkUpdateCOGS();
 }
 
 function shRemoveWorker(name) {
-  // Bank their time before removing
+  // Bank their time but KEEP them in the list — just mark clocked out
   const w = shWorkCrew.find(x => x.name === name);
   if (w && !w.clockedOutAt) {
     w.totalSecs += Math.round((Date.now() - w.clockInAt) / 1000);
     w.clockedOutAt = Date.now();
   }
-  shWorkCrew = shWorkCrew.filter(x => x.name !== name);
+  shRenderWorkCrew();
+  shWorkUpdateCOGS();
+}
+
+function shWorkerPause(name) {
+  const w = shWorkCrew.find(x => x.name === name);
+  if (!w || w.clockedOutAt || w.paused) return;
+  // Bank elapsed time
+  w.totalSecs += Math.round((Date.now() - w.clockInAt) / 1000);
+  w.paused = true;
+  w.pausedAt = Date.now();
+  shRenderWorkCrew();
+  shWorkUpdateCOGS();
+}
+
+function shWorkerResume(name) {
+  const w = shWorkCrew.find(x => x.name === name);
+  if (!w || w.clockedOutAt || !w.paused) return;
+  w.paused = false;
+  w.clockInAt = Date.now(); // reset clock-in to now
+  w.pausedAt = null;
   shRenderWorkCrew();
   shWorkUpdateCOGS();
 }
@@ -6848,17 +6868,23 @@ function shRenderWorkCrew() {
   list.innerHTML = shWorkCrew.map(w => {
     const elapsed = w.clockedOutAt
       ? w.totalSecs
-      : w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000);
+      : w.paused
+        ? w.totalSecs
+        : w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000);
     const cost = (w.rate * elapsed / 3600).toFixed(2);
-    const status = w.clockedOutAt ? 'color:var(--text3)' : 'color:var(--green)';
+    const status = w.clockedOutAt ? 'color:var(--text3)' : w.paused ? 'color:var(--amber)' : 'color:var(--green)';
     return `<div style="display:flex;align-items:center;gap:8px;background:rgba(126,211,33,0.05);border:1px solid var(--border2);border-radius:7px;padding:6px 10px">
       <span style="font-size:12px;font-weight:600;color:var(--text);flex:1">👷 ${w.name}</span>
       <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">$${w.rate}/hr</span>
       <span id="sh-crew-time-${w.name.replace(/\s+/g,'_')}" style="font-size:12px;font-family:var(--font-mono);${status};min-width:60px;text-align:right">${shFormatTime(elapsed)}</span>
       <span style="font-size:11px;font-family:var(--font-mono);color:var(--amber);min-width:48px;text-align:right">$${cost}</span>
       ${w.clockedOutAt
-        ? `<span style="font-size:10px;color:var(--text3);padding:2px 6px;border:1px solid var(--border2);border-radius:4px">clocked out</span>`
-        : `<button onclick="shRemoveWorker('${w.name}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">Clock Out</button>`
+        ? `<span style="font-size:10px;color:var(--text3);padding:2px 6px;border:1px solid var(--border2);border-radius:4px">✓ done</span>`
+        : w.paused
+          ? `<button onclick="shWorkerResume('${w.name}')" style="background:rgba(126,211,33,0.1);border:1px solid rgba(126,211,33,0.3);color:var(--green);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">▶ Resume</button>
+             <button onclick="shRemoveWorker('${w.name}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">Clock Out</button>`
+          : `<button onclick="shWorkerPause('${w.name}')" style="background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.3);color:var(--amber);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">⏸ Pause</button>
+             <button onclick="shRemoveWorker('${w.name}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer">Clock Out</button>`
       }
     </div>`;
   }).join('');
@@ -6923,7 +6949,7 @@ function shWorkTick() {
   if (totalEl) totalEl.textContent = shFormatTime(total, true);
   // Update crew timers display
   shWorkCrew.forEach(w => {
-    if (w.clockedOutAt) return;
+    if (w.clockedOutAt || w.paused) return;
     const wElapsed = w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000);
     const key = w.name.replace(/\s+/g, '_');
     const el = document.getElementById('sh-crew-time-' + key);
@@ -7013,7 +7039,7 @@ function shWorkGetBoxes() {
 function shWorkUpdateCOGS() {
   // Labor: sum all crew members' time × their rate
   const laborCost = shWorkCrew.reduce((sum, w) => {
-    const secs = w.clockedOutAt
+    const secs = w.clockedOutAt || w.paused
       ? w.totalSecs
       : w.totalSecs + Math.round((Date.now() - w.clockInAt) / 1000);
     return sum + (w.rate * secs / 3600);
