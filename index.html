@@ -8200,6 +8200,21 @@ function shUpdateBatchAlloc(row) {
   if (!val || !qty) { allocDiv.style.display='none'; allocDiv.innerHTML=''; return; }
   const [sku, mg] = val.split('||');
   const { allocation, shortfall } = shFifoBatches(sku, mg, qty);
+
+  // Cap quantity to available stock
+  const totalAvailable = allocation.reduce((s,a) => s + a.available, 0);
+  if (shortfall > 0) {
+    const qtyInput = row.querySelector('.sh-item-qty');
+    if (qtyInput && qty > totalAvailable) {
+      qtyInput.value = totalAvailable;
+      qtyInput.style.borderColor = 'var(--red)';
+      setTimeout(() => { if(qtyInput) qtyInput.style.borderColor=''; }, 2000);
+      showToast(`⚠ Only ${totalAvailable} cases available — quantity capped`);
+      shUpdateBatchAlloc(row); // re-run with capped qty
+      return;
+    }
+  }
+
   if (!allocation.length) {
     allocDiv.style.display='block';
     allocDiv.innerHTML='<div style="font-size:11px;color:var(--red);padding:4px 0">⚠ No batch stock found</div>';
@@ -9968,10 +9983,11 @@ function prodRunGoLive() {
   _prodRunRenderCrew();
   _prodRunRenderExpendables();
   _prodRunUpdateCosts();
-  // Start elapsed timer
-  if (_prlTimer) clearInterval(_prlTimer);
+  // Start elapsed timer — clear any existing first
+  if (_prlTimer) { clearInterval(_prlTimer); _prlTimer = null; }
+  if (!prodRunActive.startedAt) prodRunActive.startedAt = new Date().toISOString();
+  _prodRunTickTimer(); // run immediately
   _prlTimer = setInterval(_prodRunTickTimer, 1000);
-  _prodRunTickTimer();
   // Resume any active crew timers
   (prodRunActive.crew||[]).forEach(c => {
     if (!c.clockOutAt) _prlCrewTimers[c.name] = new Date(c.clockInAt).getTime();
@@ -14753,9 +14769,12 @@ function batchComboInput(inputId, resultsId, statusId) {
   const matches = batchData
     .filter(b => {
       const code = (b.Batch||b.BatchCode||'').toUpperCase();
-      return code.includes(val) && (b.OnHand > 0 || b.Inbound > 0);
+      const sku  = (b.SKU||'').toUpperCase();
+      const mg   = (b.MG||b.MG_Strength||'').toUpperCase();
+      return (code.includes(val) || sku.includes(val) || mg.includes(val)) && b.OnHand > 0;
     })
-    .slice(0, 8);
+    .sort((a,b) => (b.OnHand||0) - (a.OnHand||0))
+    .slice(0, 10);
 
   if (!matches.length) { res.style.display = 'none'; return; }
 
