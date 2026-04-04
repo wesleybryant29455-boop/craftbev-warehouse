@@ -7414,7 +7414,7 @@ async function shGetLiveRates() {
   panel.innerHTML = `<div style="background:var(--bg3);border-radius:8px;padding:16px;text-align:center;color:var(--text3)">⏳ Getting live rates from ShipStation...</div>`;
 
   // Step 1: Get all carriers on the account
-  const carriersResult = await shApiCall('GET', '/carriers/listcarriers', null);
+  const carriersResult = await shApiCall('GET', '/carriers', null);
   if (carriersResult.error || !Array.isArray(carriersResult)) {
     if (btn) { btn.textContent = '📡 Get Live Rates'; btn.disabled = false; }
     panel.innerHTML = shRatesManualFallback(s, carriersResult.error || 'Could not load carriers');
