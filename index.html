@@ -7538,6 +7538,8 @@ async function shSubmitShipment() {
   shSave();
   document.getElementById('sh-ship-modal').classList.add('hidden');
   shUpdateStats(); shRenderList();
+  // ── Wire accounting hook: auto-invoice if deal says on_shipment ──
+  try { if (typeof acctOnShipmentSubmitted === 'function') acctOnShipmentSubmitted(s.id); } catch(e) {}
   shStage3Id = null;
 }
 
@@ -11043,6 +11045,8 @@ function prodRunWizardNext() {
     prodRunActive.status     = 'completed';
     prodRunActive.costSummary= _prodCalcCosts(prodRunActive);
     prodRunSaveActive();
+    // ── Auto-create immutable cost snapshot ────────────────────────
+    try { if (typeof acctOnProdRunComplete === 'function') acctOnProdRunComplete(prodRunActive); } catch(e) {}
     // Go to step 4 — confirm and launch Log Movement
     prodRunWizardStep=4;
     _prodRunShowLogMovementStep();
@@ -18207,6 +18211,890 @@ runExceptionEngine=function(){
 
 // ── PHASE 2 INIT ─────────────────────────────────────────────
 setTimeout(()=>{try{taxRulesLoad();runExceptionEngine();}catch(e){console.warn('P2 init:',e);}},3500);
+
+// ═══════════════════════════════════════════════════════════════
+// PHASE 3 — ADVANCED REPORTS, DEAL EDITOR, PRICE BOOKS, TAX UI
+//           LABOR EFFICIENCY, VENDOR SPEND, INVENTORY AGING
+//           WRITE-OFF ANALYSIS, ORDER QUEUE ACCOUNTING LINK
+// ═══════════════════════════════════════════════════════════════
+
+// ── BRAND P&L ENGINE ─────────────────────────────────────────
+function calcBrandPnL(brandName, period) {
+  const shArr = typeof shipments !== 'undefined' ? shipments : [];
+  const branded = shArr.filter(s =>
+    (s.brandName || _brandFromSku(((s.items||[])[0]||{}).sku||'')) === brandName &&
+    (s.shippedDate || s.createdAt || '').slice(0,7) === period &&
+    !['pending','working'].includes(s.status)
+  );
+  let revenue=0, cogs=0, labor=0, freight=0, materials=0;
+  branded.forEach(s => {
+    const p = calcShipmentProfitability(s.id);
+    if (!p) return;
+    revenue += p.revenue; cogs += p.batchCogs;
+    labor += p.laborCost; freight += p.carrierCost; materials += p.matCost;
+  });
+  const setts = settlementsLoad().filter(s => s.brandName === brandName && s.period === period);
+  const settRevenue = setts.reduce((a,s) => a + (s.netDue||0), 0);
+  const totalRev = revenue + settRevenue;
+  const totalCost = cogs + labor + freight + materials;
+  const gp = totalRev - totalCost;
+  return { brandName, period, shipmentCount: branded.length, revenue, settRevenue,
+    totalRevenue: totalRev, cogs, labor, freight, materials, totalCost,
+    grossProfit: gp, grossMarginPct: totalRev > 0 ? (gp/totalRev*100) : 0 };
+}
+
+// ── SKU PROFITABILITY ENGINE ──────────────────────────────────
+function calcSkuProfitability(period) {
+  const shArr = typeof shipments !== 'undefined' ? shipments : [];
+  const bySkuMg = {};
+  shArr.filter(s => (s.shippedDate||s.createdAt||'').slice(0,7) === period &&
+    !['pending','working'].includes(s.status)).forEach(s => {
+    (s.items||[]).forEach(item => {
+      const key = `${item.sku}|${item.mg}`;
+      if (!bySkuMg[key]) bySkuMg[key] = { sku: item.sku, mg: item.mg, cases:0, revenue:0, cogs:0 };
+      const qty = parseInt(item.qty)||0;
+      const rate = priceBookGetRate(s.recipientName, s.brandName||'', item.sku, item.mg);
+      const snap = acctLoad(ACCT_KEYS.COST_SNAPSHOTS).filter(sn =>
+        (item.batchAllocation||[]).some(a => a.batchCode === sn.batchCode)).pop();
+      bySkuMg[key].cases += qty;
+      bySkuMg[key].revenue += (rate.pricePerCase||0) * qty;
+      bySkuMg[key].cogs += snap ? (snap.costPerCase||0) * qty : 0;
+    });
+  });
+  return Object.values(bySkuMg).map(r => ({
+    ...r,
+    grossProfit: r.revenue - r.cogs,
+    grossMarginPct: r.revenue > 0 ? ((r.revenue-r.cogs)/r.revenue*100) : 0,
+    revenuePerCase: r.cases > 0 ? r.revenue/r.cases : 0,
+    cogsPerCase: r.cases > 0 ? r.cogs/r.cases : 0,
+  })).sort((a,b) => b.grossProfit - a.grossProfit);
+}
+
+// ── LABOR EFFICIENCY ENGINE ───────────────────────────────────
+function calcLaborEfficiency(period) {
+  const runs = JSON.parse(localStorage.getItem('420craft_prod_runs')||'[]');
+  const periodRuns = runs.filter(r =>
+    (r.startedAt||r.startDate||'').slice(0,7) === period && r.status === 'completed'
+  );
+  return periodRuns.map(r => {
+    const totalMins = (r.crew||[]).reduce((a,c) => a + (c.totalMins||0), 0);
+    const totalHrs = totalMins / 60;
+    const cases = r.totalCases || 0;
+    const cost = r.costSummary?.grand || 0;
+    const laborCost = (r.crew||[]).reduce((a,c) => {
+      const mins = c.totalMins||0; const rate = parseFloat(c.rate)||0;
+      return a + (mins/60)*rate;
+    }, 0);
+    return {
+      runId: r.id, sku: r.sku, batchCode: r.batchCode||'',
+      totalHrs: parseFloat(totalHrs.toFixed(2)),
+      totalCases: cases,
+      casesPerHr: totalHrs > 0 ? parseFloat((cases/totalHrs).toFixed(1)) : 0,
+      cansPerHr: totalHrs > 0 ? parseFloat((cases*24/totalHrs).toFixed(0)) : 0,
+      laborCostPerCase: cases > 0 ? parseFloat((laborCost/cases).toFixed(2)) : 0,
+      totalLaborCost: parseFloat(laborCost.toFixed(2)),
+      crewSize: (r.crew||[]).length,
+      date: (r.startedAt||r.startDate||'').slice(0,10),
+    };
+  }).sort((a,b) => b.casesPerHr - a.casesPerHr);
+}
+
+// ── VENDOR SPEND ENGINE ───────────────────────────────────────
+function calcVendorSpend(period) {
+  const bills = acctLoad(ACCT_KEYS.VENDOR_BILLS);
+  const periodBills = bills.filter(b => (b.billDate||'').slice(0,7) === period);
+  const byVendor = {};
+  periodBills.forEach(b => {
+    if (!byVendor[b.vendorName]) byVendor[b.vendorName] = {
+      vendorName: b.vendorName, vendorId: b.vendorId,
+      totalSpend: 0, billCount: 0, byCategory: {}, bills: []
+    };
+    byVendor[b.vendorName].totalSpend += b.totalAmount||0;
+    byVendor[b.vendorName].billCount++;
+    byVendor[b.vendorName].bills.push(b.billId);
+    // Category from PO
+    const po = posLoad().find(p => p.poId === b.poId);
+    const cat = po?.category || 'uncategorized';
+    if (!byVendor[b.vendorName].byCategory[cat]) byVendor[b.vendorName].byCategory[cat] = 0;
+    byVendor[b.vendorName].byCategory[cat] += b.totalAmount||0;
+  });
+  return Object.values(byVendor).sort((a,b) => b.totalSpend - a.totalSpend);
+}
+
+// ── INVENTORY AGING ENGINE ────────────────────────────────────
+function calcInventoryAging() {
+  const bd = typeof batchData !== 'undefined' ? batchData : [];
+  const today = new Date();
+  return bd.filter(b => (parseInt(b.OnHand||b['On Hand'])||0) > 0).map(b => {
+    const prodDate = b.ProductionDate || b['Production Date'] || '';
+    const ageDays = prodDate ? Math.floor((today - new Date(prodDate)) / 86400000) : null;
+    const ageBucket = ageDays === null ? 'unknown' :
+      ageDays <= 30 ? '0-30 days' :
+      ageDays <= 60 ? '31-60 days' :
+      ageDays <= 90 ? '61-90 days' :
+      ageDays <= 180 ? '91-180 days' : '180+ days';
+    const onHand = parseInt(b.OnHand||b['On Hand'])||0;
+    const snap = acctLoad(ACCT_KEYS.COST_SNAPSHOTS)
+      .filter(s => s.batchCode === (b.Batch||b.BatchCode)).pop();
+    const value = snap ? onHand * (snap.costPerCase||0) : 0;
+    return {
+      batchCode: b.Batch||b.BatchCode||'', sku: b.SKU||'', mg: b.MG||'',
+      onHand, productionDate: prodDate, ageDays, ageBucket, value,
+      status: b.Status||'active', atRisk: ageDays !== null && ageDays > 120,
+    };
+  }).sort((a,b) => (b.ageDays||0) - (a.ageDays||0));
+}
+
+// ── MATERIAL PRICE VARIANCE ENGINE ───────────────────────────
+function calcMaterialPriceVariance() {
+  const consumables = JSON.parse(localStorage.getItem('420craft_consumables')||'[]');
+  return consumables.filter(c => c.unitCost && c.lastUnitCost && c.lastUnitCost > 0).map(c => {
+    const standard = parseFloat(c.unitCost)||0;
+    const actual = parseFloat(c.lastUnitCost)||0;
+    const variance = actual - standard;
+    const variancePct = standard > 0 ? (variance/standard*100) : 0;
+    return {
+      name: c.name, category: c.category||'', unit: c.unit||'',
+      standardCost: standard, actualCost: actual,
+      variance, variancePct: parseFloat(variancePct.toFixed(1)),
+      lastPurchaseDate: c.lastPurchaseDate||'',
+      stockOnHand: c.stockOnHand||0,
+      totalVarianceImpact: variance * (c.stockOnHand||0),
+      favorable: variance < 0,
+    };
+  }).sort((a,b) => Math.abs(b.variancePct) - Math.abs(a.variancePct));
+}
+
+// ── WRITE-OFF ANALYSIS ────────────────────────────────────────
+function calcWriteOffAnalysis(period) {
+  const mv = typeof movements !== 'undefined' ? movements : [];
+  const writeOffTypes = ['Write-Off','Damage','Expired','Destruction','Recall'];
+  const periodWOs = mv.filter(m =>
+    writeOffTypes.includes(m.Movement_Type) &&
+    (m.Timestamp||'').slice(0,7) === period
+  );
+  const byType = {};
+  const byReason = {};
+  let totalCases = 0, totalValue = 0;
+  const snaps = acctLoad(ACCT_KEYS.COST_SNAPSHOTS);
+  periodWOs.forEach(m => {
+    const qty = parseInt(m.Quantity)||0;
+    totalCases += qty;
+    const snap = snaps.filter(s => s.batchCode === m.Batch_Code).pop();
+    const val = snap ? (snap.costPerCase||0) * qty : 0;
+    totalValue += val;
+    const type = m.Movement_Type;
+    const reason = m.WriteOffReason || m.Notes || 'unspecified';
+    if (!byType[type]) byType[type] = { type, cases:0, value:0 };
+    byType[type].cases += qty; byType[type].value += val;
+    if (!byReason[reason]) byReason[reason] = { reason, cases:0, value:0 };
+    byReason[reason].cases += qty; byReason[reason].value += val;
+  });
+  return {
+    period, totalCases, totalValue,
+    byType: Object.values(byType).sort((a,b) => b.value - a.value),
+    byReason: Object.values(byReason).sort((a,b) => b.value - a.value),
+    movements: periodWOs,
+  };
+}
+
+// ── SAMPLE/PROMO ANALYSIS ──────────────────────────────────────
+function calcSamplePromoAnalysis(period) {
+  const mv = typeof movements !== 'undefined' ? movements : [];
+  const sampleTypes = ['Pull to Sample','Send Sample'];
+  const periodSamples = mv.filter(m =>
+    sampleTypes.includes(m.Movement_Type) &&
+    (m.Timestamp||'').slice(0,7) === period
+  );
+  const snaps = acctLoad(ACCT_KEYS.COST_SNAPSHOTS);
+  let totalCases=0, totalValue=0;
+  const byCustomer = {};
+  periodSamples.forEach(m => {
+    const qty = parseInt(m.Quantity)||0; totalCases += qty;
+    const snap = snaps.filter(s => s.batchCode === m.Batch_Code).pop();
+    const val = snap ? (snap.costPerCase||0)*qty : 0; totalValue += val;
+    const cust = m.Destination?.company || m.Destination?.name || 'Unspecified';
+    if (!byCustomer[cust]) byCustomer[cust] = { customer:cust, cases:0, value:0 };
+    byCustomer[cust].cases += qty; byCustomer[cust].value += val;
+  });
+  return { period, totalCases, totalValue,
+    byCustomer: Object.values(byCustomer).sort((a,b) => b.value - a.value) };
+}
+
+// ── MONTH-END REPORT EXPORT ───────────────────────────────────
+function exportMonthEndReport(period) {
+  if (typeof XLSX === 'undefined') { showToast('❌ XLSX library not loaded'); return; }
+  const wb = XLSX.utils.book_new();
+  const prevPer = period || _prevPeriod(acctPeriod(acctToday()));
+
+  // 1. Customer P&L
+  const pnl = calcAllCustomersPnL(prevPer);
+  if (pnl.length) {
+    const ws1 = XLSX.utils.json_to_sheet(pnl.map(r => ({
+      'Customer': r.customerName, 'Period': r.period, 'Shipments': r.shipmentCount,
+      'Revenue': r.totalRevenueCombined.toFixed(2), 'COGS': r.totalCogs.toFixed(2),
+      'Labor': r.totalLabor.toFixed(2), 'Freight': r.totalFreight.toFixed(2),
+      'Gross Profit': r.totalGrossProfit.toFixed(2), 'Margin %': r.grossMarginPct.toFixed(1),
+      'Invoiced': r.invoicedAmount.toFixed(2), 'Collected': r.collectedAmount.toFixed(2),
+      'Open AR': r.openAR.toFixed(2),
+    })));
+    XLSX.utils.book_append_sheet(wb, ws1, 'Customer P&L');
+  }
+
+  // 2. AR Aging
+  const aging = arAgingReport();
+  const agingRows = [];
+  [['Current',aging.current],['1-30',aging['1-30']],['31-60',aging['31-60']],
+   ['61-90',aging['61-90']],['90+',aging['90+']]].forEach(([bucket, invs]) => {
+    invs.forEach(i => agingRows.push({
+      'Bucket': bucket, 'Invoice #': i.invoiceNo, 'Customer': i.customerName,
+      'Invoice Date': i.invoiceDate, 'Due Date': i.dueDate,
+      'Total': (i.totalAmount||0).toFixed(2), 'Open': (i.openAmount||0).toFixed(2),
+      'Status': i.status,
+    }));
+  });
+  if (agingRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(agingRows), 'AR Aging');
+
+  // 3. Inventory Valuation
+  const invVal = inventoryValuation();
+  if (invVal.length) {
+    const ws3 = XLSX.utils.json_to_sheet(invVal.map(r => ({
+      'Batch Code': r.batchCode, 'SKU': r.sku, 'MG': r.mg,
+      'On Hand Cases': r.onHand, 'Cost/Case': (r.costPerCase||0).toFixed(2),
+      'Total Value': r.totalValue.toFixed(2), 'Status': r.status,
+      'Production Date': r.productionDate, 'Has Snapshot': r.hasSnapshot ? 'Yes' : 'No',
+    })));
+    XLSX.utils.book_append_sheet(wb, ws3, 'Inventory Valuation');
+  }
+
+  // 4. Settlements
+  const setts = settlementsLoad().filter(s => s.period === prevPer);
+  if (setts.length) {
+    const ws4 = XLSX.utils.json_to_sheet(setts.map(s => ({
+      'Brand': s.brandName, 'Period': s.period, 'Deal Type': s.dealType,
+      'Settlement Units': s.settlementUnits, 'Base Recovery': (s.baseRecovery||0).toFixed(2),
+      'Profit Share': (s.ourProfitShare||0).toFixed(2), 'Storage': (s.storageCharge||0).toFixed(2),
+      'Net Due': (s.netDue||0).toFixed(2), 'Status': s.status,
+    })));
+    XLSX.utils.book_append_sheet(wb, ws4, 'Settlements');
+  }
+
+  // 5. Write-Off Analysis
+  const wo = calcWriteOffAnalysis(prevPer);
+  if (wo.movements.length) {
+    const ws5 = XLSX.utils.json_to_sheet(wo.movements.map(m => ({
+      'Date': (m.Timestamp||'').slice(0,10), 'Type': m.Movement_Type,
+      'SKU': m.SKU, 'MG': m.MG_Strength, 'Batch': m.Batch_Code,
+      'Cases': m.Quantity, 'Reason': m.WriteOffReason||m.Notes||'',
+    })));
+    XLSX.utils.book_append_sheet(wb, ws5, 'Write-Offs');
+  }
+
+  // 6. Vendor Spend
+  const spend = calcVendorSpend(prevPer);
+  if (spend.length) {
+    const ws6 = XLSX.utils.json_to_sheet(spend.map(r => ({
+      'Vendor': r.vendorName, 'Total Spend': r.totalSpend.toFixed(2),
+      'Bills': r.billCount, 'Categories': Object.keys(r.byCategory).join(', '),
+    })));
+    XLSX.utils.book_append_sheet(wb, ws6, 'Vendor Spend');
+  }
+
+  // 7. Inventory Aging
+  const aging2 = calcInventoryAging();
+  if (aging2.length) {
+    const ws7 = XLSX.utils.json_to_sheet(aging2.map(r => ({
+      'Batch': r.batchCode, 'SKU': r.sku, 'MG': r.mg,
+      'On Hand': r.onHand, 'Age (days)': r.ageDays||'unknown',
+      'Age Bucket': r.ageBucket, 'Value': r.value.toFixed(2),
+      'At Risk': r.atRisk ? 'Yes' : 'No', 'Status': r.status,
+    })));
+    XLSX.utils.book_append_sheet(wb, ws7, 'Inventory Aging');
+  }
+
+  XLSX.writeFile(wb, `420Craft_MonthEnd_${prevPer}.xlsx`);
+  showToast(`✅ Month-end report exported: ${prevPer}`);
+}
+
+// ── FULL DEAL EDIT MODAL ──────────────────────────────────────
+function acctEditDealModal(dealId) {
+  const deals = dealsLoad();
+  const d = deals.find(x => x.dealId === dealId);
+  if (!d) { showToast('Deal not found'); return; }
+  acctModal('EDIT DEAL — ' + d.customerName + ' / ' + d.brandName, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Customer Name</label>
+        <input class="form-input" id="ed-cust" value="${_esc(d.customerName)}"></div>
+      <div class="form-group"><label class="form-label">Brand Name</label>
+        <input class="form-input" id="ed-brand" value="${_esc(d.brandName)}"></div>
+      <div class="form-group"><label class="form-label">Deal Type</label>
+        <select class="form-input" id="ed-type" onchange="acctEditDealToggle()">
+          ${Object.entries(DEAL_TYPES).map(([k,v])=>`<option value="${k}" ${d.dealType===k?'selected':''}>${v}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label class="form-label">Status</label>
+        <select class="form-input" id="ed-status">
+          <option value="draft" ${d.status==='draft'?'selected':''}>Draft</option>
+          <option value="active" ${d.status==='active'?'selected':''}>Active</option>
+          <option value="expired" ${d.status==='expired'?'selected':''}>Expired</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">Effective Start</label>
+        <input class="form-input" type="date" id="ed-start" value="${d.effectiveStart||''}"></div>
+      <div class="form-group"><label class="form-label">Effective End</label>
+        <input class="form-input" type="date" id="ed-end" value="${d.effectiveEnd||''}"></div>
+      <div class="form-group"><label class="form-label">Price Per Case ($)</label>
+        <input class="form-input" type="number" id="ed-price" step="0.01" value="${d.pricePerCase||''}"></div>
+      <div class="form-group"><label class="form-label">Payment Terms</label>
+        <select class="form-input" id="ed-terms">
+          ${['Net15','Net30','Net45','COD','Prepaid'].map(t=>`<option ${d.paymentTerms===t?'selected':''}>${t}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label class="form-label">Settlement Basis</label>
+        <select class="form-input" id="ed-basis">
+          ${Object.entries(SETTLEMENT_BASIS).map(([k,v])=>`<option value="${k}" ${d.settlementBasis===k?'selected':''}>${v}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label class="form-label">Invoice Cadence</label>
+        <select class="form-input" id="ed-cadence">
+          <option value="on_shipment" ${d.invoiceCadence==='on_shipment'?'selected':''}>On Shipment (auto)</option>
+          <option value="monthly" ${d.invoiceCadence==='monthly'?'selected':''}>Monthly</option>
+          <option value="on_settlement" ${d.invoiceCadence==='on_settlement'?'selected':''}>On Settlement</option>
+          <option value="manual" ${d.invoiceCadence==='manual'?'selected':''}>Manual Only</option>
+        </select></div>
+      <div class="form-group" id="ed-share-row" style="display:${['profit_share','hybrid'].includes(d.dealType)?'':'none'}">
+        <label class="form-label">Our Profit Share %</label>
+        <input class="form-input" type="number" id="ed-share" step="1" value="${d.ourSharePct||''}"></div>
+      <div class="form-group" id="ed-base-row" style="display:${['profit_share','hybrid'].includes(d.dealType)?'':'none'}">
+        <label class="form-label">Base Recovery ($/unit)</label>
+        <input class="form-input" type="number" id="ed-base" step="0.01" value="${d.baseRecovery||''}"></div>
+      <div class="form-group"><label class="form-label">
+        <input type="checkbox" id="ed-freight" ${d.freightRebill?'checked':''}> Freight Rebill</label></div>
+      <div class="form-group"><label class="form-label">Freight Markup %</label>
+        <input class="form-input" type="number" id="ed-fmarkup" step="1" value="${d.freightMarkup||0}"></div>
+      <div class="form-group"><label class="form-label">
+        <input type="checkbox" id="ed-storage" ${d.storageEnabled?'checked':''} onchange="document.getElementById('ed-storage-rate').style.display=this.checked?'':'none'"> Storage Enabled</label></div>
+      <div class="form-group" id="ed-storage-rate" style="display:${d.storageEnabled?'':'none'}">
+        <label class="form-label">Storage Rate ($/case/mo)</label>
+        <input class="form-input" type="number" id="ed-srate" step="0.01" value="${d.storageRate||''}"></div>
+      <div class="form-group"><label class="form-label">
+        <input type="checkbox" id="ed-st" ${d.custReportsSellThrough?'checked':''}> Customer Reports Sell-Through</label></div>
+      <div class="form-group"><label class="form-label">
+        <input type="checkbox" id="ed-square" ${d.squareEligible?'checked':''}> Square Eligible</label></div>
+      <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label>
+        <textarea class="form-input" id="ed-notes" style="height:60px">${_esc(d.notes||'')}</textarea></div>
+    </div>`,
+    () => {
+      // Apply changes — create superseding version if active
+      const newData = {
+        customerName:   document.getElementById('ed-cust').value.trim(),
+        brandName:      document.getElementById('ed-brand').value.trim(),
+        dealType:       document.getElementById('ed-type').value,
+        status:         document.getElementById('ed-status').value,
+        effectiveStart: document.getElementById('ed-start').value,
+        effectiveEnd:   document.getElementById('ed-end').value,
+        pricePerCase:   parseFloat(document.getElementById('ed-price').value)||0,
+        paymentTerms:   document.getElementById('ed-terms').value,
+        settlementBasis:document.getElementById('ed-basis').value,
+        invoiceCadence: document.getElementById('ed-cadence').value,
+        ourSharePct:    parseFloat(document.getElementById('ed-share')?.value)||d.ourSharePct||0,
+        baseRecovery:   parseFloat(document.getElementById('ed-base')?.value)||d.baseRecovery||0,
+        freightRebill:  document.getElementById('ed-freight').checked,
+        freightMarkup:  parseFloat(document.getElementById('ed-fmarkup').value)||0,
+        storageEnabled: document.getElementById('ed-storage').checked,
+        storageRate:    parseFloat(document.getElementById('ed-srate')?.value)||0,
+        custReportsSellThrough: document.getElementById('ed-st').checked,
+        squareEligible: document.getElementById('ed-square').checked,
+        notes:          document.getElementById('ed-notes').value,
+      };
+      // Direct update (not versioning for minor edits)
+      Object.assign(d, newData);
+      d.updatedAt = acctNow();
+      acctSave(ACCT_KEYS.DEALS, deals);
+      acctAudit('update', 'deal', dealId, newData, 'Deal updated via editor');
+      showToast('✅ Deal updated');
+      renderAcctDeals();
+    }, 'Save Changes');
+  setTimeout(() => acctEditDealToggle(), 50);
+}
+
+function acctEditDealToggle() {
+  const t = document.getElementById('ed-type')?.value;
+  const show = ['profit_share','hybrid'].includes(t);
+  const sr = document.getElementById('ed-share-row');
+  const br = document.getElementById('ed-base-row');
+  if (sr) sr.style.display = show ? '' : 'none';
+  if (br) br.style.display = show ? '' : 'none';
+}
+
+// ── PRICE BOOKS PAGE ──────────────────────────────────────────
+function renderAcctPriceBooks() {
+  const el = document.getElementById('acct-price-books-content');
+  if (!el) return;
+  const books = priceBooksLoad();
+  const deals = dealsLoad().filter(d => d.status === 'active');
+  el.innerHTML = `<div style="padding:24px;max-width:1100px">
+    ${_acctSectionHeader('PRICE BOOKS', books.length + ' price books — define per-SKU rates for each customer/deal',
+      _acctBtnGreen('+ New Price Book', 'acctNewPriceBookModal()'))}
+    ${books.length === 0
+      ? `<div style="text-align:center;padding:48px;background:var(--card);border-radius:12px;color:var(--text3)">
+          No price books yet. Price books define what you charge per case for each SKU.<br>
+          Without them, shipment profitability will show $0 revenue.
+          <div style="margin-top:16px">${_acctBtnGreen('+ Create First Price Book', 'acctNewPriceBookModal()')}</div>
+        </div>`
+      : books.map(b => `
+        <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px 18px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+            <div>
+              <div style="font-weight:700;font-size:14px;margin-bottom:4px">${_esc(b.name)}</div>
+              <div style="font-size:12px;color:var(--text3)">${b.customerId||b.brandName||'Global'} · Effective ${b.effectiveDate} · ${b.lines.length} SKUs</div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button onclick="acctEditPriceBook('${b.bookId}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Edit</button>
+              <button onclick="acctDeletePriceBook('${b.bookId}')" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);color:var(--red);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Delete</button>
+            </div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <tr style="color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+              <th style="text-align:left;padding:4px">SKU</th><th style="padding:4px">MG</th>
+              <th style="text-align:right;padding:4px">$/Case</th><th style="text-align:right;padding:4px">$/Can</th>
+            </tr>
+            ${b.lines.map(l => `<tr style="border-top:1px solid var(--border2)">
+              <td style="padding:6px 4px;font-weight:500">${_esc(l.sku)}</td>
+              <td style="padding:6px 4px;color:var(--text3);text-align:center">${_esc(l.mg||'Any')}</td>
+              <td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);color:var(--green)">${acctFmt(l.pricePerCase)}</td>
+              <td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt((l.pricePerCase||0)/24)}</td>
+            </tr>`).join('')}
+          </table>
+        </div>`).join('')}
+  </div>`;
+}
+
+function acctEditPriceBook(bookId) {
+  const books = priceBooksLoad();
+  const b = books.find(x => x.bookId === bookId);
+  if (!b) return;
+  acctModal('EDIT PRICE BOOK — ' + b.name, `
+    <div style="display:grid;gap:12px">
+      <div class="form-group"><label class="form-label">Name</label>
+        <input class="form-input" id="epb-name" value="${_esc(b.name)}"></div>
+      <div class="form-group"><label class="form-label">Effective Date</label>
+        <input class="form-input" type="date" id="epb-date" value="${b.effectiveDate}"></div>
+      <div class="form-group"><label class="form-label">Price Lines (SKU, MG, $/case — one per line)</label>
+        <textarea class="form-input" id="epb-lines" style="height:180px;font-family:var(--font-mono);font-size:11px">${b.lines.map(l=>l.sku+', '+(l.mg||'')+', '+l.pricePerCase).join('\n')}</textarea>
+      </div>
+    </div>`,
+    () => {
+      b.name = document.getElementById('epb-name').value.trim();
+      b.effectiveDate = document.getElementById('epb-date').value;
+      const raw = document.getElementById('epb-lines').value.split('\n').filter(l => l.trim());
+      b.lines = raw.map(l => { const p = l.split(',').map(s=>s.trim()); return {sku:p[0]||'',mg:p[1]||'',pricePerCase:parseFloat(p[2])||0}; }).filter(l=>l.sku&&l.pricePerCase>0);
+      b.updatedAt = acctNow();
+      acctSave('420craft_acct_price_books', books);
+      acctAudit('update', 'price_book', bookId, {lines:b.lines.length}, 'Price book updated');
+      showToast('✅ Price book updated — ' + b.lines.length + ' lines');
+      renderAcctPriceBooks();
+    }, 'Save');
+}
+
+function acctDeletePriceBook(bookId) {
+  if (!confirm('Delete this price book? This cannot be undone.')) return;
+  const books = priceBooksLoad().filter(b => b.bookId !== bookId);
+  acctSave('420craft_acct_price_books', books);
+  acctAudit('delete', 'price_book', bookId, null, 'Price book deleted');
+  showToast('Price book deleted');
+  renderAcctPriceBooks();
+}
+
+// ── TAX RULES PAGE ────────────────────────────────────────────
+function renderAcctTaxRules() {
+  const el = document.getElementById('acct-tax-rules-content');
+  if (!el) return;
+  const rules = taxRulesLoad();
+  el.innerHTML = `<div style="padding:24px;max-width:900px">
+    ${_acctSectionHeader('TAX & FEE RULES', 'Configure sales tax, excise, and regulatory fees by state and channel',
+      _acctBtnGreen('+ Add Rule', 'acctAddTaxRuleModal()'))}
+    <div style="background:rgba(255,184,48,0.07);border:1px solid rgba(255,184,48,0.2);border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:12px;color:var(--text3)">
+      Tax rules apply automatically to invoices based on customer state and channel. Wholesale/resale customers are typically tax-exempt. THC excise applies to THC products only.
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--card);border-radius:10px;overflow:hidden">
+      <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+        <th style="text-align:left;padding:10px 14px">Rule Name</th>
+        <th style="padding:10px 8px">State</th><th style="padding:10px 8px">Type</th>
+        <th style="padding:10px 8px">Channel</th><th style="text-align:right;padding:10px 14px">Rate</th>
+        <th style="padding:10px 8px">Active</th><th style="padding:10px 8px">Actions</th>
+      </tr>
+      ${rules.map(r => `<tr style="border-top:1px solid var(--border2)">
+        <td style="padding:8px 14px;font-weight:600">${_esc(r.name)}</td>
+        <td style="padding:8px;text-align:center;color:var(--text3)">${r.state}</td>
+        <td style="padding:8px;text-align:center"><span style="background:var(--bg3);padding:2px 7px;border-radius:4px;font-size:10px;font-family:var(--font-mono)">${r.type}</span></td>
+        <td style="padding:8px;color:var(--text3);font-size:11px">${r.channel}</td>
+        <td style="padding:8px 14px;text-align:right;font-family:var(--font-mono);color:var(--amber)">${(r.rate*100).toFixed(1)}%</td>
+        <td style="padding:8px;text-align:center">
+          <button onclick="acctToggleTaxRule('${r.ruleId}')" style="background:${r.active?'rgba(57,232,122,0.1)':'var(--bg3)'};border:1px solid ${r.active?'rgba(57,232,122,0.3)':'var(--border2)'};color:${r.active?'var(--green)':'var(--text3)'};border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer">${r.active?'ON':'OFF'}</button>
+        </td>
+        <td style="padding:8px">
+          <button onclick="acctDeleteTaxRule('${r.ruleId}')" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.25);color:var(--red);border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer">Del</button>
+        </td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+function acctToggleTaxRule(ruleId) {
+  const rules = taxRulesLoad();
+  const r = rules.find(x => x.ruleId === ruleId);
+  if (r) { r.active = !r.active; acctSave('420craft_acct_tax_rules', rules); }
+  renderAcctTaxRules();
+}
+
+function acctDeleteTaxRule(ruleId) {
+  if (!confirm('Delete this tax rule?')) return;
+  const rules = taxRulesLoad().filter(r => r.ruleId !== ruleId);
+  acctSave('420craft_acct_tax_rules', rules);
+  renderAcctTaxRules();
+}
+
+function acctAddTaxRuleModal() {
+  acctModal('ADD TAX RULE', `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Rule Name *</label>
+      <input class="form-input" id="tr-name" placeholder="e.g. CO Sales Tax"></div>
+    <div class="form-group"><label class="form-label">State</label>
+      <input class="form-input" id="tr-state" placeholder="CO or ALL" value="ALL"></div>
+    <div class="form-group"><label class="form-label">Type</label>
+      <select class="form-input" id="tr-type">
+        <option value="sales">Sales Tax</option><option value="excise">Excise Fee</option>
+        <option value="regulatory">Regulatory Fee</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Channel</label>
+      <select class="form-input" id="tr-channel">
+        <option value="all">All Channels</option><option value="dtc">DTC Only</option>
+        <option value="wholesale">Wholesale Only</option><option value="distributor">Distributor Only</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Rate (%)</label>
+      <input class="form-input" type="number" id="tr-rate" step="0.001" placeholder="2.9"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label>
+      <input class="form-input" id="tr-notes" placeholder="e.g. Applies to retail sales only"></div>
+  </div>`,
+  () => {
+    const name = document.getElementById('tr-name').value.trim();
+    if (!name) { showToast('⚠ Rule name required'); return; }
+    const rules = taxRulesLoad();
+    rules.push({
+      ruleId: acctId('TAX'), name, state: document.getElementById('tr-state').value.toUpperCase(),
+      rate: (parseFloat(document.getElementById('tr-rate').value)||0)/100,
+      type: document.getElementById('tr-type').value,
+      channel: document.getElementById('tr-channel').value,
+      active: true, notes: document.getElementById('tr-notes').value,
+    });
+    acctSave('420craft_acct_tax_rules', rules);
+    showToast('✅ Tax rule added');
+    renderAcctTaxRules();
+  }, 'Add Rule');
+}
+
+// ── EXTENDED REPORTS PAGE — EXTRA TABS ───────────────────────
+// Extend renderAcctReports to add more report tabs
+const _origRenderAcctReports = renderAcctReports;
+renderAcctReports = function() {
+  _origRenderAcctReports();
+  // Patch the tab bar to add more tabs
+  const tabBar = document.querySelector('#acct-reports-content [data-rtab="4"]')?.parentElement;
+  if (!tabBar) return;
+  const extraTabs = ['Brand P&L','SKU Profit','Labor Eff.','Vendor Spend','Inv. Aging','Write-Offs'];
+  extraTabs.forEach((tab, i) => {
+    const btn = document.createElement('button');
+    btn.setAttribute('data-rtab', String(5 + i));
+    btn.style.cssText = 'background:var(--bg3);border:1px solid var(--border2);color:var(--text3);border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:400;white-space:nowrap';
+    btn.textContent = tab;
+    btn.onclick = function() { acctShowReportExt(5+i, this); };
+    tabBar.appendChild(btn);
+  });
+  // Add extra panels
+  const container = document.getElementById('acct-reports-content').querySelector('[id="rp4"]')?.parentElement;
+  if (!container) return;
+  const period = _prevPeriod(acctPeriod(acctToday()));
+  const extraPanels = [
+    _renderBrandPnLReport(period),
+    _renderSkuProfitReport(period),
+    _renderLaborEffReport(period),
+    _renderVendorSpendReport(period),
+    _renderInvAgingReport(),
+    _renderWriteOffReport(period),
+  ];
+  extraPanels.forEach((html, i) => {
+    const div = document.createElement('div');
+    div.id = 'rp' + (5+i);
+    div.style.display = 'none';
+    div.innerHTML = html;
+    container.appendChild(div);
+  });
+};
+
+function acctShowReportExt(idx, btn) {
+  document.querySelectorAll('[data-rtab]').forEach(b => {
+    b.style.background='var(--bg3)';b.style.borderColor='var(--border2)';
+    b.style.color='var(--text3)';b.style.fontWeight='400';
+  });
+  btn.style.background='rgba(255,184,48,0.15)';btn.style.borderColor='rgba(255,184,48,0.4)';
+  btn.style.color='var(--amber)';btn.style.fontWeight='600';
+  for(let i=0;i<11;i++){const p=document.getElementById('rp'+i);if(p)p.style.display=i===idx?'':'none';}
+}
+
+function _renderBrandPnLReport(period) {
+  const brands = [...new Set(dealsLoad().map(d=>d.brandName).filter(Boolean))];
+  const pnl = brands.map(b => calcBrandPnL(b, period)).filter(b => b.shipmentCount > 0 || b.settRevenue > 0);
+  if (!pnl.length) return `<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No brand P&L data for ${period}</div>`;
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--card);border-radius:10px;overflow:hidden">
+    <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+      <th style="text-align:left;padding:10px 14px">Brand</th><th style="text-align:right;padding:10px 8px">Revenue</th>
+      <th style="text-align:right;padding:10px 8px">COGS</th><th style="text-align:right;padding:10px 8px">Labor</th>
+      <th style="text-align:right;padding:10px 8px">Gross Profit</th><th style="text-align:right;padding:10px 14px">Margin</th>
+    </tr>
+    ${pnl.map(b=>{const mc=b.grossMarginPct>=30?'var(--green)':b.grossMarginPct>=15?'var(--amber)':'var(--red)';
+      return`<tr style="border-top:1px solid var(--border2)">
+        <td style="padding:10px 14px;font-weight:600">${_esc(b.brandName)}</td>
+        <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--green)">${acctFmt(b.totalRevenue)}</td>
+        <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt(b.cogs)}</td>
+        <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt(b.labor)}</td>
+        <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:${mc}">${acctFmt(b.grossProfit)}</td>
+        <td style="padding:10px 14px;text-align:right;font-family:var(--font-mono);color:${mc}">${b.grossMarginPct.toFixed(1)}%</td>
+      </tr>`;}).join('')}
+  </table>`;
+}
+
+function _renderSkuProfitReport(period) {
+  const data = calcSkuProfitability(period);
+  if (!data.length) return `<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No SKU data for ${period} — create price books to see revenue per SKU</div>`;
+  return `<table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--card);border-radius:10px;overflow:hidden">
+    <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+      <th style="text-align:left;padding:10px 14px">SKU</th><th style="padding:10px 8px">MG</th>
+      <th style="text-align:right;padding:10px 8px">Cases</th><th style="text-align:right;padding:10px 8px">Revenue</th>
+      <th style="text-align:right;padding:10px 8px">COGS</th><th style="text-align:right;padding:10px 8px">GP</th>
+      <th style="text-align:right;padding:10px 14px">Margin</th>
+    </tr>
+    ${data.map(r=>{const mc=r.grossMarginPct>=30?'var(--green)':r.grossMarginPct>=15?'var(--amber)':'var(--red)';
+      return`<tr style="border-top:1px solid var(--border2)">
+        <td style="padding:8px 14px;font-size:11px">${_esc(r.sku)}</td>
+        <td style="padding:8px;text-align:center;color:var(--text3)">${_esc(r.mg)}</td>
+        <td style="padding:8px;text-align:right;font-family:var(--font-mono)">${r.cases}</td>
+        <td style="padding:8px;text-align:right;font-family:var(--font-mono);color:var(--green)">${acctFmt(r.revenue)}</td>
+        <td style="padding:8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${acctFmt(r.cogs)}</td>
+        <td style="padding:8px;text-align:right;font-family:var(--font-mono);color:${mc}">${acctFmt(r.grossProfit)}</td>
+        <td style="padding:8px 14px;text-align:right;font-family:var(--font-mono);color:${mc}">${r.grossMarginPct.toFixed(1)}%</td>
+      </tr>`;}).join('')}
+  </table>`;
+}
+
+function _renderLaborEffReport(period) {
+  const data = calcLaborEfficiency(period);
+  if (!data.length) return `<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No completed production runs for ${period}</div>`;
+  const avgCph = data.reduce((a,r)=>a+r.casesPerHr,0)/data.length;
+  const totalHrs = data.reduce((a,r)=>a+r.totalHrs,0);
+  return `<div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+      ${_acctCard('AVG CASES/HR', avgCph.toFixed(1), 'across '+data.length+' runs', 'var(--green)', '⚡')}
+      ${_acctCard('TOTAL PROD HOURS', totalHrs.toFixed(1)+'h', period, 'var(--blue)', '⏱')}
+      ${_acctCard('TOTAL RUNS', data.length, 'completed', 'var(--amber)', '🏗')}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--card);border-radius:10px;overflow:hidden">
+      <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+        <th style="text-align:left;padding:10px 14px">Date</th><th style="text-align:left;padding:10px 8px">SKU</th>
+        <th style="text-align:right;padding:10px 8px">Cases</th><th style="text-align:right;padding:10px 8px">Crew Hrs</th>
+        <th style="text-align:right;padding:10px 8px">Cases/Hr</th><th style="text-align:right;padding:10px 8px">Cans/Hr</th>
+        <th style="text-align:right;padding:10px 14px">Labor/Case</th>
+      </tr>
+      ${data.map(r=>{const eff=r.casesPerHr>=avgCph*1.1?'var(--green)':r.casesPerHr>=avgCph*0.9?'var(--amber)':'var(--red)';
+        return`<tr style="border-top:1px solid var(--border2)">
+          <td style="padding:8px 14px;font-size:10px;color:var(--text3)">${r.date}</td>
+          <td style="padding:8px 8px;font-size:11px">${_esc(r.sku)}</td>
+          <td style="padding:8px;text-align:right;font-family:var(--font-mono)">${r.totalCases}</td>
+          <td style="padding:8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${r.totalHrs}h</td>
+          <td style="padding:8px;text-align:right;font-family:var(--font-mono);color:${eff};font-weight:700">${r.casesPerHr}</td>
+          <td style="padding:8px;text-align:right;font-family:var(--font-mono);color:var(--text3)">${r.cansPerHr}</td>
+          <td style="padding:8px 14px;text-align:right;font-family:var(--font-mono)">${acctFmt(r.laborCostPerCase)}</td>
+        </tr>`;}).join('')}
+    </table>
+  </div>`;
+}
+
+function _renderVendorSpendReport(period) {
+  const data = calcVendorSpend(period);
+  const total = data.reduce((a,r)=>a+r.totalSpend,0);
+  if (!data.length) return `<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No vendor bills for ${period} — add bills via AP & Purchase Orders</div>`;
+  return `<div>
+    ${_acctCard('TOTAL VENDOR SPEND', acctFmt(total), data.length+' vendors · '+period, 'var(--amber)', '🏪')}
+    <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--card);border-radius:10px;overflow:hidden;margin-top:16px">
+      <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+        <th style="text-align:left;padding:10px 14px">Vendor</th>
+        <th style="text-align:right;padding:10px 8px">Bills</th>
+        <th style="text-align:right;padding:10px 8px">Total Spend</th>
+        <th style="text-align:left;padding:10px 14px">Categories</th>
+      </tr>
+      ${data.map(r=>`<tr style="border-top:1px solid var(--border2)">
+        <td style="padding:10px 14px;font-weight:600">${_esc(r.vendorName)}</td>
+        <td style="padding:10px 8px;text-align:right;color:var(--text3)">${r.billCount}</td>
+        <td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--amber)">${acctFmt(r.totalSpend)}</td>
+        <td style="padding:10px 14px;font-size:11px;color:var(--text3)">${Object.keys(r.byCategory).join(', ')}</td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+function _renderInvAgingReport() {
+  const data = calcInventoryAging();
+  const atRisk = data.filter(r=>r.atRisk);
+  const totalValue = data.reduce((a,r)=>a+r.value,0);
+  const atRiskValue = atRisk.reduce((a,r)=>a+r.value,0);
+  if (!data.length) return `<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No inventory data — log batches in Log Movement first</div>`;
+  const buckets = {};
+  data.forEach(r=>{if(!buckets[r.ageBucket])buckets[r.ageBucket]={cases:0,value:0};buckets[r.ageBucket].cases+=r.onHand;buckets[r.ageBucket].value+=r.value;});
+  return `<div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+      ${_acctCard('TOTAL INV VALUE', acctFmt(totalValue), data.length+' batches on hand', 'var(--green)', '📦')}
+      ${_acctCard('AT-RISK (120+ days)', acctFmt(atRiskValue), atRisk.length+' batches', atRisk.length>0?'var(--red)':'var(--green)', '⚠️')}
+      ${_acctCard('AVG AGE', data.filter(r=>r.ageDays).length>0?(data.filter(r=>r.ageDays).reduce((a,r)=>a+r.ageDays,0)/data.filter(r=>r.ageDays).length).toFixed(0)+' days':'—', 'weighted', 'var(--amber)', '📅')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px">
+      ${Object.entries(buckets).map(([bucket,d])=>`<div style="background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:10px 12px">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:2px">${bucket}</div>
+        <div style="font-family:var(--font-mono);font-size:15px;color:var(--text)">${d.cases} cases</div>
+        <div style="font-size:11px;color:var(--text3)">${acctFmt(d.value)}</div>
+      </div>`).join('')}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--card);border-radius:10px;overflow:hidden">
+      <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+        <th style="text-align:left;padding:8px 14px">Batch</th><th style="padding:8px">SKU</th>
+        <th style="text-align:right;padding:8px">Cases</th><th style="text-align:right;padding:8px">Age</th>
+        <th style="text-align:right;padding:8px">Value</th><th style="padding:8px">Risk</th>
+      </tr>
+      ${data.slice(0,20).map(r=>`<tr style="border-top:1px solid var(--border2)">
+        <td style="padding:7px 14px;font-family:var(--font-mono);font-size:10px;color:var(--green)">${r.batchCode}</td>
+        <td style="padding:7px 8px;font-size:11px">${_esc(r.sku)}</td>
+        <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">${r.onHand}</td>
+        <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:${r.atRisk?'var(--red)':r.ageDays>90?'var(--amber)':'var(--text3)'}">${r.ageDays!==null?r.ageDays+'d':'—'}</td>
+        <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">${r.value>0?acctFmt(r.value):'—'}</td>
+        <td style="padding:7px 8px">${r.atRisk?'<span style="color:var(--red);font-size:10px">⚠ AT RISK</span>':'<span style="color:var(--text3);font-size:10px">OK</span>'}</td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+function _renderWriteOffReport(period) {
+  const wo = calcWriteOffAnalysis(period);
+  const sample = calcSamplePromoAnalysis(period);
+  if (!wo.totalCases && !sample.totalCases)
+    return `<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px">No write-offs or samples for ${period}</div>`;
+  return `<div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+      ${_acctCard('WRITE-OFFS', wo.totalCases+' cases', acctFmt(wo.totalValue)+' cost value', wo.totalCases>0?'var(--red)':'var(--green)', '📉')}
+      ${_acctCard('SAMPLES/PROMOS', sample.totalCases+' cases', acctFmt(sample.totalValue)+' cost value', 'var(--amber)', '🎯')}
+      ${_acctCard('TOTAL NON-REVENUE', (wo.totalCases+sample.totalCases)+' cases', acctFmt(wo.totalValue+sample.totalValue), 'var(--red)', '💸')}
+      ${_acctCard('PERIOD', period, 'reporting period', 'var(--text3)', '📅')}
+    </div>
+    ${wo.byType.length?`<div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:8px">WRITE-OFFS BY TYPE</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px">
+      ${wo.byType.map(t=>`<div style="background:rgba(255,77,109,0.06);border:1px solid rgba(255,77,109,0.2);border-radius:8px;padding:10px 12px">
+        <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:2px">${_esc(t.type)}</div>
+        <div style="font-family:var(--font-mono);font-size:15px">${t.cases} cases</div>
+        <div style="font-size:11px;color:var(--text3)">${acctFmt(t.value)}</div>
+      </div>`).join('')}
+    </div>`:''}
+    ${sample.byCustomer.length?`<div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:8px">SAMPLES BY RECIPIENT</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
+      ${sample.byCustomer.map(c=>`<div style="background:rgba(255,184,48,0.06);border:1px solid rgba(255,184,48,0.2);border-radius:8px;padding:10px 12px">
+        <div style="font-size:11px;font-weight:600;color:var(--amber);margin-bottom:2px">${_esc(c.customer)}</div>
+        <div style="font-family:var(--font-mono);font-size:15px">${c.cases} cases</div>
+        <div style="font-size:11px;color:var(--text3)">${acctFmt(c.value)}</div>
+      </div>`).join('')}
+    </div>`:''}
+  </div>`;
+}
+
+// ── ADD PRICE BOOKS + TAX RULES TO NAV + showPage ────────────
+// Inject nav items dynamically at runtime (avoids HTML injection)
+function _acctInjectPhase3Nav() {
+  // Check if already injected
+  if (document.querySelector('[onclick*="acct-price-books"]')) return;
+  const exceptionsItem = document.querySelector('[onclick*="acct-exceptions"]');
+  if (!exceptionsItem) return;
+  const navItems = [
+    ['acct-price-books', '💲', 'Price Books'],
+    ['acct-tax-rules', '🏛️', 'Tax Rules'],
+  ];
+  navItems.forEach(([page, icon, label]) => {
+    const div = document.createElement('div');
+    div.className = 'nav-item';
+    div.onclick = function() { showPage(page, this); };
+    div.innerHTML = `<span class="icon">${icon}</span> ${label}`;
+    exceptionsItem.parentElement.insertBefore(div, exceptionsItem.nextSibling);
+    // Add pageTitles entry
+    pageTitles[page] = label.toUpperCase();
+    // Add page div if not exists
+    if (!document.getElementById(`page-${page}`)) {
+      const pageDiv = document.createElement('div');
+      pageDiv.className = 'page';
+      pageDiv.id = `page-${page}`;
+      pageDiv.innerHTML = `<div id="${page}-content"></div>`;
+      document.getElementById('page-acct-exceptions').after(pageDiv);
+    }
+  });
+}
+
+// Extend showPage to handle phase 3 pages
+const _p2ShowPage = showPage;
+showPage = function(id, el) {
+  _p2ShowPage(id, el);
+  if (id === 'acct-price-books') renderAcctPriceBooks();
+  if (id === 'acct-tax-rules')   renderAcctTaxRules();
+};
+
+// ── ORDER QUEUE → ACCOUNTING LINK ────────────────────────────
+// Patch renderOrderQueue to show linked deal and invoice status
+const _origRenderOQ = typeof renderOrderQueue === 'function' ? renderOrderQueue : null;
+function _acctEnrichOrderQueue() {
+  // Find order cards and add accounting badge
+  setTimeout(() => {
+    const orders = JSON.parse(localStorage.getItem('420craft_customer_orders')||'[]');
+    orders.forEach(order => {
+      const deal = dealGetActive(order.customer||order.customerName||'', order.brand||order.brandName||'')[0];
+      const invs = invoicesLoad().filter(i => i.refOrderId === order.id || i.customerName === (order.customer||order.customerName));
+      // Find the order row element if visible
+      const row = document.querySelector(`[data-order-id="${order.id}"]`);
+      if (row && !row.querySelector('.acct-badge')) {
+        const badge = document.createElement('span');
+        badge.className = 'acct-badge';
+        badge.style.cssText = 'font-size:10px;font-family:var(--font-mono);padding:2px 7px;border-radius:4px;margin-left:6px;background:var(--bg3);color:var(--text3)';
+        badge.textContent = deal ? (DEAL_TYPES[deal.dealType]||deal.dealType) : 'No deal';
+        row.querySelector('.order-status')?.appendChild(badge);
+      }
+    });
+  }, 200);
+}
+
+// ── MONTH-END EXPORT BUTTON in Close Center ───────────────────
+const _origRenderAcctClose = renderAcctClose;
+renderAcctClose = function() {
+  _origRenderAcctClose();
+  // Add export button to close page header
+  const closeEl = document.getElementById('acct-close-content');
+  if (!closeEl) return;
+  const headerBtn = closeEl.querySelector('[onclick*="acctOpenPeriod"]')?.parentElement;
+  if (headerBtn && !headerBtn.querySelector('.me-export-btn')) {
+    const btn = document.createElement('button');
+    btn.className = 'me-export-btn';
+    btn.style.cssText = 'background:rgba(57,232,122,0.12);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;font-weight:600';
+    btn.textContent = '📥 Export Month-End';
+    btn.onclick = () => {
+      const period = prompt('Export period (YYYY-MM):', _prevPeriod(acctPeriod(acctToday())));
+      if (period) exportMonthEndReport(period);
+    };
+    headerBtn.insertBefore(btn, headerBtn.firstChild);
+  }
+};
+
+// ── PHASE 3 INIT ─────────────────────────────────────────────
+setTimeout(() => {
+  try {
+    _acctInjectPhase3Nav();
+  } catch(e) { console.warn('Phase 3 nav init:', e); }
+}, 1000);
 
 </script>
 </body>
