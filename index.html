@@ -4834,21 +4834,30 @@ function renderDashboard() {
   const filteredSkus = brandF_dash
     ? skuData.filter(s => getBrandLine(s.SKU||s.Full_SKU||'') === brandF_dash)
     : skuData;
-  // KPIs — calculated from movements (Form Responses) for accurate all-time totals
-  // movements is the true source: every case in and out since day 1
+  // KPIs — use movements if we have the full set, otherwise fall back to skuData totals
+  // skuData (SEED_SKUS) has correct all-time totals from the spreadsheet
   const movArr = Array.isArray(movements) ? movements : [];
-  const filteredMovs = brandF_dash
-    ? movArr.filter(m => {
-        const s = skuData.find(sk => (sk.SKU||sk.Full_SKU||sk.sku_code||'') === (m.SKU||m.sku_code||m.Batch_Code||''));
-        return s && getBrandLine(s.SKU||s.Full_SKU||'') === brandF_dash;
-      })
-    : movArr;
+  const hasFullMovements = movArr.length >= 1700; // 1M row fetch — always full // full set = ~1798 records
 
-  const totalIn   = filteredMovs.filter(m => (m.direction||m.Direction||'') === 'inbound' || (m.movement_type||m.Movement_Type||'').includes('inbound'))
-    .reduce((a,m) => a + parseInt(m.quantity||m.Quantity||0), 0);
-  const totalOut  = filteredMovs.filter(m => (m.direction||m.Direction||'') === 'outbound' || (m.movement_type||m.Movement_Type||'').includes('outbound'))
-    .reduce((a,m) => a + parseInt(m.quantity||m.Quantity||0), 0);
-  const totalHand = totalIn - totalOut;
+  let totalIn, totalOut;
+  if (hasFullMovements) {
+    // Calculate from live movements — most accurate
+    const filteredMovs = brandF_dash
+      ? movArr.filter(m => {
+          const s = skuData.find(sk => (sk.SKU||sk.Full_SKU||sk.sku_code||'') === (m.SKU||m.sku_code||''));
+          return s && getBrandLine(s.SKU||s.Full_SKU||'') === brandF_dash;
+        })
+      : movArr;
+    totalIn  = filteredMovs.filter(m => (m.direction||m.Direction||'') === 'inbound' || (m.movement_type||'').includes('inbound'))
+      .reduce((a,m) => a + parseInt(m.quantity||m.Quantity||0), 0);
+    totalOut = filteredMovs.filter(m => (m.direction||m.Direction||'') === 'outbound' || (m.movement_type||'').includes('outbound'))
+      .reduce((a,m) => a + parseInt(m.quantity||m.Quantity||0), 0);
+  } else {
+    // Fall back to skuData totals — these are pre-calculated from the full spreadsheet
+    totalIn  = filteredSkus.reduce((a,s) => a + parseInt(s.Inbound||0), 0);
+    totalOut = filteredSkus.reduce((a,s) => a + parseInt(s.Outbound||0), 0);
+  }
+  const totalHand = Math.max(0, totalIn - totalOut);
 
   // Low stock: SKUs where on-hand (from batch rollup) is <= 10 cases
   const lowCount = filteredSkus.filter(s => (s.OnHand||0) <= 10 && (s.OnHand||0) >= 0).length;
@@ -19729,7 +19738,7 @@ const _tableSync = {
     }),
     pages: ['inventory','inv-detail','movement-history','dashboard','brand-velocity'],
     postFetch: (data) => { if(typeof movements!=='undefined') movements = data; },
-    orderBy: { col: 'created_at', asc: false }, limit: 10000,
+    orderBy: { col: 'created_at', asc: false }, limit: 1000000,
   },
   sku_master: {
     key: '420craft_skus',
@@ -19857,7 +19866,15 @@ async function _remoteSync(table, forceRender) {
   try {
     let query = sb.from(table).select('*');
     if (cfg.orderBy) query = query.order(cfg.orderBy.col, { ascending: cfg.orderBy.asc });
-    if (cfg.limit && cfg.limit <= 5000) query = query.limit(cfg.limit);
+    // Use range to bypass Supabase's 1000-row default limit
+    if (cfg.limit && cfg.limit > 1000) {
+      query = query.range(0, cfg.limit - 1);
+    } else if (cfg.limit) {
+      query = query.limit(cfg.limit);
+    } else {
+      // No limit set — use large range to get all rows
+      query = query.range(0, 999999);
+    }
     const { data, error } = await query;
     if (error) throw error;
 
@@ -20325,7 +20342,12 @@ const _SB_WRITE_MAP = {
       lead_operator: r.leadOperator||r.lead_operator||null,
       notes: r.notes||null,
     }),
-    conflict: 'id',
+    conflict: 'batch_code', // use batch_code so saves update not duplicate
+    // Filter out DEMO/seed data — never write test runs to Supabase
+    filter: rows => rows.filter(r => {
+      const bc = (r.batchCode||r.batch_code||'').toUpperCase();
+      return bc && bc !== 'DEMO' && bc !== 'TEST' && bc !== '' && bc.length > 3;
+    }),
   },
   '420craft_schedule': {
     table: 'production_schedule_blocks',
@@ -20454,7 +20476,9 @@ async function _sbWriteAfterSave(lsKey) {
         if (toInsert.length) await sb.from(cfg.table).insert(toInsert);
       }
     } else {
-      const toWrite = rows.map(cfg.toRow).filter(r => {
+      // Apply table-specific filter if defined (e.g. remove DEMO/test data)
+      const rawRows = cfg.filter ? cfg.filter(rows) : rows;
+      const toWrite = rawRows.map(cfg.toRow).filter(r => {
         // Filter out rows with empty required fields
         const firstVal = Object.values(r)[0];
         return firstVal !== '' && firstVal !== null && firstVal !== undefined;
