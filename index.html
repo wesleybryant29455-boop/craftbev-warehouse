@@ -4204,13 +4204,10 @@ window.addEventListener('load', function() {
 // Set your Apps Script Web App URL here after deploying
 if (!localStorage.getItem('420craft_shipstation_key')) localStorage.setItem('420craft_shipstation_key', '');
 // Auto-clear known broken Apps Script URL
-const _WORKING_URL = 'https://script.google.com/macros/s/AKfycbzpcVVcqvIIsc7s44irnf3I0D6gg9eyJKx1mLOoqJnlWpGvcyu3pw0SR2KbXuL9-awI/exec';
-// Auto-migrate any old script URL to the current version
-const _storedUrl = localStorage.getItem('420craft_sheets_url');
-if (!_storedUrl || !_storedUrl.includes('AKfycbzpcVV')) {
-  localStorage.setItem('420craft_sheets_url', _WORKING_URL);
-}
-let SHEETS_URL = localStorage.getItem('420craft_sheets_url') || _WORKING_URL;
+const _WORKING_URL = 'https://script.google.com/macros/s/AKfycbxNXiOamSFDmqW5_Gxpr61rZYzaMq5_rjuro3ZBjNPDPg8qP9hDxkMLeQTp4TWTdzWE/exec';
+// Always force the current script URL — clears any old cached version
+localStorage.setItem('420craft_sheets_url', _WORKING_URL);
+let SHEETS_URL = _WORKING_URL;
 let _syncQueue = [];
 let _syncTimer = null;
 let _syncStatus = 'idle'; // idle | syncing | error | ok
