@@ -4502,11 +4502,13 @@ function fetchFromSheets() {
     if (rawBatches.length > 0) {
       batchData = rawBatches;
       localStorage.setItem('420craft_batches', JSON.stringify(batchData));
+    _sbWriteAfterSave('420craft_batches');
     }
 
     if (rawMovements.length > 0) {
       movements = rawMovements;
       localStorage.setItem('420craft_movements', JSON.stringify(movements));
+  _sbWriteAfterSave('420craft_movements');
     }
 
     renderDashboard();
@@ -4588,6 +4590,7 @@ function loadData() {
 function saveData() {
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
   localStorage.setItem('420craft_movements', JSON.stringify(movements));
+  _sbWriteAfterSave('420craft_movements');
   localStorage.setItem('420craft_batches', JSON.stringify(batchData));
   // Auto-sync to Google Sheets
   sheetsQueue('sync_all', {
@@ -5952,6 +5955,7 @@ function loadBrandCatalog() {
 
 function saveBrandCatalog() {
   localStorage.setItem('420craft_brands', JSON.stringify(brandCatalog));
+  _sbWriteAfterSave('420craft_brands');
   if (sheetsEnabled()) sheetsQueue('save_brands', { brands: brandCatalog });
 }
 
@@ -6708,6 +6712,7 @@ function shLoad() {
 }
 function shSave() {
   localStorage.setItem('420craft_shipments', JSON.stringify(shipments));
+  _sbWriteAfterSave('420craft_shipments');
   if (sheetsEnabled()) sheetsQueue('sync_all', { shipments });
 }
 function shGetById(id) { return shipments.find(s => s.id === id); }
@@ -8102,6 +8107,7 @@ function abLoad() {
 }
 function abSave() {
   localStorage.setItem('420craft_address_book', JSON.stringify(addressBook));
+  _sbWriteAfterSave('420craft_address_book');
   if (sheetsEnabled()) sheetsQueue('save_address_book', { addressBook });
 }
 
@@ -8838,6 +8844,7 @@ function smLoad() {
 
 function smSave() {
   localStorage.setItem('420craft_shipping_materials', JSON.stringify(shippingMaterials));
+  _sbWriteAfterSave('420craft_shipping_materials');
   if (sheetsEnabled()) sheetsQueue('save_shipping_materials', { shippingMaterials });
 }
 
@@ -9810,6 +9817,7 @@ function operatorLoad() {
 }
 function operatorSaveAll(ops) {
   localStorage.setItem('420craft_operators', JSON.stringify(ops));
+  _sbWriteAfterSave('420craft_operators');
 }
 
 function renderOperators() {
@@ -10312,6 +10320,7 @@ function consumableLoad() {
 }
 function consumableSaveAll(items) {
   localStorage.setItem('420craft_consumables', JSON.stringify(items));
+  _sbWriteAfterSave('420craft_consumables');
 }
 
 function renderConsumables() {
@@ -10743,6 +10752,7 @@ function prodRunLoad() {
 }
 function prodRunSaveAll(runs) {
   localStorage.setItem('420craft_prod_runs', JSON.stringify(runs));
+  _sbWriteAfterSave('420craft_prod_runs');
   const inProg = runs.filter(r=>r.status==='in-progress').length;
   const badge = document.getElementById('prod-run-badge');
   if (badge) { badge.textContent=inProg; badge.style.display=inProg>0?'inline':'none'; }
@@ -12435,6 +12445,7 @@ function oqLoadOrders() {
 }
 function oqSaveOrders() {
   localStorage.setItem('420craft_customer_orders', JSON.stringify(customerOrders));
+  _sbWriteAfterSave('420craft_customer_orders');
 }
 
 let schedViewYear  = new Date().getFullYear();
@@ -12446,6 +12457,7 @@ function scheduleLoad() {
 }
 function scheduleSave(blocks) {
   localStorage.setItem('420craft_schedule', JSON.stringify(blocks));
+  _sbWriteAfterSave('420craft_schedule');
   if (sheetsEnabled()) sheetsQueue('sync_schedule', blocks);
 }
 function scheduleLoadConfig() {
@@ -16143,6 +16155,7 @@ function ntLoadData() {
 
 function ntSaveContacts() {
   localStorage.setItem('420craft_nt_contacts', JSON.stringify(_ntContacts));
+  _sbWriteAfterSave('420craft_nt_contacts');
 }
 
 function ntSaveHistory() {
@@ -16900,6 +16913,7 @@ function acctLoad(key){try{return JSON.parse(localStorage.getItem(key)||'[]');}c
 function acctLoadObj(key){try{return JSON.parse(localStorage.getItem(key)||'{}');}catch(e){return {};}}
 function acctSave(key,data){
   localStorage.setItem(key,JSON.stringify(data));
+  _sbWriteAcct(key,Array.isArray(data)?data:[data]);
   if(typeof sheetsQueue==='function'&&typeof sheetsEnabled==='function'&&sheetsEnabled())
     sheetsQueue('save_acct_data',{key:key.replace('420craft_',''),data});
 }
@@ -19528,19 +19542,39 @@ const _pageRenderMap = {
 const _tableSync = {
   batches: {
     key: '420craft_batches',
-    transform: r => ({ ...r, Batch: r.batch_code, BatchCode: r.batch_code, SKU: r.sku_code,
-      MG: r.mg_strength, CanSize: r.can_size, CaseSize: r.case_size,
-      ProductionDate: r.production_date, COA_Link: r.coa_link, Status: r.status,
-      Inbound: r.cases_produced, OnHand: r.cases_on_hand, Outbound: r.cases_shipped }),
+    transform: r => ({
+      ...r,
+      Batch: r.batch_code || r['Batch Code'] || r.Batch || r.BatchCode || '',
+      BatchCode: r.batch_code || r['Batch Code'] || r.BatchCode || '',
+      SKU: r.sku_code || r.SKU || '',
+      MG: r.mg_strength || r['MG Strength'] || r.MG || '',
+      CanSize: r.can_size || r['Can Size'] || r.CanSize || '12 oz',
+      CaseSize: parseInt(r.case_size || r['Case Pack'] || r.CaseSize || 24),
+      ProductionDate: r.production_date || r['Production Date'] || r.ProductionDate || '',
+      COA_Link: r.coa_link || r['COA Link'] || r.COA_Link || '',
+      Status: r.status || r.Status || 'released',
+      Inbound: parseInt(r.cases_produced || r.Inbound || 0),
+      OnHand: parseInt(r.cases_on_hand || r['On Hand'] || r.OnHand || 0),
+      Outbound: parseInt(r.cases_shipped || r.Outbound || 0),
+    }),
     pages: ['inventory','inv-detail','inv-audit','dashboard','brand-velocity','reorder','acct-inventory-val','acct-costing','batch-calc'],
     postFetch: (data) => { batchData = data; },
   },
   movements: {
     key: '420craft_movements',
-    transform: r => ({ ...r, Timestamp: r.created_at, Batch_Code: r.batch_code, SKU: r.sku_code,
-      Quantity: r.quantity, Direction: r.direction,
-      Movement_Type: (r.movement_type||'').replace(/_/g,' ').replace(/\w/g,c=>c.toUpperCase()),
-      Notes: r.notes, Destination: r.destination }),
+    transform: r => ({
+      ...r,
+      Timestamp: r.created_at || r.Timestamp || '',
+      Batch_Code: r.batch_code || r.Batch_Code || r['Batch Code'] || '',
+      SKU: r.sku_code || r.SKU || '',
+      Quantity: parseInt(r.quantity || r.Quantity || 0),
+      Direction: r.direction || r.Direction || 'outbound',
+      Movement_Type: r.movement_type
+        ? r.movement_type.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())
+        : (r.Movement_Type || r['Movement Type'] || 'Outbound'),
+      Notes: r.notes || r.Notes || '',
+      Destination: r.destination || r.Destination || null,
+    }),
     pages: ['inventory','inv-detail','movement-history','dashboard','brand-velocity'],
     postFetch: (data) => { if(typeof movements!=='undefined') movements = data; },
     orderBy: { col: 'created_at', asc: false }, limit: 2000,
@@ -20011,6 +20045,296 @@ async function _checkLiveStatus() {
 setTimeout(_checkLiveStatus, 2000);
 setInterval(_checkLiveStatus, 10000);
 
+// ── SUPABASE WRITE LAYER ─────────────────────────────────────────
+// Every save operation calls _sbWriteAfterSave(key) after updating localStorage.
+// This writes to Supabase in the background — non-blocking, non-breaking.
+// Google Sheets backup fires independently as a secondary failsafe.
+
+// Maps localStorage keys to their Supabase table + row transform
+const _SB_WRITE_MAP = {
+  '420craft_batches': {
+    table: 'batches',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_batches')||'[]'); } catch { return []; }
+    },
+    toRow: b => ({
+      batch_code: b.batch_code||b.BatchCode||b.Batch||b['Batch Code']||'',
+      sku_code: b.sku_code||b.SKU||'',
+      mg_strength: b.mg_strength||b.MG||b['MG Strength']||'',
+      can_size: b.can_size||b.CanSize||b['Can Size']||'12 oz',
+      case_size: parseInt(b.case_size||b.CaseSize||b['Case Pack']||24),
+      production_date: b.production_date||b.ProductionDate||b['Production Date']||null,
+      coa_link: b.coa_link||b.COA_Link||b['COA Link']||null,
+      status: (b.status||b.Status||'released').toLowerCase().replace(/\s+/g,'_'),
+      cases_produced: parseInt(b.cases_produced||b.Inbound||0),
+      cases_on_hand: parseInt(b.cases_on_hand||b.OnHand||b['On Hand']||0),
+      cases_shipped: parseInt(b.cases_shipped||b.Outbound||0),
+      lead_operator: b.lead_operator||b.Operator||null,
+      notes: b.notes||b.Notes||null,
+    }),
+    conflict: 'batch_code',
+  },
+  '420craft_movements': {
+    table: 'movements',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_movements')||'[]'); } catch { return []; }
+    },
+    toRow: m => ({
+      batch_code: m.batch_code||m.Batch_Code||m['Batch Code']||'',
+      sku_code: m.sku_code||m.SKU||'',
+      movement_type: ((m.movement_type||m.Movement_Type||m['Movement Type']||'outbound_shipment')
+        .toLowerCase().replace(/[\s\/\-]+/g,'_')),
+      direction: m.direction||m.Direction||'outbound',
+      quantity: parseInt(m.quantity||m.Quantity||0),
+      destination: m.destination||m.Destination||null,
+      write_off_reason: m.write_off_reason||m.WriteOffReason||null,
+      notes: m.notes||m.Notes||null,
+      operator: m.operator||m.Operator||null,
+      created_at: m.created_at||m.Timestamp||new Date().toISOString(),
+    }),
+    conflict: null, // insert only — movements are immutable records
+    insertOnly: true,
+  },
+  '420craft_shipments': {
+    table: 'shipments',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_shipments')||'[]'); } catch { return []; }
+    },
+    toRow: s => ({
+      internal_id: s.id||s.internal_id||`SH-${Date.now()}`,
+      status: s.status||'pending',
+      shipment_type: s.type||s.shipment_type||'customer_order',
+      recipient_name: s.recipientName||s.recipient_name||null,
+      recipient_company: s.recipientCompany||null,
+      recipient_addr1: s.recipientAddr1||s.recipient_addr1||null,
+      recipient_city: s.recipientCity||s.recipient_city||null,
+      recipient_state: s.recipientState||s.recipient_state||null,
+      recipient_zip: s.recipientZip||s.recipient_zip||null,
+      carrier: s.carrier||null,
+      tracking_number: s.trackingNumber||s.tracking_number||null,
+      items: s.items||[],
+      cogs: s.cogs||null,
+      carrier_cost: parseFloat(s.cogs?.carrierTotal||s.carrier_cost||0),
+      labor_cost: parseFloat(s.cogs?.laborTotal||s.labor_cost||0),
+      total_cost: parseFloat(s.cogs?.totalCogs||s.total_cost||0),
+      ship_date: s.shipDate||s.ship_date||null,
+      submitted_at: s.submittedAt||s.submitted_at||null,
+    }),
+    conflict: 'internal_id',
+  },
+  '420craft_operators': {
+    table: 'operators',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_operators')||'[]'); } catch { return []; }
+    },
+    toRow: o => ({
+      legacy_id: String(o.id||o.legacy_id||''),
+      name: o.name||'',
+      position: o.position||'',
+      status: o.status||'active',
+      shift_eligible: true,
+    }),
+    conflict: 'legacy_id',
+  },
+  '420craft_consumables': {
+    table: 'consumables',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_consumables')||'[]'); } catch { return []; }
+    },
+    toRow: c => ({
+      legacy_id: String(c.id||c.legacy_id||''),
+      name: c.name||'',
+      category: c.category||'',
+      unit: c.unit||'each',
+      unit_cost: parseFloat(c.unitCost||c.unit_cost||0),
+      true_cost_per_unit: parseFloat(c.trueCostPerUnit||c.true_cost_per_unit||0),
+      stock_on_hand: parseFloat(c.stockOnHand||c.stock_on_hand||0),
+      reorder_point: parseFloat(c.reorderPoint||c.reorder_point||0),
+      reorder_qty: parseFloat(c.reorderQty||c.reorder_qty||0),
+      last_purchase_date: c.lastPurchaseDate||c.last_purchase_date||null,
+      last_unit_cost: parseFloat(c.lastUnitCost||c.last_unit_cost||0),
+    }),
+    conflict: 'legacy_id',
+  },
+  '420craft_prod_runs': {
+    table: 'production_runs',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_prod_runs')||'[]'); } catch { return []; }
+    },
+    toRow: r => ({
+      batch_code: r.batchCode||r.batch_code||'',
+      sku_code: r.sku||r.sku_code||'',
+      status: r.status||'draft',
+      crew: r.crew||[],
+      cases_produced: parseInt(r.totalCases||r.cases_produced||0),
+      cost_summary: r.costSummary||r.cost_summary||null,
+      started_at: r.startedAt||r.started_at||null,
+      completed_at: r.completedAt||r.completed_at||null,
+      lead_operator: r.leadOperator||r.lead_operator||null,
+      notes: r.notes||null,
+    }),
+    conflict: 'id',
+  },
+  '420craft_schedule': {
+    table: 'production_schedule_blocks',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_schedule')||'[]'); } catch { return []; }
+    },
+    toRow: b => ({
+      title: b.title||'',
+      sku_code: b.skuCode||b.sku_code||'',
+      start_time: b.startTime||b.start_time||null,
+      end_time: b.endTime||b.end_time||null,
+      status: b.status||'scheduled',
+      cases_planned: parseInt(b.casesPlanned||b.cases_planned||0),
+      lead_operator: b.leadOperator||b.lead_operator||null,
+      notes: b.notes||null,
+    }),
+    conflict: 'id',
+  },
+  '420craft_shipping_materials': {
+    table: 'shipping_materials',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_shipping_materials')||'[]'); } catch { return []; }
+    },
+    toRow: m => ({
+      legacy_id: String(m.id||m.legacy_id||''),
+      name: m.name||'',
+      unit: m.unit||'each',
+      unit_cost: parseFloat(m.unitCost||m.unit_cost||0),
+      stock_on_hand: parseFloat(m.stockOnHand||m.stock_on_hand||0),
+    }),
+    conflict: 'legacy_id',
+  },
+  '420craft_customer_orders': {
+    table: 'customer_orders',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_customer_orders')||'[]'); } catch { return []; }
+    },
+    toRow: o => ({
+      status: o.status||'requested',
+      items: o.items||[],
+      ship_to: o.shipTo||o.ship_to||null,
+      notes: o.notes||null,
+      requested_date: o.requestedDate||o.requested_date||null,
+    }),
+    conflict: 'id',
+  },
+  '420craft_nt_contacts': {
+    table: 'notification_contacts',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_nt_contacts')||'[]'); } catch { return []; }
+    },
+    toRow: c => ({
+      legacy_id: String(c.id||c.legacy_id||''),
+      name: c.name||'',
+      company: c.company||null,
+      role: c.role||null,
+      email: c.email||null,
+      phone: c.phone||null,
+      notes: c.notes||null,
+    }),
+    conflict: 'legacy_id',
+  },
+  '420craft_brands': {
+    table: 'brands',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_brands')||'[]'); } catch { return []; }
+    },
+    toRow: b => ({
+      name: b.name||'',
+      status: b.status||'Active',
+      dev_log: b.devLog||b.dev_log||[],
+      checklist: b.checklist||{},
+      commercial_profile: { client: b.client, clientEmail: b.clientEmail },
+    }),
+    conflict: 'id',
+  },
+  '420craft_address_book': {
+    table: 'customers',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_address_book')||'[]'); } catch { return []; }
+    },
+    toRow: c => ({
+      name: c.name||c.company||'',
+      email: c.email||null,
+      phone: c.phone||null,
+      billing_address: { address1: c.address, city: c.city, state: c.state, zip: c.zip },
+    }),
+    conflict: 'id',
+  },
+};
+
+// Accounting table map for acctSave
+const _SB_ACCT_MAP = {
+  '420craft_acct_deals':          { table: 'customer_deals',      conflict: 'id' },
+  '420craft_acct_invoices':       { table: 'invoices',             conflict: 'invoice_no' },
+  '420craft_acct_payments':       { table: 'payments',             conflict: 'id' },
+  '420craft_acct_settlements':    { table: 'settlement_periods',   conflict: 'id' },
+  '420craft_acct_vendors':        { table: 'vendors',              conflict: 'id' },
+  '420craft_acct_pos':            { table: 'purchase_orders',      conflict: 'po_number' },
+  '420craft_acct_bills':          { table: 'vendor_bills',         conflict: 'id' },
+  '420craft_acct_cost_snapshots': { table: 'cost_snapshots',       conflict: 'id' },
+  '420craft_acct_close_periods':  { table: 'close_periods',        conflict: 'period' },
+  '420craft_acct_price_books':    { table: 'price_books',          conflict: 'id' },
+  '420craft_acct_tax_rules':      { table: 'tax_rules',            conflict: 'id' },
+};
+
+// Core write function — non-blocking, fires after localStorage update
+async function _sbWriteAfterSave(lsKey) {
+  if (!SUPABASE_CONFIG.remoteFirst) return;
+  const sb = getSupabaseClient();
+  if (!sb) return;
+
+  const cfg = _SB_WRITE_MAP[lsKey];
+  if (!cfg) return;
+
+  try {
+    const rows = cfg.getRows();
+    if (!rows || !rows.length) return;
+
+    if (cfg.insertOnly) {
+      // Movements — only insert new ones (find by created_at threshold)
+      const cutoff = new Date(Date.now() - 10000).toISOString(); // last 10 seconds
+      const newRows = rows.filter(r => (r.created_at||r.Timestamp||'') > cutoff);
+      if (newRows.length) {
+        const toInsert = newRows.map(cfg.toRow).filter(r => r.batch_code);
+        if (toInsert.length) await sb.from(cfg.table).insert(toInsert);
+      }
+    } else {
+      const toWrite = rows.map(cfg.toRow).filter(r => {
+        // Filter out rows with empty required fields
+        const firstVal = Object.values(r)[0];
+        return firstVal !== '' && firstVal !== null && firstVal !== undefined;
+      });
+      if (!toWrite.length) return;
+      if (cfg.conflict) {
+        await sb.from(cfg.table).upsert(toWrite, { onConflict: cfg.conflict, ignoreDuplicates: false });
+      } else {
+        await sb.from(cfg.table).upsert(toWrite);
+      }
+    }
+    console.log(`[SB Write] ${cfg.table}: ${rows.length} records synced`);
+  } catch(e) {
+    console.warn(`[SB Write] ${cfg.table} failed (data safe in localStorage):`, e.message);
+  }
+}
+
+// For acctSave — write accounting records to Supabase
+async function _sbWriteAcct(lsKey, records) {
+  if (!SUPABASE_CONFIG.remoteFirst) return;
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  const cfg = _SB_ACCT_MAP[lsKey];
+  if (!cfg || !records?.length) return;
+  try {
+    await sb.from(cfg.table).upsert(records, { onConflict: cfg.conflict, ignoreDuplicates: true });
+    console.log(`[SB Write] ${cfg.table}: ${records.length} acct records synced`);
+  } catch(e) {
+    console.warn(`[SB Write] ${cfg.table} acct failed:`, e.message);
+  }
+}
+
 // ── DUAL-WRITE HELPERS ────────────────────────────────────────
 
 async function sbRead(table, filters = {}) {
@@ -20051,11 +20375,19 @@ async function loadBatchesFromRemote() {
   const data = await sbRead('batches');
   if (!data) return;
   batchData = data.map(r => ({
-    Batch: r.batch_code, BatchCode: r.batch_code, SKU: r.sku_code,
-    MG: r.mg_strength, CanSize: r.can_size, CaseSize: r.case_size,
-    ProductionDate: r.production_date, COA_Link: r.coa_link,
-    Status: r.status, Inbound: r.cases_produced, OnHand: r.cases_on_hand,
-    Outbound: r.cases_shipped,
+    ...r,
+    Batch: r.batch_code || r['Batch Code'] || '',
+    BatchCode: r.batch_code || r['Batch Code'] || '',
+    SKU: r.sku_code || r.SKU || '',
+    MG: r.mg_strength || r['MG Strength'] || r.MG || '',
+    CanSize: r.can_size || r['Can Size'] || r.CanSize || '12 oz',
+    CaseSize: parseInt(r.case_size || r['Case Pack'] || r.CaseSize || 24),
+    ProductionDate: r.production_date || r['Production Date'] || '',
+    COA_Link: r.coa_link || r['COA Link'] || '',
+    Status: r.status || 'released',
+    Inbound: parseInt(r.cases_produced || r.Inbound || 0),
+    OnHand: parseInt(r.cases_on_hand || r['On Hand'] || r.OnHand || 0),
+    Outbound: parseInt(r.cases_shipped || r.Outbound || 0),
   }));
   localStorage.setItem('420craft_batches', JSON.stringify(batchData));
   console.log('[Remote] Loaded', batchData.length, 'batches from Supabase');
