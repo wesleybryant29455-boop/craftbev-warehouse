@@ -1132,7 +1132,16 @@ window.addEventListener('load', function() {
     <div class="nav-item" onclick="showPage('acct-exceptions',this)"><span class="icon">⚠️</span> Exceptions<span id="acct-exception-badge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;font-family:var(--font-mono);margin-left:4px"></span></div>
     <div class="nav-item" onclick="showPage('acct-reports',this)"><span class="icon">📈</span> Reports</div>
     <div class="nav-item" onclick="showPage('acct-shipment-costing',this)"><span class="icon">🚚</span> Shipment Costing</div>
+    <div class="nav-item" onclick="showPage('acct-invoice-types',this)"><span class="icon">📝</span> Invoice Types</div>
     <div class="nav-item" onclick="showPage('acct-integrations',this)"><span class="icon">🔗</span> Integrations</div>
+    <div class="nav-item" onclick="showPage('acct-qbo',this)"><span class="icon">💼</span> QuickBooks</div>
+    <div class="nav-item" onclick="showPage('acct-ar-reminders',this)"><span class="icon">📧</span> AR Reminders</div>
+    <div class="nav-item" onclick="showPage('acct-ap-accounts',this)"><span class="icon">🏦</span> Payment Accounts</div>
+    <div class="nav-item" onclick="showPage('acct-price-books',this)"><span class="icon">💲</span> Price Books</div>
+    <div class="nav-item" onclick="showPage('acct-tax-rules',this)"><span class="icon">🏛️</span> Tax Rules</div>
+    <div class="nav-section" style="color:var(--blue);border-color:rgba(56,189,248,0.2)">👥 Admin</div>
+    <div class="nav-item" onclick="showPage('acct-employees',this)"><span class="icon">👤</span> Employees</div>
+    <div class="nav-item" onclick="showPage('acct-roles',this)"><span class="icon">🛡️</span> Roles & Permissions</div>
     <div class="nav-section">Export</div>
     <div class="nav-item" onclick="showPage('notifications',this)">
       <span class="icon">📧</span> Notifications
@@ -2160,6 +2169,14 @@ window.addEventListener('load', function() {
   <div class="page" id="page-acct-reports"><div id="acct-reports-content"></div></div>
   <div class="page" id="page-acct-shipment-costing"><div id="acct-shipment-costing-content"></div></div>
   <div class="page" id="page-acct-integrations"><div id="acct-integrations-content"></div></div>
+  <div class="page" id="page-acct-invoice-types"><div id="acct-invoice-types-content"></div></div>
+  <div class="page" id="page-acct-qbo"><div id="acct-qbo-content"></div></div>
+  <div class="page" id="page-acct-ar-reminders"><div id="acct-ar-reminders-content"></div></div>
+  <div class="page" id="page-acct-ap-accounts"><div id="acct-ap-accounts-content"></div></div>
+  <div class="page" id="page-acct-employees"><div id="acct-employees-content"></div></div>
+  <div class="page" id="page-acct-roles"><div id="acct-roles-content"></div></div>
+  <div class="page" id="page-acct-price-books"><div id="acct-price-books-content"></div></div>
+  <div class="page" id="page-acct-tax-rules"><div id="acct-tax-rules-content"></div></div>
 
   <div class="page" id="page-backup">
     <div class="section-header">
@@ -4504,6 +4521,10 @@ const pageTitles = {
   'acct-close':'CLOSE & AUDIT','acct-exceptions':'EXCEPTION CENTER',
   'acct-reports':'REPORTS CENTER','acct-shipment-costing':'SHIPMENT COSTING',
   'acct-integrations':'INTEGRATIONS',
+  'acct-invoice-types':'INVOICE TYPES','acct-qbo':'QUICKBOOKS ONLINE',
+  'acct-ar-reminders':'AR REMINDER RULES','acct-ap-accounts':'PAYMENT ACCOUNTS',
+  'acct-employees':'EMPLOYEE PROFILES','acct-roles':'ROLES & PERMISSIONS',
+  'acct-price-books':'PRICE BOOKS','acct-tax-rules':'TAX & FEE RULES',
 };
 function showPage(id, el) {
   // Auto-close sidebar on mobile whenever a page is shown
