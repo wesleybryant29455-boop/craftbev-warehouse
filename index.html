@@ -16851,6 +16851,20 @@ showPage = function(id, el) {
 
 
 // ── FIX: Patch Brand field after loading from Sheets ──────────────
+function _rollupSkuTotals() {
+  // Roll up batch inventory totals into skuData so dashboard KPIs are correct
+  if (!Array.isArray(skuData) || !Array.isArray(batchData)) return;
+  skuData = skuData.map(sku => {
+    const skuCode = sku.SKU || sku.Full_SKU || sku.sku_code || '';
+    const batches = batchData.filter(b => (b.sku_code||b.SKU||b.Full_SKU||'') === skuCode);
+    const totalOnHand   = batches.reduce((s,b)=>s+parseInt(b.cases_on_hand||b.OnHand||b['On Hand']||0),0);
+    const totalInbound  = batches.reduce((s,b)=>s+parseInt(b.cases_produced||b.Inbound||0),0);
+    const totalOutbound = batches.reduce((s,b)=>s+parseInt(b.cases_shipped||b.Outbound||0),0);
+    return {...sku, OnHand: totalOnHand, Inbound: totalInbound, Outbound: totalOutbound};
+  });
+  localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+}
+
 function _fixSkuBrands() {
   if (!skuData || !skuData.length) return;
   // Normalize ALL skus — fix field names from Sheets format to portal format
@@ -16880,6 +16894,8 @@ function _fixSkuBrands() {
     };
   });
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+
+  _rollupSkuTotals();
 }
 
 
@@ -19558,7 +19574,7 @@ const _tableSync = {
       Outbound: parseInt(r.cases_shipped || r.Outbound || 0),
     }),
     pages: ['inventory','inv-detail','inv-audit','dashboard','brand-velocity','reorder','acct-inventory-val','acct-costing','batch-calc'],
-    postFetch: (data) => { batchData = data; },
+    postFetch: (data) => { batchData = data; _rollupSkuTotals(); },
   },
   movements: {
     key: '420craft_movements',
@@ -19584,7 +19600,7 @@ const _tableSync = {
     transform: r => ({ ...r, SKU: r.sku_code, Full_SKU: r.sku_code, MG_Strength: r.mg_strength,
       CanSize: r.can_size, CaseSize: r.case_size }),
     pages: ['inventory','sku-manager','batch-calc','brand-velocity','reorder'],
-    postFetch: (data) => { if(typeof skuData!=='undefined') skuData = data; _fixSkuBrands && _fixSkuBrands(); },
+    postFetch: (data) => { if(typeof skuData!=='undefined') skuData = data; _fixSkuBrands && _fixSkuBrands(); _rollupSkuTotals && _rollupSkuTotals(); },
   },
   production_runs: {
     key: '420craft_prod_runs',
