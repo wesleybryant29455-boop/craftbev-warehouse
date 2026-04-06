@@ -1141,6 +1141,7 @@ window.addEventListener('load', function() {
     <div class="nav-item" onclick="showPage('acct-tax-rules',this)"><span class="icon">🏛️</span> Tax Rules</div>
     <div class="nav-section" style="color:var(--blue);border-color:rgba(56,189,248,0.2)">👥 Admin</div>
     <div class="nav-item" onclick="showPage('acct-employees',this)"><span class="icon">👤</span> Employees</div>
+    <div class="nav-item" onclick="showPage('admin-diagnostics',this)"><span class="icon">🩺</span> Diagnostics</div>
     <div class="nav-item" onclick="showPage('acct-roles',this)"><span class="icon">🛡️</span> Roles & Permissions</div>
     <div class="nav-section">Export</div>
     <div class="nav-item" onclick="showPage('notifications',this)">
@@ -2169,6 +2170,7 @@ window.addEventListener('load', function() {
   <div class="page" id="page-acct-reports"><div id="acct-reports-content"></div></div>
   <div class="page" id="page-acct-shipment-costing"><div id="acct-shipment-costing-content"></div></div>
   <div class="page" id="page-acct-integrations"><div id="acct-integrations-content"></div></div>
+  <div class="page" id="page-admin-diagnostics"><div id="admin-diagnostics-content"></div></div>
   <div class="page" id="page-acct-invoice-types"><div id="acct-invoice-types-content"></div></div>
   <div class="page" id="page-acct-qbo"><div id="acct-qbo-content"></div></div>
   <div class="page" id="page-acct-ar-reminders"><div id="acct-ar-reminders-content"></div></div>
@@ -4596,6 +4598,7 @@ const pageTitles = {
   'acct-ar-reminders':'AR REMINDER RULES','acct-ap-accounts':'PAYMENT ACCOUNTS',
   'acct-employees':'EMPLOYEE PROFILES','acct-roles':'ROLES & PERMISSIONS',
   'acct-price-books':'PRICE BOOKS','acct-tax-rules':'TAX & FEE RULES',
+  'admin-diagnostics':'SYSTEM DIAGNOSTICS',
 };
 function showPage(id, el) {
   // Auto-close sidebar on mobile whenever a page is shown
@@ -19408,6 +19411,396 @@ _renderSettlementCard = function(s) {
 setTimeout(() => {
   try { _acctInjectAustinNav(); } catch(e) { console.warn('Austin nav init:', e); }
 }, 1200);
+
+// ═══════════════════════════════════════════════════════════════
+// SUPABASE BRIDGE — PHASE A/J (Data Access Abstraction)
+// Dual-write layer: localStorage + optional Supabase remote
+// Feature flag: SUPABASE_REMOTE_FIRST controls read source
+// ═══════════════════════════════════════════════════════════════
+
+const SUPABASE_CONFIG = {
+  url: '',          // Set via Settings → Apps Script / Supabase URL
+  anonKey: '',      // Set via Settings → Supabase Anon Key
+  remoteFirst: false,
+  get configured() { return !!(this.url && this.anonKey); }
+};
+
+// Load config from localStorage (non-sensitive anon key only)
+(function _loadSupabaseConfig() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('420craft_supabase_config') || '{}');
+    if (cfg.url) SUPABASE_CONFIG.url = cfg.url;
+    if (cfg.anonKey) SUPABASE_CONFIG.anonKey = cfg.anonKey;
+    if (cfg.remoteFirst) SUPABASE_CONFIG.remoteFirst = cfg.remoteFirst;
+  } catch(e) {}
+})();
+
+// ── SUPABASE CLIENT (CDN-loaded, lazy) ───────────────────────
+let _sbClient = null;
+function getSupabaseClient() {
+  if (_sbClient) return _sbClient;
+  if (!SUPABASE_CONFIG.configured) return null;
+  if (typeof window.supabase === 'undefined') {
+    console.warn('[Supabase] Client library not loaded — add CDN script');
+    return null;
+  }
+  _sbClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+    auth: { autoRefreshToken: true, persistSession: true },
+  });
+  // Subscribe to key realtime channels
+  _sbClient.channel('inventory-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'batches' }, payload => {
+      console.log('[Realtime] Batch change:', payload.eventType, payload.new?.batch_code);
+      // Reload batch data from remote
+      if (SUPABASE_CONFIG.remoteFirst) loadBatchesFromRemote();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'movements' }, payload => {
+      console.log('[Realtime] Movement:', payload.eventType);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, payload => {
+      console.log('[Realtime] Invoice change:', payload.new?.invoice_no);
+    })
+    .subscribe();
+  return _sbClient;
+}
+
+// ── DUAL-WRITE HELPERS ────────────────────────────────────────
+
+async function sbRead(table, filters = {}) {
+  const sb = getSupabaseClient();
+  if (!sb || !SUPABASE_CONFIG.remoteFirst) return null;
+  try {
+    let q = sb.from(table).select('*');
+    Object.entries(filters).forEach(([col, val]) => { q = q.eq(col, val); });
+    const { data, error } = await q;
+    if (error) { console.warn('[Supabase] read error:', error.message); return null; }
+    return data;
+  } catch(e) { console.warn('[Supabase] read failed:', e.message); return null; }
+}
+
+async function sbUpsert(table, data, conflictOn = 'id') {
+  const sb = getSupabaseClient();
+  if (!sb) return { ok: false, reason: 'not_configured' };
+  try {
+    const records = Array.isArray(data) ? data : [data];
+    const { error } = await sb.from(table).upsert(records, { onConflict: conflictOn });
+    if (error) { console.warn('[Supabase] upsert error:', table, error.message); return { ok: false, error: error.message }; }
+    return { ok: true };
+  } catch(e) { return { ok: false, error: e.message }; }
+}
+
+async function sbInsert(table, data) {
+  const sb = getSupabaseClient();
+  if (!sb) return { ok: false, reason: 'not_configured' };
+  try {
+    const { error } = await sb.from(table).insert(data);
+    if (error) { console.warn('[Supabase] insert error:', table, error.message); return { ok: false, error: error.message }; }
+    return { ok: true };
+  } catch(e) { return { ok: false, error: e.message }; }
+}
+
+// ── REMOTE BATCH LOADER ───────────────────────────────────────
+async function loadBatchesFromRemote() {
+  const data = await sbRead('batches');
+  if (!data) return;
+  batchData = data.map(r => ({
+    Batch: r.batch_code, BatchCode: r.batch_code, SKU: r.sku_code,
+    MG: r.mg_strength, CanSize: r.can_size, CaseSize: r.case_size,
+    ProductionDate: r.production_date, COA_Link: r.coa_link,
+    Status: r.status, Inbound: r.cases_produced, OnHand: r.cases_on_hand,
+    Outbound: r.cases_shipped,
+  }));
+  localStorage.setItem('420craft_batches', JSON.stringify(batchData));
+  console.log('[Remote] Loaded', batchData.length, 'batches from Supabase');
+}
+
+// ── SUPABASE SIGN-IN ─────────────────────────────────────────
+async function supabaseSignIn() {
+  const sb = getSupabaseClient();
+  if (!sb) { showToast('⚠ Supabase not configured — enter URL and key in Diagnostics'); return; }
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+      queryParams: { hd: SUPABASE_CONFIG.allowedDomain || '' },
+    },
+  });
+  if (error) showToast('❌ Sign-in error: ' + error.message);
+}
+
+async function supabaseSignOut() {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  await sb.auth.signOut();
+  showToast('✅ Signed out');
+  renderAdminDiagnostics();
+}
+
+async function supabaseCurrentUser() {
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+  try {
+    const { data: { user } } = await sb.auth.getUser();
+    return user;
+  } catch { return null; }
+}
+
+// Extend showPage for diagnostics
+const _diagShowPage = showPage;
+showPage = function(id, el) {
+  _diagShowPage(id, el);
+  if (id === 'admin-diagnostics') renderAdminDiagnostics();
+};
+
+// ── ADMIN DIAGNOSTICS PAGE ────────────────────────────────────
+async function renderAdminDiagnostics() {
+  const el = document.getElementById('admin-diagnostics-content');
+  if (!el) return;
+  el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text3)">🔍 Running diagnostics...</div>';
+
+  const sb = getSupabaseClient();
+  const user = await supabaseCurrentUser();
+
+  // Health checks
+  const checks = {
+    localStorage_ok: typeof localStorage !== 'undefined',
+    supabase_configured: SUPABASE_CONFIG.configured,
+    supabase_connected: false,
+    supabase_auth: false,
+    remote_first: SUPABASE_CONFIG.remoteFirst,
+    auth_user: user?.email || null,
+    db_counts: {},
+    migration_status: {},
+  };
+
+  if (sb) {
+    try {
+      const { error } = await sb.from('batches').select('count', { count: 'exact', head: true });
+      checks.supabase_connected = !error;
+      checks.supabase_auth = !!user;
+    } catch {}
+
+    if (checks.supabase_connected) {
+      for (const table of ['batches','movements','invoices','settlement_periods','customer_deals','sku_master']) {
+        try {
+          const { count } = await sb.from(table).select('count', { count: 'exact', head: true });
+          checks.db_counts[table] = count || 0;
+        } catch { checks.db_counts[table] = 'error'; }
+      }
+    }
+  }
+
+  // Local data counts
+  const localCounts = {
+    skus: (typeof skuData !== 'undefined' ? skuData : []).length,
+    batches: (typeof batchData !== 'undefined' ? batchData : []).length,
+    movements: (typeof movements !== 'undefined' ? movements : []).length,
+    shipments: JSON.parse(localStorage.getItem('420craft_shipments')||'[]').length,
+    operators: operatorLoad().length,
+    consumables: consumableLoad().length,
+    deals: acctLoad(ACCT_KEYS.DEALS).length,
+    invoices: acctLoad(ACCT_KEYS.INVOICES).length,
+    settlements: acctLoad(ACCT_KEYS.SETTLEMENTS).length,
+    vendors: vendorsLoad().length,
+    prod_runs: prodRunLoad().length,
+  };
+
+  el.innerHTML = `<div style="padding:24px;max-width:1000px">
+    ${_acctSectionHeader('SYSTEM DIAGNOSTICS','Backend migration status · DB health · Data counts')}
+
+    <!-- Connection Status -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+      ${_acctCard('localStorage', checks.localStorage_ok?'✅ OK':'❌ Unavailable', 'primary store', checks.localStorage_ok?'var(--green)':'var(--red)', '💾')}
+      ${_acctCard('Supabase Config', checks.supabase_configured?'✅ Set':'⚠ Not set', 'URL + anon key', checks.supabase_configured?'var(--green)':'var(--amber)', '🔗')}
+      ${_acctCard('Supabase DB', checks.supabase_connected?'✅ Connected':'❌ Not connected', checks.supabase_connected?'RLS active':'check config', checks.supabase_connected?'var(--green)':'var(--red)', '🗄')}
+      ${_acctCard('Auth', checks.supabase_auth?'✅ '+checks.auth_user:'⚠ Not signed in', 'Google OAuth', checks.supabase_auth?'var(--green)':'var(--amber)', '🔐')}
+      ${_acctCard('Mode', checks.remote_first?'🚀 REMOTE FIRST':'📦 Local First', checks.remote_first?'Supabase is source':'localStorage is source', checks.remote_first?'var(--blue)':'var(--text3)', '⚡')}
+    </div>
+
+    <!-- Supabase Config Form -->
+    ${!checks.supabase_configured?`<div style="background:var(--card);border:1px solid rgba(255,184,48,0.3);border-radius:12px;padding:20px;margin-bottom:16px">
+      <div style="font-weight:700;color:var(--amber);margin-bottom:12px">⚙ Configure Supabase Connection</div>
+      <div style="display:grid;gap:10px">
+        <div class="form-group"><label class="form-label">Supabase Project URL</label>
+          <input class="form-input" id="diag-sb-url" placeholder="https://your-project.supabase.co" style="font-family:var(--font-mono);font-size:12px"></div>
+        <div class="form-group"><label class="form-label">Supabase Anon Key (browser-safe)</label>
+          <input class="form-input" id="diag-sb-key" placeholder="eyJ..." type="password" style="font-family:var(--font-mono);font-size:12px"></div>
+        <button onclick="diagSaveSupabaseConfig()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer">💾 Save & Connect</button>
+      </div>
+    </div>`:''}
+
+    <!-- Auth actions -->
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:16px 20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-weight:600;margin-bottom:4px">Authentication</div>
+        <div style="font-size:12px;color:var(--text3)">${checks.supabase_auth?'Signed in as: '+checks.auth_user:'Not signed in — sign in with Google to access Supabase'}</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        ${!checks.supabase_auth?`<button onclick="supabaseSignIn()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:7px;padding:8px 16px;font-size:12px;cursor:pointer">🔐 Sign in with Google</button>`:`<button onclick="supabaseSignOut()" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);color:var(--red);border-radius:7px;padding:8px 16px;font-size:12px;cursor:pointer">Sign Out</button>`}
+      </div>
+    </div>
+
+    <!-- Data Counts Comparison -->
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:16px 20px;margin-bottom:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:14px">📊 DATA INVENTORY — LOCAL vs REMOTE</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr style="color:var(--text3);font-size:10px;font-family:var(--font-mono)"><th style="text-align:left;padding:4px 8px">Entity</th><th style="text-align:right;padding:4px 8px">Local</th><th style="text-align:right;padding:4px 8px">Remote (DB)</th><th style="text-align:right;padding:4px 8px">Status</th></tr>
+        ${Object.entries(localCounts).map(([entity, localCount]) => {
+          const remoteCount = checks.db_counts[entity] ?? (checks.db_counts[entity+'s'] ?? '—');
+          const synced = typeof remoteCount === 'number' && remoteCount >= localCount;
+          return `<tr style="border-top:1px solid var(--border2)">
+            <td style="padding:6px 8px;font-weight:500;text-transform:capitalize">${entity.replace(/_/g,' ')}</td>
+            <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">${localCount}</td>
+            <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:${typeof remoteCount==='number'?'var(--text)':'var(--text3)'}">${remoteCount}</td>
+            <td style="padding:6px 8px;text-align:right">${checks.supabase_connected?(synced?'<span style="color:var(--green)">✅ Synced</span>':'<span style="color:var(--amber)">⚠ Needs migration</span>'):'<span style="color:var(--text3)">—</span>'}</td>
+          </tr>`;
+        }).join('')}
+      </table>
+    </div>
+
+    <!-- Migration Actions -->
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:16px 20px;margin-bottom:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:14px">🚀 MIGRATION ACTIONS</div>
+      <div id="diag-migration-log" style="font-family:var(--font-mono);font-size:11px;background:var(--bg3);border-radius:8px;padding:12px;min-height:60px;max-height:200px;overflow-y:auto;margin-bottom:12px;color:var(--text3)">Ready to migrate. Click button to start.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${checks.supabase_connected && checks.supabase_auth
+          ? `<button onclick="diagRunMigration()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer;font-weight:600">▶ Migrate localStorage → Supabase</button>
+             <button onclick="diagEnableRemoteFirst()" style="background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.3);color:var(--blue);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer">${SUPABASE_CONFIG.remoteFirst?'⬇ Switch to Local First':'⬆ Switch to Remote First'}</button>`
+          : `<div style="color:var(--text3);font-size:12px">Connect Supabase and sign in to enable migration</div>`}
+        <button onclick="renderAdminDiagnostics()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Local Storage Key Inventory -->
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:16px 20px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">🔑 LOCALSTORAGE KEY INVENTORY</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;font-family:var(--font-mono)">
+        ${['420craft_skus','420craft_batches','420craft_movements','420craft_shipments',
+           '420craft_operators','420craft_consumables','420craft_prod_runs','420craft_schedule',
+           '420craft_brands','420craft_customer_orders','420craft_acct_deals','420craft_acct_invoices',
+           '420craft_acct_settlements','420craft_acct_cost_snapshots','420craft_acct_vendors',
+           '420craft_acct_pos','420craft_acct_employees','420craft_acct_roles'].map(key => {
+          const raw = localStorage.getItem(key);
+          let count = '—';
+          try { const d = JSON.parse(raw||'[]'); count = Array.isArray(d)?d.length+' records':'1 obj'; } catch {}
+          const hasData = !!(raw && raw !== '[]' && raw !== '{}' && raw !== 'null');
+          return `<div style="display:flex;justify-content:space-between;padding:3px 6px;background:var(--bg3);border-radius:4px;gap:8px">
+            <span style="color:${hasData?'var(--text2)':'var(--text3)'}">${key.replace('420craft_','')}</span>
+            <span style="color:${hasData?'var(--green)':'var(--text3)'}">${count}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+function diagSaveSupabaseConfig() {
+  const url = document.getElementById('diag-sb-url')?.value.trim();
+  const key = document.getElementById('diag-sb-key')?.value.trim();
+  if (!url || !key) { showToast('⚠ Enter both URL and anon key'); return; }
+  localStorage.setItem('420craft_supabase_config', JSON.stringify({ url, anonKey: key }));
+  SUPABASE_CONFIG.url = url;
+  SUPABASE_CONFIG.anonKey = key;
+  _sbClient = null; // reset client
+  showToast('✅ Supabase config saved — reconnecting...');
+  setTimeout(renderAdminDiagnostics, 1000);
+}
+
+function diagEnableRemoteFirst() {
+  SUPABASE_CONFIG.remoteFirst = !SUPABASE_CONFIG.remoteFirst;
+  const cfg = JSON.parse(localStorage.getItem('420craft_supabase_config') || '{}');
+  cfg.remoteFirst = SUPABASE_CONFIG.remoteFirst;
+  localStorage.setItem('420craft_supabase_config', JSON.stringify(cfg));
+  showToast(SUPABASE_CONFIG.remoteFirst ? '🚀 Remote-First mode ON — Supabase is now source of truth' : '📦 Local-First mode — localStorage is source of truth');
+  renderAdminDiagnostics();
+}
+
+async function diagRunMigration() {
+  const logEl = document.getElementById('diag-migration-log');
+  if (!logEl) return;
+  const log = msg => { logEl.innerHTML += '\n' + msg; logEl.scrollTop = logEl.scrollHeight; };
+
+  log('▶ Starting migration from localStorage → Supabase...');
+
+  const sb = getSupabaseClient();
+  if (!sb) { log('❌ Supabase not configured'); return; }
+
+  // SKUs
+  const skus = typeof skuData !== 'undefined' ? skuData : [];
+  log(`📦 Migrating ${skus.length} SKUs...`);
+  for (const sku of skus) {
+    const { error } = await sb.from('sku_master').upsert({
+      sku_code: sku.SKU || sku.Full_SKU || '',
+      display_name: sku.SKU || '',
+      mg_strength: sku.MG_Strength || '',
+      can_size: sku.CanSize || '12 oz',
+      case_size: parseInt(sku.CaseSize || 24),
+      active: true,
+    }, { onConflict: 'sku_code' });
+    if (error) log('  ❌ SKU error: ' + sku.SKU + ' — ' + error.message);
+  }
+  log('  ✅ SKUs done');
+
+  // Batches
+  const batches = typeof batchData !== 'undefined' ? batchData : [];
+  log(`🧪 Migrating ${batches.length} batches...`);
+  for (const b of batches) {
+    const { error } = await sb.from('batches').upsert({
+      batch_code: b.Batch || b.BatchCode || '',
+      sku_code: b.SKU || '',
+      mg_strength: b.MG || '',
+      can_size: b.CanSize || '12 oz',
+      case_size: parseInt(b.CaseSize || 24),
+      production_date: b.ProductionDate || null,
+      coa_link: b.COA_Link || null,
+      status: 'released',
+      cases_produced: parseInt(b.Inbound || 0),
+      cases_on_hand: parseInt(b.OnHand || 0),
+      cases_shipped: parseInt(b.Outbound || 0),
+    }, { onConflict: 'batch_code' });
+    if (error) log('  ❌ Batch error: ' + (b.Batch||b.BatchCode) + ' — ' + error.message);
+  }
+  log('  ✅ Batches done');
+
+  // Movements (chunked)
+  const movs = typeof movements !== 'undefined' ? movements : [];
+  log(`🔄 Migrating ${movs.length} movements (in chunks of 200)...`);
+  let movOk = 0, movFail = 0;
+  for (let i = 0; i < movs.length; i += 200) {
+    const chunk = movs.slice(i, i + 200).map(m => ({
+      batch_code: m.Batch_Code || '',
+      sku_code: m.SKU || '',
+      movement_type: (m.Movement_Type || 'outbound_shipment').toLowerCase().replace(/[\s/]+/g, '_'),
+      direction: m.Direction || 'outbound',
+      quantity: parseInt(m.Quantity || 0),
+      destination: m.Destination || null,
+      notes: m.Notes || null,
+      created_at: m.Timestamp || new Date().toISOString(),
+    }));
+    const { error } = await sb.from('movements').insert(chunk);
+    if (error) { movFail += chunk.length; log('  ⚠ Movement chunk error: ' + error.message); }
+    else movOk += chunk.length;
+  }
+  log(`  ✅ Movements: ${movOk} ok, ${movFail} failed`);
+
+  // Accounting data
+  log('💰 Migrating accounting data...');
+  const acctMigrations = [
+    { key: ACCT_KEYS.DEALS, table: 'customer_deals', conflict: 'id' },
+    { key: ACCT_KEYS.VENDORS, table: 'vendors', conflict: 'id' },
+    { key: ACCT_KEYS.SETTLEMENTS, table: 'settlement_periods', conflict: 'id' },
+  ];
+  for (const { key, table, conflict } of acctMigrations) {
+    const records = acctLoad(key);
+    if (!records.length) continue;
+    const { error } = await sb.from(table).upsert(records, { onConflict: conflict, ignoreDuplicates: true });
+    if (error) log(`  ⚠ ${table}: ${error.message}`);
+    else log(`  ✅ ${table}: ${records.length} records`);
+  }
+
+  log('\n✅ Migration complete! Refresh diagnostics to see updated counts.');
+  log('Next step: verify counts match, then click "Switch to Remote First".');
+}
 
 // ═══════════════════════════════════════════════════════════════
 // PHASE 3 — ADVANCED REPORTS, DEAL EDITOR, PRICE BOOKS, TAX UI
