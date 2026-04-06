@@ -19790,20 +19790,142 @@ async function diagRunMigration() {
   }
   log(`  ✅ Movements: ${movOk} ok, ${movFail} failed`);
 
+  // Operators
+  const ops = operatorLoad();
+  log(`👷 Migrating ${ops.length} operators...`);
+  for (const o of ops) {
+    const { error } = await sb.from('operators').upsert({
+      legacy_id: String(o.id || ''),
+      name: o.name || '',
+      position: o.position || '',
+      status: o.status || 'active',
+      shift_eligible: true,
+    }, { onConflict: 'legacy_id' });
+    if (error) log('  ❌ Operator error: ' + o.name + ' — ' + error.message);
+  }
+  log('  ✅ Operators done');
+
+  // Consumables
+  const cons = consumableLoad();
+  log(`🧴 Migrating ${cons.length} consumables...`);
+  for (const c of cons) {
+    const { error } = await sb.from('consumables').upsert({
+      legacy_id: String(c.id || ''),
+      name: c.name || '',
+      category: c.category || '',
+      unit: c.unit || 'each',
+      unit_cost: parseFloat(c.unitCost || 0),
+      true_cost_per_unit: parseFloat(c.trueCostPerUnit || 0),
+      stock_on_hand: parseFloat(c.stockOnHand || 0),
+      reorder_point: parseFloat(c.reorderPoint || 0),
+      reorder_qty: parseFloat(c.reorderQty || 0),
+      last_purchase_date: c.lastPurchaseDate || null,
+      last_unit_cost: parseFloat(c.lastUnitCost || 0),
+    }, { onConflict: 'legacy_id' });
+    if (error) log('  ❌ Consumable error: ' + c.name + ' — ' + error.message);
+  }
+  log('  ✅ Consumables done');
+
+  // Vendors
+  const vendors = vendorsLoad();
+  log(`🏪 Migrating ${vendors.length} vendors...`);
+  for (const v of vendors) {
+    const { error } = await sb.from('vendors').upsert({
+      name: v.name || '',
+      email: v.email || null,
+      phone: v.phone || null,
+      payment_terms: v.paymentTerms || 'Net30',
+      account_number: v.accountNo || v.accountNumber || null,
+      notes: v.notes || null,
+      status: 'active',
+    });
+    if (error) log('  ❌ Vendor error: ' + v.name + ' — ' + error.message);
+  }
+  log('  ✅ Vendors done');
+
+  // Production Runs
+  const runs = prodRunLoad();
+  log(`🏗 Migrating ${runs.length} production runs...`);
+  for (const r of runs) {
+    const { error } = await sb.from('production_runs').upsert({
+      batch_code: r.batchCode || r.batch_code || '',
+      sku_code: r.sku || r.sku_code || '',
+      status: r.status || 'completed',
+      crew: r.crew || [],
+      cases_produced: parseInt(r.totalCases || r.cases_produced || 0),
+      cost_summary: r.costSummary || null,
+      started_at: r.startedAt || null,
+      completed_at: r.completedAt || null,
+      lead_operator: r.leadOperator || null,
+      notes: r.notes || null,
+    });
+    if (error) log('  ❌ Run error: ' + (r.batchCode||r.id) + ' — ' + error.message);
+  }
+  log('  ✅ Production runs done');
+
+  // Shipments
+  const ships = JSON.parse(localStorage.getItem('420craft_shipments') || '[]');
+  log(`🚚 Migrating ${ships.length} shipments...`);
+  for (const s of ships) {
+    const { error } = await sb.from('shipments').upsert({
+      internal_id: s.id || '',
+      shipment_type: s.type || 'customer_order',
+      status: s.status || 'pending',
+      recipient_name: s.recipientName || null,
+      recipient_addr1: s.recipientAddr1 || null,
+      recipient_city: s.recipientCity || null,
+      recipient_state: s.recipientState || null,
+      recipient_zip: s.recipientZip || null,
+      carrier: s.carrier || null,
+      tracking_number: s.trackingNumber || null,
+      items: s.items || [],
+      carrier_cost: parseFloat(s.cogs?.carrierTotal || 0),
+      total_cost: parseFloat(s.cogs?.totalCogs || 0),
+      ship_date: s.shipDate || null,
+      submitted_at: s.submittedAt || null,
+    }, { onConflict: 'internal_id' });
+    if (error) log('  ❌ Shipment error: ' + s.id + ' — ' + error.message);
+  }
+  log('  ✅ Shipments done');
+
   // Accounting data
   log('💰 Migrating accounting data...');
-  const acctMigrations = [
-    { key: ACCT_KEYS.DEALS, table: 'customer_deals', conflict: 'id' },
-    { key: ACCT_KEYS.VENDORS, table: 'vendors', conflict: 'id' },
-    { key: ACCT_KEYS.SETTLEMENTS, table: 'settlement_periods', conflict: 'id' },
-  ];
-  for (const { key, table, conflict } of acctMigrations) {
-    const records = acctLoad(key);
-    if (!records.length) continue;
-    const { error } = await sb.from(table).upsert(records, { onConflict: conflict, ignoreDuplicates: true });
-    if (error) log(`  ⚠ ${table}: ${error.message}`);
-    else log(`  ✅ ${table}: ${records.length} records`);
+
+  // Customers first (needed for deals/settlements FK)
+  const deals = acctLoad(ACCT_KEYS.DEALS);
+  const uniqueCustomers = [...new Map(deals.map(d => [d.customerName, {
+    name: d.customerName, payment_terms: d.paymentTerms || 'Net30', status: 'active'
+  }])).values()];
+  if (uniqueCustomers.length) {
+    const { error } = await sb.from('customers').upsert(uniqueCustomers, { onConflict: 'name', ignoreDuplicates: true });
+    if (error) log('  ⚠ customers: ' + error.message);
+    else log(`  ✅ customers: ${uniqueCustomers.length} records`);
   }
+
+  // Deals (simplified - skip FK columns that don't match)
+  log(`  📝 Migrating ${deals.length} deals...`);
+  for (const d of deals) {
+    const { data: cust } = await sb.from('customers').select('id').eq('name', d.customerName).single();
+    if (!cust) continue;
+    const { error } = await sb.from('customer_deals').upsert({
+      customer_id: cust.id,
+      customer_name: d.customerName || '',
+      brand_name: d.brandName || '',
+      deal_type: d.dealType || 'wholesale_fixed',
+      status: d.status || 'active',
+      version_no: d.versionNo || 1,
+      price_per_case: parseFloat(d.pricePerCase || 0),
+      our_share_pct: parseFloat(d.ourSharePct || 0),
+      payment_terms: d.paymentTerms || 'Net30',
+      invoice_cadence: d.invoiceCadence || 'on_shipment',
+      settlement_basis: d.settlementBasis || 'shipped',
+      freight_rebill: d.freightRebill || false,
+      storage_enabled: d.storageEnabled || false,
+      notes: d.notes || null,
+    }, { onConflict: 'id', ignoreDuplicates: true });
+    if (error) log('  ⚠ deal: ' + d.customerName + ' — ' + error.message);
+  }
+  log('  ✅ Deals done');
 
   log('\n✅ Migration complete! Refresh diagnostics to see updated counts.');
   log('Next step: verify counts match, then click "Switch to Remote First".');
