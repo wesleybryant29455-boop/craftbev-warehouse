@@ -4339,7 +4339,78 @@ function sheetsSyncAll() {
     ntHistory:          JSON.parse(localStorage.getItem('420craft_nt_history') || '[]'),
     orderingManager:    JSON.parse(localStorage.getItem('420craft_ordering_manager') || 'null'),
   });
+
+  // Sync accounting data in separate queued actions (keeps payload size manageable)
+  const acctSyncKeys = [
+    { action:'save_acct_deals',           key:'420craft_acct_deals' },
+    { action:'save_acct_invoices',        key:'420craft_acct_invoices' },
+    { action:'save_acct_payments',        key:'420craft_acct_payments' },
+    { action:'save_acct_settlements',     key:'420craft_acct_settlements' },
+    { action:'save_acct_cost_snapshots',  key:'420craft_acct_cost_snapshots' },
+    { action:'save_acct_pos',             key:'420craft_acct_pos' },
+    { action:'save_acct_bills',           key:'420craft_acct_bills' },
+    { action:'save_acct_vendors',         key:'420craft_acct_vendors' },
+    { action:'save_acct_sell_through',    key:'420craft_acct_sell_through' },
+    { action:'save_acct_close_periods',   key:'420craft_acct_close_periods' },
+    { action:'save_acct_data',            key:'420craft_acct_invoice_types' },
+    { action:'save_acct_data',            key:'420craft_acct_employees' },
+    { action:'save_acct_data',            key:'420craft_acct_ap_accounts' },
+    { action:'save_acct_data',            key:'420craft_acct_ar_reminders' },
+    { action:'save_acct_data',            key:'420craft_acct_price_books' },
+    { action:'save_acct_data',            key:'420craft_acct_tax_rules' },
+    { action:'save_acct_data',            key:'420craft_acct_reservations' },
+  ];
+  acctSyncKeys.forEach(({ action, key }) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw && raw !== '[]' && raw !== '{}') {
+        sheetsQueue(action, { key: key.replace('420craft_',''), data: JSON.parse(raw) });
+      }
+    } catch(e) {}
+  });
 }
+
+// ── 30-SECOND PERIODIC SYNC ─────────────────────────────────
+// Runs regardless of user activity — ensures data is always current in Sheets
+let _periodicSyncInterval = null;
+let _lastPeriodicSync = 0;
+
+function _startPeriodicSync() {
+  if (_periodicSyncInterval) clearInterval(_periodicSyncInterval);
+  _periodicSyncInterval = setInterval(() => {
+    if (!sheetsEnabled()) return;
+    // Only sync if at least 25s since last activity-triggered sync
+    // This prevents double-syncing when user is actively making changes
+    const msSinceLast = Date.now() - _lastPeriodicSync;
+    if (msSinceLast < 25000) return;
+    _lastPeriodicSync = Date.now();
+    sheetsSyncAll();
+  }, 30000); // every 30 seconds
+  console.log('📡 Periodic sync started — every 30s');
+}
+
+// Track when activity-triggered syncs happen
+const _origSheetsQueue = sheetsQueue;
+sheetsQueue = function(action, data) {
+  _lastPeriodicSync = Date.now(); // reset periodic timer on activity
+  _origSheetsQueue(action, data);
+};
+
+// Start periodic sync after page loads
+window.addEventListener('load', () => {
+  setTimeout(_startPeriodicSync, 5000); // 5s delay after load
+});
+
+// Also sync when tab becomes visible again (user switches back to tab)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && sheetsEnabled()) {
+    const msSinceSync = Date.now() - _lastPeriodicSync;
+    if (msSinceSync > 20000) { // if it's been >20s since last sync
+      _lastPeriodicSync = Date.now();
+      sheetsSyncAll();
+    }
+  }
+});
 
 function fetchFromSheets() {
   const url = localStorage.getItem('420craft_sheets_url');
@@ -9251,45 +9322,96 @@ function backupExport() {
       XLSX.utils.book_append_sheet(wb, wsNT, 'Network Contacts');
     }
 
+
     // ── ACCOUNTING DATA SHEETS ──────────────────────────────
     const acctSheetDefs = [
-      { key:'420craft_acct_deals',          name:'Acct-Deals' },
-      { key:'420craft_acct_invoices',       name:'Acct-Invoices' },
-      { key:'420craft_acct_payments',       name:'Acct-Payments' },
-      { key:'420craft_acct_settlements',    name:'Acct-Settlements' },
-      { key:'420craft_acct_cost_snapshots', name:'Acct-CostSnapshots' },
-      { key:'420craft_acct_pos',            name:'Acct-PurchaseOrders' },
-      { key:'420craft_acct_bills',          name:'Acct-Bills' },
-      { key:'420craft_acct_vendors',        name:'Acct-Vendors' },
-      { key:'420craft_acct_sell_through',   name:'Acct-SellThrough' },
-      { key:'420craft_acct_close_periods',  name:'Acct-ClosePeriods' },
-      { key:'420craft_acct_audit_trail',    name:'Acct-AuditTrail' },
-      { key:'420craft_acct_price_books',    name:'Acct-PriceBooks' },
-      { key:'420craft_acct_sync_log',       name:'Acct-SyncLog' },
+      // Core accounting
+      { key:'420craft_acct_deals',               name:'Acct-Deals' },
+      { key:'420craft_acct_invoices',            name:'Acct-Invoices' },
+      { key:'420craft_acct_payments',            name:'Acct-Payments' },
+      { key:'420craft_acct_settlements',         name:'Acct-Settlements' },
+      { key:'420craft_acct_cost_snapshots',      name:'Acct-CostSnapshots' },
+      { key:'420craft_acct_pos',                 name:'Acct-PurchaseOrders' },
+      { key:'420craft_acct_bills',               name:'Acct-Bills' },
+      { key:'420craft_acct_vendors',             name:'Acct-Vendors' },
+      { key:'420craft_acct_sell_through',        name:'Acct-SellThrough' },
+      { key:'420craft_acct_close_periods',       name:'Acct-ClosePeriods' },
+      { key:'420craft_acct_audit_trail',         name:'Acct-AuditTrail' },
+      { key:'420craft_acct_price_books',         name:'Acct-PriceBooks' },
+      { key:'420craft_acct_sync_log',            name:'Acct-SyncLog' },
+      { key:'420craft_acct_tax_rules',           name:'Acct-TaxRules' },
+      { key:'420craft_acct_coa',                 name:'Acct-ChartOfAccounts' },
+      { key:'420craft_acct_reservations',        name:'Acct-Reservations' },
+      // Austin addendum
+      { key:'420craft_acct_invoice_types',       name:'Acct-InvoiceTypes' },
+      { key:'420craft_acct_employees',           name:'Acct-Employees' },
+      { key:'420craft_acct_roles',               name:'Acct-Roles' },
+      { key:'420craft_acct_ap_accounts',         name:'Acct-APAccounts' },
+      { key:'420craft_acct_ar_reminders',        name:'Acct-ARReminderRules' },
+      { key:'420craft_acct_ar_reminder_history', name:'Acct-ARReminderHistory' },
+      { key:'420craft_acct_qbo_config',          name:'Acct-QBOConfig' },
+      { key:'420craft_acct_square_config',       name:'Acct-SquareConfig' },
+      { key:'420craft_acct_ext_id_map',          name:'Acct-ExternalIDMap' },
     ];
-    acctSheetDefs.forEach(({ key, name }) => {
+
+    // ── OPERATIONAL RAW DATA (PREVIOUSLY MISSING) ────────────
+    const opSheetDefs = [
+      { key:'420craft_prod_runs',            name:'ProdRuns-Raw' },
+      { key:'420craft_schedule',             name:'Schedule-Raw' },
+      { key:'420craft_production_requests',  name:'ProductionRequests' },
+      { key:'420craft_run_intelligence',     name:'RunIntelligence' },
+      { key:'420craft_barcode_map',          name:'BarcodeMap' },
+      { key:'420craft_flavor_catalog',       name:'FlavorCatalog-Raw' },
+      { key:'420craft_flavor_config',        name:'FlavorConfig' },
+      { key:'420craft_yield_config',         name:'YieldConfig' },
+      { key:'420craft_shift_config',         name:'ShiftConfig' },
+      { key:'420craft_ordering_manager',     name:'OrderingManager' },
+      { key:'420craft_postpone_log',         name:'PostponeLog' },
+      { key:'420craft_nt_history',           name:'NTHistory' },
+    ];
+
+    // ── APP SETTINGS + AUTH SHEET ────────────────────────────────
+    try {
+      const settingsRaw = JSON.parse(localStorage.getItem('420craft_settings') || '{}');
+      const authRaw = JSON.parse(localStorage.getItem('420craft_auth_user') || '{}');;
+      const wsSettings = XLSX.utils.json_to_sheet([{
+        sheets_url:     localStorage.getItem('420craft_sheets_url') || '',
+        auth_role:      authRaw.role || '',
+        auth_name:      authRaw.name || '',
+        shipstation_key_present: !!(localStorage.getItem('420craft_shipstation_key')),
+        exported_at:    new Date().toISOString(),
+        ...Object.fromEntries(Object.entries(settingsRaw).map(([k,v])=>
+          [k, typeof v === 'object' ? JSON.stringify(v) : v]
+        )),
+      }]);
+      XLSX.utils.book_append_sheet(wb, wsSettings, 'App-Settings');
+    } catch(e) { console.warn('App settings sheet failed:', e); }
+
+    // Generic JSON→sheet writer for all acct + operational data
+    [...acctSheetDefs, ...opSheetDefs].forEach(({ key, name }) => {
       try {
         const raw = localStorage.getItem(key);
-        if (raw) {
-          const data = JSON.parse(raw);
-          if (Array.isArray(data) && data.length > 0) {
-            const flat = data.map(r => {
-              const out = {};
-              Object.entries(r).forEach(([k, v]) => {
-                out[k] = (typeof v === 'object' && v !== null) ? JSON.stringify(v) : v;
-              });
-              return out;
-            });
-            const ws = XLSX.utils.json_to_sheet(flat);
-            XLSX.utils.book_append_sheet(wb, ws, name);
-          }
-        }
-      } catch(e) { console.warn('Acct sheet failed:', name, e); }
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        const arr = Array.isArray(data) ? data : (data && typeof data === 'object' ? [data] : null);
+        if (!arr || arr.length === 0) return;
+        const flat = arr.map(r => {
+          if (typeof r !== 'object' || r === null) return { value: String(r) };
+          const out = {};
+          Object.entries(r).forEach(([k, v]) => {
+            out[k] = (typeof v === 'object' && v !== null) ? JSON.stringify(v) : v;
+          });
+          return out;
+        });
+        const ws = XLSX.utils.json_to_sheet(flat);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      } catch(e) { console.warn('Sheet failed:', name, e); }
     });
 
     // ── Download ──────────────────────────────────────
     XLSX.writeFile(wb, '420craft-backup-' + date + '.xlsx');
-    statusEl.textContent = '✅ Backup exported! File: 420craft-backup-' + date + '.xlsx — ' + skuData.length + ' SKUs, ' + batchData.length + ' batches, ' + movements.length + ' movements';
+    const totalSheets = wb.SheetNames.length;
+    statusEl.textContent = '✅ Full backup — ' + totalSheets + ' sheets · ' + skuData.length + ' SKUs · ' + batchData.length + ' batches · ' + movements.length + ' movements';
     statusEl.style.color = 'var(--green)';
 
   } catch(err) {
@@ -9504,25 +9626,67 @@ function backupImport() {
 
     // ── RESTORE ACCOUNTING DATA ────────────────────────────
     const acctRestoreMap = {
-      'Acct-Deals':         '420craft_acct_deals',
-      'Acct-Invoices':      '420craft_acct_invoices',
-      'Acct-Payments':      '420craft_acct_payments',
-      'Acct-Settlements':   '420craft_acct_settlements',
-      'Acct-CostSnapshots': '420craft_acct_cost_snapshots',
-      'Acct-PurchaseOrders':'420craft_acct_pos',
-      'Acct-Bills':         '420craft_acct_bills',
-      'Acct-Vendors':       '420craft_acct_vendors',
-      'Acct-SellThrough':   '420craft_acct_sell_through',
-      'Acct-ClosePeriods':  '420craft_acct_close_periods',
-      'Acct-AuditTrail':    '420craft_acct_audit_trail',
-      'Acct-PriceBooks':    '420craft_acct_price_books',
-      'Acct-SyncLog':       '420craft_acct_sync_log',
+      // Core accounting
+      'Acct-Deals':              '420craft_acct_deals',
+      'Acct-Invoices':           '420craft_acct_invoices',
+      'Acct-Payments':           '420craft_acct_payments',
+      'Acct-Settlements':        '420craft_acct_settlements',
+      'Acct-CostSnapshots':      '420craft_acct_cost_snapshots',
+      'Acct-PurchaseOrders':     '420craft_acct_pos',
+      'Acct-Bills':              '420craft_acct_bills',
+      'Acct-Vendors':            '420craft_acct_vendors',
+      'Acct-SellThrough':        '420craft_acct_sell_through',
+      'Acct-ClosePeriods':       '420craft_acct_close_periods',
+      'Acct-AuditTrail':         '420craft_acct_audit_trail',
+      'Acct-PriceBooks':         '420craft_acct_price_books',
+      'Acct-SyncLog':            '420craft_acct_sync_log',
+      'Acct-TaxRules':           '420craft_acct_tax_rules',
+      'Acct-ChartOfAccounts':    '420craft_acct_coa',
+      'Acct-Reservations':       '420craft_acct_reservations',
+      // Austin addendum
+      'Acct-InvoiceTypes':       '420craft_acct_invoice_types',
+      'Acct-Employees':          '420craft_acct_employees',
+      'Acct-Roles':              '420craft_acct_roles',
+      'Acct-APAccounts':         '420craft_acct_ap_accounts',
+      'Acct-ARReminderRules':    '420craft_acct_ar_reminders',
+      'Acct-ARReminderHistory':  '420craft_acct_ar_reminder_history',
+      'Acct-ExternalIDMap':      '420craft_acct_ext_id_map',
+      // Operational raw data
+      'ProdRuns-Raw':            '420craft_prod_runs',
+      'Schedule-Raw':            '420craft_schedule',
+      'ProductionRequests':      '420craft_production_requests',
+      'RunIntelligence':         '420craft_run_intelligence',
+      'BarcodeMap':              '420craft_barcode_map',
+      'FlavorCatalog-Raw':       '420craft_flavor_catalog',
+      'FlavorConfig':            '420craft_flavor_config',
+      'YieldConfig':             '420craft_yield_config',
+      'ShiftConfig':             '420craft_shift_config',
+      'OrderingManager':         '420craft_ordering_manager',
+      'PostponeLog':             '420craft_postpone_log',
+      'NTHistory':               '420craft_nt_history',
     };
+    // Restore app settings sheet
+    if (wb.SheetNames.includes('App-Settings')) {
+      try {
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['App-Settings']);
+        if (rows[0]) {
+          const r = rows[0];
+          if (r.sheets_url) localStorage.setItem('420craft_sheets_url', r.sheets_url);
+          const settingsFields = Object.keys(r).filter(k =>
+            !['sheets_url','shipstation_key_present','exported_at','apps_script_url_present'].includes(k)
+          );
+          if (settingsFields.length) {
+            const existing = JSON.parse(localStorage.getItem('420craft_settings') || '{}');
+            settingsFields.forEach(k => { existing[k] = r[k]; });
+            localStorage.setItem('420craft_settings', JSON.stringify(existing));
+          }
+        }
+      } catch(e) { console.warn('App settings restore failed:', e); }
+    }
     Object.entries(acctRestoreMap).forEach(([sheetName, lsKey]) => {
       if (wb.SheetNames.includes(sheetName)) {
         try {
           const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
-          // Parse any JSON-stringified fields back to objects
           const restored = rows.map(r => {
             const out = {};
             Object.entries(r).forEach(([k, v]) => {
