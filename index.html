@@ -4634,6 +4634,8 @@ function fetchFromSheets() {
       movements = rawMovements;
       localStorage.setItem('420craft_movements', JSON.stringify(movements));
   _sbWriteAfterSave('420craft_movements');
+  // Update SEED_SKUS in memory so dashboard shows correct all-time totals immediately
+  _updateSeedSkusFromMovement();
     }
 
     renderDashboard();
@@ -5133,7 +5135,7 @@ function logMovement() {
 
   // Log movement
   movements.push({
-    Timestamp: ts || new Date().toISOString().slice(0,16),
+    Timestamp: ts || _localDateTimeStr(),
     SKU: sku, MG_Strength: mg, Quantity: qty,
     Batch_Code: batch, Movement_Type: type,
     // Normalise for backward compat — New Batch & Return count as Inbound direction
@@ -11115,6 +11117,37 @@ function prodRunWizardBack() {
 }
 
 function _prodRunCreate() {
+
+// ── DATE HELPERS — always use local timezone, never UTC-shifted ──────────
+// Using toISOString() returns UTC which shifts dates for non-UTC timezones.
+// These helpers use local time so a run started at 10pm EST stays on that day.
+
+function _localDateStr() {
+  // Returns YYYY-MM-DD in local timezone
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0');
+}
+
+function _localDateTimeStr() {
+  // Returns YYYY-MM-DDTHH:MM:SS in local timezone (no UTC offset)
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0') + 'T' +
+    String(d.getHours()).padStart(2,'0') + ':' +
+    String(d.getMinutes()).padStart(2,'0') + ':' +
+    String(d.getSeconds()).padStart(2,'0');
+}
+
+function _localTimeStr() {
+  // Returns HH:MM in local timezone
+  const d = new Date();
+  return String(d.getHours()).padStart(2,'0') + ':' +
+    String(d.getMinutes()).padStart(2,'0');
+}
+
   const now = new Date();
   prodRunActive = {
     id: 'RUN-' + now.toISOString().slice(0,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,5).toUpperCase(),
@@ -11122,8 +11155,8 @@ function _prodRunCreate() {
     flavorId: prodRunWizardData.flavorId,
     flavorName: prodRunWizardData.flavorName,
     sku: prodRunWizardData.flavorName, // keep sku field for compat
-    startDate: now.toISOString().slice(0,10),
-    startedAt: now.toISOString(),
+    startDate: _localDateStr(),
+    startedAt: _localDateTimeStr(),
     lead: prodRunWizardData.lead,
     notes: prodRunWizardData.notes||'',
     crew: [],         // [{name, clockInAt, clockOutAt, totalMins, rate}]
@@ -11148,7 +11181,7 @@ function prodRunGoLive() {
   _prodRunUpdateCosts();
   // Start elapsed timer — clear any existing first
   if (_prlTimer) { clearInterval(_prlTimer); _prlTimer = null; }
-  if (!prodRunActive.startedAt) prodRunActive.startedAt = new Date().toISOString();
+  if (!prodRunActive.startedAt) prodRunActive.startedAt = _localDateTimeStr();
   _prodRunTickTimer(); // run immediately
   _prlTimer = setInterval(_prodRunTickTimer, 1000);
   // Resume any active crew timers
@@ -12900,17 +12933,44 @@ function scheduleGoToToday() {
 
 // ── Main render ────────────────────────────────────────────────────
 function _normalizeScheduleBlock(b) {
+  // Extract date (YYYY-MM-DD) from start_time which may be ISO timestamp
+  const rawStart = b.start_time || b.startTime || b.date || '';
+  // Always slice first 10 chars for date — works for both:
+  //   '2025-05-09T08:00:00' (local) and '2025-05-09T13:00:00+00' (UTC)
+  const dateStr  = rawStart ? rawStart.slice(0, 10) : '';
+  // Extract time — if UTC timestamp, convert back to local time to avoid day shift
+  let timeStr = '08:00';
+  if (rawStart && rawStart.length > 10) {
+    if (rawStart.includes('+') || rawStart.endsWith('Z')) {
+      // UTC timestamp — convert to local time for display
+      const d = new Date(rawStart);
+      timeStr = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+      // Also fix date in case UTC offset shifted the day
+      const localDate = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      // Use localDate as the date for calendar filtering
+      if (localDate !== dateStr) {
+        // Day shifted due to timezone — use local date
+        Object.defineProperty(b, '_localDate', { value: localDate, writable: true });
+      }
+    } else {
+      timeStr = rawStart.slice(11, 16);
+    }
+  } else if (b.startTime && b.startTime.length <= 5) {
+    timeStr = b.startTime;
+  }
   return {
     ...b,
-    id:         b.id || '',
-    title:      b.title || b.sku_code || '',
-    skuCode:    b.sku_code    || b.skuCode    || '',
-    startTime:  b.start_time  || b.startTime  || '',
-    endTime:    b.end_time    || b.endTime    || '',
-    status:     b.status      || 'scheduled',
-    casesPlanned: b.cases_planned || b.casesPlanned || 0,
-    leadOperator: b.lead_operator || b.leadOperator || '',
-    notes:      b.notes || '',
+    id:           b.id || '',
+    title:        b.title || b.sku_code || '',
+    skuCode:      b.sku_code     || b.skuCode     || '',
+    date:         b.date         || dateStr,        // ← calendar filters on this
+    startTime:    timeStr,                           // ← HH:MM for display
+    endTime:      b.end_time     || b.endTime      || '',
+    status:       b.status       || 'scheduled',
+    casesPlanned: b.cases_planned|| b.casesPlanned || 0,
+    leadOperator: b.lead_operator|| b.leadOperator || '',
+    notes:        b.notes || '',
+    estMins:      b.estMins      || b.est_mins     || 480,
   };
 }
 
@@ -12960,11 +13020,11 @@ function _schedRenderCalendar() {
     const isToday  = dateStr === today;
     const isPast   = dateStr < today;
     const isOffDay = !_schedIsWorkDay(dateStr);
-    const dayBlocks = blocks.filter(b => b.date === dateStr)
+    const dayBlocks = blocks.filter(b => (b._localDate || b.date) === dateStr)
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
     // Calculate capacity used
-    const usedMins = dayBlocks.filter(b=>['scheduled','in-progress','paused'].includes(b.status))
+    const usedMins = dayBlocks.filter(b=>['scheduled','in-progress','paused','completed'].includes(b.status))
       .reduce((a,b) => a + (b.estMins||0) + (b.changeoverAfter ? (b.changeoverMins||45) : 0), 0);
     const capacityPct = Math.min(100, Math.round((usedMins / shiftMins) * 100));
     const capColor = capacityPct >= 100 ? 'var(--red)' : capacityPct >= 75 ? 'var(--amber)' : 'var(--green)';
@@ -17061,15 +17121,16 @@ showPage = function(id, el) {
 
 // ── FIX: Patch Brand field after loading from Sheets ──────────────
 function _rollupSkuTotals() {
-  // Roll up batch inventory totals into skuData so dashboard KPIs are correct
+  // Only update OnHand from batch data — Inbound/Outbound come from SEED_SKUS/movements
+  // This prevents batch rollup (4,645 cases) from overwriting all-time totals (22,854)
   if (!Array.isArray(skuData) || !Array.isArray(batchData)) return;
   skuData = skuData.map(sku => {
-    const skuCode = sku.SKU || sku.Full_SKU || sku.sku_code || '';
+    const skuCode = sku.Full_SKU || sku.SKU || sku.sku_code || '';
     const batches = batchData.filter(b => (b.sku_code||b.SKU||b.Full_SKU||'') === skuCode);
-    const totalOnHand   = batches.reduce((s,b)=>s+parseInt(b.cases_on_hand||b.OnHand||b['On Hand']||0),0);
-    const totalInbound  = batches.reduce((s,b)=>s+parseInt(b.cases_produced||b.Inbound||0),0);
-    const totalOutbound = batches.reduce((s,b)=>s+parseInt(b.cases_shipped||b.Outbound||0),0);
-    return {...sku, OnHand: totalOnHand, Inbound: totalInbound, Outbound: totalOutbound};
+    // OnHand = current live stock from active batches
+    const totalOnHand = batches.reduce((s,b)=>s+parseInt(b.cases_on_hand||b.OnHand||b['On Hand']||0),0);
+    // Keep Inbound/Outbound from SEED_SKUS — do NOT overwrite with batch rollup
+    return {...sku, OnHand: totalOnHand};
   });
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
 }
@@ -19809,7 +19870,25 @@ const _tableSync = {
     transform: r => ({ ...r, SKU: r.sku_code, Full_SKU: r.sku_code, MG_Strength: r.mg_strength,
       CanSize: r.can_size, CaseSize: r.case_size }),
     pages: ['inventory','sku-manager','batch-calc','brand-velocity','reorder'],
-    postFetch: (data) => { if(typeof skuData!=='undefined') skuData = data; _fixSkuBrands && _fixSkuBrands(); _rollupSkuTotals && _rollupSkuTotals(); },
+    postFetch: (data) => {
+      if (typeof skuData === 'undefined' || !skuData) return;
+      // Only update product definition fields — NEVER overwrite inventory totals
+      // Inbound/Outbound/OnHand come from movements and SEED_SKUS, not sku_master
+      data.forEach(remote => {
+        const skuCode = remote.sku_code || remote.SKU || remote.Full_SKU || '';
+        const existing = skuData.find(s => (s.Full_SKU||s.SKU||s.sku_code||'') === skuCode);
+        if (existing) {
+          // Update definition fields only
+          existing.CanSize   = remote.can_size    || remote.CanSize   || existing.CanSize;
+          existing.CaseSize  = remote.case_size   || remote.CaseSize  || existing.CaseSize;
+          existing.Brand     = remote.brand       || remote.Brand     || existing.Brand;
+          existing.FlavorBase= remote.flavor_base || remote.FlavorBase|| existing.FlavorBase;
+          // Never touch: Inbound, Outbound, OnHand
+        }
+      });
+      _fixSkuBrands && _fixSkuBrands();
+      // Do NOT call _rollupSkuTotals here — that overwrites correct Inbound/Outbound from SEED_SKUS
+    },
   },
   production_runs: {
     key: '420craft_prod_runs',
