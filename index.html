@@ -4256,7 +4256,7 @@ function sheetsQueue(action, data) {
   _syncQueue = _syncQueue.filter(q => q.action !== action);
   _syncQueue.push({ action, data });
   if (_syncTimer) clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(_sheetsFlush, 1500); // 1.5s debounce
+  _syncTimer = setTimeout(_sheetsFlush, 5000); // 5s debounce — gives time to batch multiple changes
 }
 
 async function _sheetsFlush() {
@@ -4268,7 +4268,7 @@ async function _sheetsFlush() {
 
   for (const item of batch) {
     const controller = new AbortController();
-    const flushTimeout = setTimeout(() => controller.abort(), 15000);
+    const flushTimeout = setTimeout(() => controller.abort(), 90000); // 90s for large data syncs
     try {
       await fetch(SHEETS_URL, {
         method: 'POST',
@@ -4284,11 +4284,11 @@ async function _sheetsFlush() {
       // Network error or timeout — re-queue this item and retry in 30s
       _syncQueue.unshift(item);
       _syncStatus = 'error';
-      const msg = e.name === 'AbortError' ? '⚠ Sync timeout — retrying...' : '⚠ Sync error — retrying...';
+      const msg = e.name === 'AbortError' ? '⚠ Sheet backup timeout — retrying in 60s' : '⚠ Sheet backup error — retrying...';
       _updateSyncIndicator(msg, 'var(--red)');
       console.warn('Sheets sync error:', e.message);
       if (_syncTimer) clearTimeout(_syncTimer);
-      _syncTimer = setTimeout(_sheetsFlush, 30000); // retry in 30s
+      _syncTimer = setTimeout(_sheetsFlush, 60000); // retry in 60s
       return;
     }
   }
@@ -4317,12 +4317,15 @@ async function sheetsPost(action, data) {
 // ── Full sync on page load ────────────────────────────────────
 function sheetsSyncAll() {
   if (!sheetsEnabled()) return;
+  // NOTE: movements and full batch history are NOT sent to Sheets
+  // Supabase is now the source of truth for those.
+  // Sheets only receives: settings, operators, consumables, schedule,
+  // shipping materials, address book, brands — lightweight operational data.
   // Build merged settings — includes flavor_config and yield_config
   const mergedSettings = settingsLoad();
+  // Supabase now holds: skuData, batchData, movements, shipments, customerOrders
+  // Only send lightweight operational data to Sheets (backup/failsafe)
   sheetsQueue('sync_all', {
-    skuData,
-    batchData,
-    movements,
     operators:          operatorLoad(),
     consumables:        consumableLoad(),
     prodRuns:           prodRunLoad(),
@@ -4332,7 +4335,6 @@ function sheetsSyncAll() {
     settings:           mergedSettings,
     runIntelligence:    schedIntelligenceLoad(),
     barcodeMap:         barcodeMapLoad(),
-    shipments:          JSON.parse(localStorage.getItem('420craft_shipments') || '[]'),
     addressBook:        JSON.parse(localStorage.getItem('420craft_address_book') || '[]'),
     shippingMaterials:  JSON.parse(localStorage.getItem('420craft_shipping_materials') || '[]'),
     brands:             JSON.parse(localStorage.getItem('420craft_brands') || '[]'),
@@ -4340,9 +4342,6 @@ function sheetsSyncAll() {
     flavorConfig:       JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}'),
     yieldConfig:        JSON.parse(localStorage.getItem('420craft_yield_config') || '{}'),
     shiftConfig:        JSON.parse(localStorage.getItem('420craft_shift_config') || 'null'),
-    auditLog:           JSON.parse(localStorage.getItem('420craft_audit_log') || '[]'),
-    batchLog:           JSON.parse(localStorage.getItem('420craft_batch_log') || '[]'),
-    customerOrders:     JSON.parse(localStorage.getItem('420craft_customer_orders') || '[]'),
     destProfiles:       JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]'),
     ntContacts:         JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]'),
     ntHistory:          JSON.parse(localStorage.getItem('420craft_nt_history') || '[]'),
@@ -4377,6 +4376,134 @@ function sheetsSyncAll() {
       }
     } catch(e) {}
   });
+
+  // ── COMPLIANCE DATA — always backed up to Sheets ─────────────
+  // These are separate queued actions so they never timeout with the main sync.
+
+  // 1. Batch Records with COA links — full traceability record
+  _syncBatchRecordsToSheets();
+
+  // 2. Shipment Chain of Custody — who shipped what, where it went, which batch
+  _syncShipmentCOCToSheets();
+}
+
+// Sync batch records with COA URLs to a dedicated compliance sheet
+async function _syncBatchRecordsToSheets() {
+  if (!sheetsEnabled()) return;
+  try {
+    // Pull from Supabase if available, fall back to localStorage
+    let batches = [];
+    const sb = getSupabaseClient();
+    if (sb && SUPABASE_CONFIG.remoteFirst) {
+      const { data } = await sb.from('batches').select('*').order('production_date', { ascending: false });
+      batches = data || [];
+    } else {
+      batches = JSON.parse(localStorage.getItem('420craft_batches') || '[]');
+    }
+
+    if (!batches.length) return;
+
+    // Format for compliance sheet — every field that matters for traceability
+    const rows = batches.map(b => ({
+      batch_code:       b.batch_code || b.BatchCode || b.Batch || '',
+      sku:              b.sku_code || b.SKU || '',
+      mg_strength:      b.mg_strength || b.MG || '',
+      can_size:         b.can_size || b.CanSize || '12 oz',
+      case_size:        b.case_size || b.CaseSize || 24,
+      production_date:  b.production_date || b.ProductionDate || '',
+      cases_produced:   b.cases_produced || b.Inbound || 0,
+      cases_on_hand:    b.cases_on_hand || b.OnHand || b['On Hand'] || 0,
+      cases_shipped:    b.cases_shipped || b.Outbound || 0,
+      status:           b.status || b.Status || '',
+      coa_link:         b.coa_link || b.COA_Link || b['COA Link'] || b['Folder Link'] || '',
+      lead_operator:    b.lead_operator || b.Operator || '',
+      notes:            b.notes || b.Notes || '',
+      last_updated:     new Date().toISOString(),
+    }));
+
+    sheetsQueue('save_compliance_batches', { rows });
+    console.log('[Compliance] Batch records queued for Sheets:', rows.length);
+  } catch(e) {
+    console.warn('[Compliance] Batch sync failed:', e.message);
+  }
+}
+
+// Sync shipment chain of custody to a dedicated compliance sheet
+async function _syncShipmentCOCToSheets() {
+  if (!sheetsEnabled()) return;
+  try {
+    // Pull from Supabase if available, fall back to localStorage
+    let shipments = [];
+    const sb = getSupabaseClient();
+    if (sb && SUPABASE_CONFIG.remoteFirst) {
+      const { data } = await sb.from('shipments').select('*').order('created_at', { ascending: false });
+      shipments = data || [];
+    } else {
+      shipments = JSON.parse(localStorage.getItem('420craft_shipments') || '[]');
+    }
+
+    if (!shipments.length) return;
+
+    // Format for COC sheet — who, what, where, which batch
+    const rows = [];
+    for (const s of shipments) {
+      const items = s.items || [];
+      // If shipment has multiple items, one row per item for complete traceability
+      if (items.length > 0) {
+        for (const item of items) {
+          rows.push({
+            shipment_id:      s.id || s.internal_id || '',
+            ship_date:        s.ship_date || s.shipDate || '',
+            status:           s.status || '',
+            sku:              item.sku || item.SKU || item.sku_code || '',
+            batch_code:       item.batchCode || item.batch_code || '',
+            cases_shipped:    item.qty || item.quantity || item.cases || 0,
+            recipient_name:   s.recipient_name || s.recipientName || '',
+            recipient_company: s.recipient_company || s.recipientCompany || '',
+            recipient_address: [
+              s.recipient_addr1 || s.recipientAddr1 || '',
+              s.recipient_city || s.recipientCity || '',
+              s.recipient_state || s.recipientState || '',
+              s.recipient_zip || s.recipientZip || '',
+            ].filter(Boolean).join(', '),
+            carrier:          s.carrier || '',
+            tracking_number:  s.tracking_number || s.trackingNumber || '',
+            submitted_by:     s.submitted_by || '',
+            submitted_at:     s.submitted_at || s.submittedAt || '',
+            last_updated:     new Date().toISOString(),
+          });
+        }
+      } else {
+        // No items detail — still record the shipment header
+        rows.push({
+          shipment_id:      s.id || s.internal_id || '',
+          ship_date:        s.ship_date || s.shipDate || '',
+          status:           s.status || '',
+          sku:              '',
+          batch_code:       '',
+          cases_shipped:    s.total_cost || 0,
+          recipient_name:   s.recipient_name || s.recipientName || '',
+          recipient_company: s.recipient_company || s.recipientCompany || '',
+          recipient_address: [
+            s.recipient_addr1 || s.recipientAddr1 || '',
+            s.recipient_city || s.recipientCity || '',
+            s.recipient_state || s.recipientState || '',
+            s.recipient_zip || s.recipientZip || '',
+          ].filter(Boolean).join(', '),
+          carrier:          s.carrier || '',
+          tracking_number:  s.tracking_number || s.trackingNumber || '',
+          submitted_by:     s.submitted_by || '',
+          submitted_at:     s.submitted_at || s.submittedAt || '',
+          last_updated:     new Date().toISOString(),
+        });
+      }
+    }
+
+    sheetsQueue('save_compliance_shipments', { rows });
+    console.log('[Compliance] Shipment COC queued for Sheets:', rows.length);
+  } catch(e) {
+    console.warn('[Compliance] Shipment COC sync failed:', e.message);
+  }
 }
 
 // ── 30-SECOND PERIODIC SYNC ─────────────────────────────────
@@ -4391,10 +4518,10 @@ function _startPeriodicSync() {
     // Only sync if at least 25s since last activity-triggered sync
     // This prevents double-syncing when user is actively making changes
     const msSinceLast = Date.now() - _lastPeriodicSync;
-    if (msSinceLast < 25000) return;
+    if (msSinceLast < 110000) return; // skip if synced in last ~2 min
     _lastPeriodicSync = Date.now();
     sheetsSyncAll();
-  }, 30000); // every 30 seconds
+  }, 120000); // every 2 minutes — Supabase is now primary, sheets is backup
   console.log('📡 Periodic sync started — every 30s');
 }
 
@@ -4503,6 +4630,7 @@ function fetchFromSheets() {
       batchData = rawBatches;
       localStorage.setItem('420craft_batches', JSON.stringify(batchData));
     _sbWriteAfterSave('420craft_batches');
+    _syncBatchRecordsToSheets(); // compliance backup
     }
 
     if (rawMovements.length > 0) {
@@ -4593,8 +4721,8 @@ function saveData() {
   _sbWriteAfterSave('420craft_movements');
   localStorage.setItem('420craft_batches', JSON.stringify(batchData));
   // Auto-sync to Google Sheets
+  // Supabase handles skuData, batchData, movements — only send lightweight data to Sheets
   sheetsQueue('sync_all', {
-    skuData, batchData, movements,
     operators:         operatorLoad(),
     consumables:       consumableLoad(),
     prodRuns:          prodRunLoad(),
@@ -4603,7 +4731,6 @@ function saveData() {
     custRequests:      JSON.parse(localStorage.getItem('420craft_production_requests') || '[]'),
     settings:          settingsLoad(),
     runIntelligence:   schedIntelligenceLoad(),
-    shipments:         JSON.parse(localStorage.getItem('420craft_shipments') || '[]'),
     addressBook:       JSON.parse(localStorage.getItem('420craft_address_book') || '[]'),
     shippingMaterials: JSON.parse(localStorage.getItem('420craft_shipping_materials') || '[]'),
     brands:            JSON.parse(localStorage.getItem('420craft_brands') || '[]'),
@@ -4611,9 +4738,6 @@ function saveData() {
     flavorConfig:      JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}'),
     yieldConfig:       JSON.parse(localStorage.getItem('420craft_yield_config') || '{}'),
     shiftConfig:       JSON.parse(localStorage.getItem('420craft_shift_config') || 'null'),
-    auditLog:          JSON.parse(localStorage.getItem('420craft_audit_log') || '[]'),
-    batchLog:          JSON.parse(localStorage.getItem('420craft_batch_log') || '[]'),
-    customerOrders:    JSON.parse(localStorage.getItem('420craft_customer_orders') || '[]'),
     destProfiles:      JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]'),
     ntContacts:        JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]'),
     ntHistory:         JSON.parse(localStorage.getItem('420craft_nt_history') || '[]'),
@@ -4713,12 +4837,26 @@ function renderDashboard() {
   const filteredSkus = brandF_dash
     ? skuData.filter(s => getBrandLine(s.SKU||s.Full_SKU||'') === brandF_dash)
     : skuData;
-  // KPIs
-  const totalIn   = filteredSkus.reduce((a,s) => a + (s.Inbound||0), 0);
-  const totalOut  = filteredSkus.reduce((a,s) => a + (s.Outbound||0), 0);
-  const totalHand = filteredSkus.reduce((a,s) => a + (s.OnHand||0), 0);
-  const lowCount  = filteredSkus.filter(s => s.OnHand <= 10).length;
-  document.getElementById('kpi-onhand').textContent = totalHand.toLocaleString();
+  // KPIs — calculated from movements (Form Responses) for accurate all-time totals
+  // movements is the true source: every case in and out since day 1
+  const movArr = Array.isArray(movements) ? movements : [];
+  const filteredMovs = brandF_dash
+    ? movArr.filter(m => {
+        const s = skuData.find(sk => (sk.SKU||sk.Full_SKU||sk.sku_code||'') === (m.SKU||m.sku_code||m.Batch_Code||''));
+        return s && getBrandLine(s.SKU||s.Full_SKU||'') === brandF_dash;
+      })
+    : movArr;
+
+  const totalIn   = filteredMovs.filter(m => (m.direction||m.Direction||'') === 'inbound' || (m.movement_type||m.Movement_Type||'').includes('inbound'))
+    .reduce((a,m) => a + parseInt(m.quantity||m.Quantity||0), 0);
+  const totalOut  = filteredMovs.filter(m => (m.direction||m.Direction||'') === 'outbound' || (m.movement_type||m.Movement_Type||'').includes('outbound'))
+    .reduce((a,m) => a + parseInt(m.quantity||m.Quantity||0), 0);
+  const totalHand = totalIn - totalOut;
+
+  // Low stock: SKUs where on-hand (from batch rollup) is <= 10 cases
+  const lowCount = filteredSkus.filter(s => (s.OnHand||0) <= 10 && (s.OnHand||0) >= 0).length;
+
+  document.getElementById('kpi-onhand').textContent = Math.max(0, totalHand).toLocaleString();
   document.getElementById('kpi-inbound').textContent = totalIn.toLocaleString();
   document.getElementById('kpi-outbound').textContent = totalOut.toLocaleString();
   document.getElementById('kpi-lowstock').textContent = lowCount;
@@ -6713,6 +6851,7 @@ function shLoad() {
 function shSave() {
   localStorage.setItem('420craft_shipments', JSON.stringify(shipments));
   _sbWriteAfterSave('420craft_shipments');
+  _syncShipmentCOCToSheets(); // compliance backup
   if (sheetsEnabled()) sheetsQueue('sync_all', { shipments });
 }
 function shGetById(id) { return shipments.find(s => s.id === id); }
@@ -6724,7 +6863,7 @@ function shApiEnabled() {
 async function shApiCall(method, endpoint, body) {
   if (!sheetsEnabled()) return { error: 'Apps Script not connected.' };
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
+  const timeout = setTimeout(() => controller.abort(), 90000); // 90s timeout for large payloads
   try {
     const res = await fetch(SHEETS_URL, {
       method: 'POST',
@@ -19593,7 +19732,7 @@ const _tableSync = {
     }),
     pages: ['inventory','inv-detail','movement-history','dashboard','brand-velocity'],
     postFetch: (data) => { if(typeof movements!=='undefined') movements = data; },
-    orderBy: { col: 'created_at', asc: false }, limit: 2000,
+    orderBy: { col: 'created_at', asc: false }, limit: 10000,
   },
   sku_master: {
     key: '420craft_skus',
@@ -19721,7 +19860,7 @@ async function _remoteSync(table, forceRender) {
   try {
     let query = sb.from(table).select('*');
     if (cfg.orderBy) query = query.order(cfg.orderBy.col, { ascending: cfg.orderBy.asc });
-    if (cfg.limit) query = query.limit(cfg.limit);
+    if (cfg.limit && cfg.limit <= 5000) query = query.limit(cfg.limit);
     const { data, error } = await query;
     if (error) throw error;
 
