@@ -705,6 +705,20 @@
 
   /* Page nav active glow */
   .nav-more-toggle:hover { background: var(--green-glow); color: var(--text2); }
+  /* ── MOBILE AUDIT FIXES ───────────────────────────────────── */
+  body.mobile-view .form-grid { grid-template-columns: 1fr !important; gap: 8px !important; }
+  body.mobile-view #sh-kpi-row { grid-template-columns: 1fr 1fr !important; }
+  body.mobile-view #bv-kpi-row { grid-template-columns: 1fr 1fr !important; }
+  body.mobile-view #prod-run-live > div:nth-child(2) { grid-template-columns: 1fr !important; }
+  body.mobile-view #yield-config-grid { grid-template-columns: 1fr !important; }
+  body.mobile-view #flavor-mgr-grid { grid-template-columns: 1fr !important; }
+  body.mobile-view #bp-brand-grid { grid-template-columns: 1fr !important; }
+  body.mobile-view [id$="-modal"] > div { max-height: 90vh !important; overflow-y: auto !important; }
+  body.mobile-view .acct-modal { max-height: 92vh !important; overflow-y: auto !important; margin: 4px !important; }
+  body.mobile-view #sh-status-tabs { overflow-x: auto !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch !important; }
+  body.mobile-view .page-btn { min-width: 44px !important; min-height: 44px !important; padding: 10px 14px !important; }
+  body.mobile-view #admin-diagnostics-content table { display: block; overflow-x: auto !important; }
+
   .nav-more-toggle:hover span { color: var(--green); }
 
 
@@ -1765,7 +1779,7 @@ window.addEventListener('load', function() {
     </div>
 
     <!-- Stats row -->
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px">
+    <div id="sh-kpi-row" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px">
       <div class="kpi-card"><div class="kpi-label">TOTAL</div><div class="kpi-value" id="sh-stat-total">0</div></div>
       <div class="kpi-card"><div class="kpi-label">BEING WORKED</div><div class="kpi-value" style="color:var(--purple)" id="sh-stat-working">0</div></div>
       <div class="kpi-card"><div class="kpi-label">PENDING LABEL</div><div class="kpi-value" style="color:var(--amber)" id="sh-stat-pending">0</div></div>
@@ -9008,6 +9022,7 @@ function renderBackup() {
   } else if (sheetsEnabled()) {
     // Key missing from localStorage — try to restore from Apps Script server
     _showKeyStatus(false, null);
+    const ssStatus = document.getElementById('ss-api-status');
     if (ssStatus) { ssStatus.textContent = '⏳ Checking server for saved key...'; ssStatus.style.color = 'var(--text3)'; }
     fetch(SHEETS_URL + '?action=get_ss_key')
       .then(r => r.json())
@@ -19450,328 +19465,257 @@ _renderSettlementCard = function(s) {
   );
 };
 
+
+// Apply mobile class on load and on resize
+setTimeout(() => { if (typeof applyMobileClass === 'function') applyMobileClass(); }, 100);
+window.addEventListener('resize', () => { if (typeof applyMobileClass === 'function') applyMobileClass(); });
+document.addEventListener('DOMContentLoaded', () => { if (typeof applyMobileClass === 'function') applyMobileClass(); });
+
 // Austin init
 setTimeout(() => {
   try { _acctInjectAustinNav(); } catch(e) { console.warn('Austin nav init:', e); }
 }, 1200);
 
 // ═══════════════════════════════════════════════════════════════
-// REMOTE-AWARE DATA LAYER
-// When Remote First is ON, all loaders pull from Supabase.
-// Falls back to localStorage if Supabase is unavailable.
+// REMOTE-AWARE DATA LAYER — SYNCHRONOUS-SAFE
+//
+// Strategy: fetch-then-refresh pattern
+// 1. All loaders remain synchronous — pages render instantly from localStorage
+// 2. _remoteSync(table) fetches from Supabase in background, updates cache
+// 3. After fetch, current page auto-refreshes if it uses that data
+// 4. Realtime events trigger _remoteSync to keep all devices in sync
 // ═══════════════════════════════════════════════════════════════
 
-// Cache for remote data — avoids redundant fetches within same session
+// Per-table fetch timestamps to avoid redundant requests
 const _remoteCache = {};
-const _remoteCacheTTL = 30000; // 30 seconds
+const _remoteCacheTTL = 20000; // 20s
 
-async function _remoteLoad(table, localKey, transform) {
-  if (!SUPABASE_CONFIG.remoteFirst) return null;
-  const sb = getSupabaseClient();
-  if (!sb) return null;
+// Page → render function lookup
+const _pageRenderMap = {
+  'inventory':          () => { try { if(typeof shLoad==='function'){shLoad();} if(typeof renderInventory==='function') renderInventory(); } catch(e){} },
+  'inv-detail':         () => { try { if(typeof renderInvDetail==='function') renderInvDetail(); } catch(e){} },
+  'inv-audit':          () => { try { if(typeof renderAudit==='function') renderAudit(); } catch(e){} },
+  'dashboard':          () => { try { if(typeof renderDashboard==='function') renderDashboard(); } catch(e){} },
+  'brand-velocity':     () => { try { if(typeof renderBrandVelocity==='function') renderBrandVelocity(); } catch(e){} },
+  'reorder':            () => { try { if(typeof renderReorder==='function') renderReorder(); } catch(e){} },
+  'movement-history':   () => { try { if(typeof renderHistory==='function') renderHistory(); } catch(e){} },
+  'log-movement':       () => { try { if(typeof _logPopulateDestProfiles==='function') _logPopulateDestProfiles(); } catch(e){} },
+  'prod-run':           () => { try { if(typeof renderProdRuns==='function') renderProdRuns(); } catch(e){} },
+  'schedule':           () => { try { if(typeof renderSchedule==='function') renderSchedule(); } catch(e){} },
+  'order-queue':        () => { try { if(typeof renderOrderQueue==='function') renderOrderQueue(); } catch(e){} },
+  'shipping':           () => { try { if(typeof shLoad==='function'){shLoad();} if(typeof renderShipping==='function') renderShipping(); } catch(e){} },
+  'sku-manager':        () => { try { if(typeof renderSkuManager==='function') renderSkuManager(); } catch(e){} },
+  'operators':          () => { try { if(typeof renderOperators==='function') renderOperators(); } catch(e){} },
+  'consumables':        () => { try { if(typeof renderConsumables==='function') renderConsumables(); } catch(e){} },
+  'batch-calc':         () => { try { if(typeof renderBatchCalc==='function') renderBatchCalc(); } catch(e){} },
+  'brand-launch':       () => { try { if(typeof loadBrandCatalog==='function'){loadBrandCatalog();} if(typeof renderBrandLaunch==='function') renderBrandLaunch(); } catch(e){} },
+  'acct-home':          () => { try { if(typeof renderAcctHome==='function') renderAcctHome(); } catch(e){} },
+  'acct-ar':            () => { try { if(typeof renderAcctAR==='function') renderAcctAR(); } catch(e){} },
+  'acct-ap':            () => { try { if(typeof renderAcctAP==='function') renderAcctAP(); } catch(e){} },
+  'acct-settlements':   () => { try { if(typeof renderAcctSettlements==='function') renderAcctSettlements(); } catch(e){} },
+  'acct-deals':         () => { try { if(typeof renderAcctDeals==='function') renderAcctDeals(); } catch(e){} },
+  'acct-vendors':       () => { try { if(typeof renderAcctVendors==='function') renderAcctVendors(); } catch(e){} },
+  'acct-costing':       () => { try { if(typeof renderAcctCosting==='function') renderAcctCosting(); } catch(e){} },
+  'acct-inventory-val': () => { try { if(typeof renderAcctInventoryVal==='function') renderAcctInventoryVal(); } catch(e){} },
+  'acct-reports':       () => { try { if(typeof renderAcctReports==='function') renderAcctReports(); } catch(e){} },
+  'acct-exceptions':    () => { try { if(typeof renderAcctExceptions==='function') renderAcctExceptions(); } catch(e){} },
+  'acct-shipment-costing': () => { try { if(typeof renderAcctShipmentCosting==='function') renderAcctShipmentCosting(); } catch(e){} },
+  'acct-close':         () => { try { if(typeof renderAcctClose==='function') renderAcctClose(); } catch(e){} },
+  'notifications':      () => { try { if(typeof ntLoadData==='function'){ntLoadData();} if(typeof renderNotifications==='function') renderNotifications(); } catch(e){} },
+};
 
-  const now = Date.now();
-  if (_remoteCache[table] && now - _remoteCache[table].ts < _remoteCacheTTL) {
-    return _remoteCache[table].data;
-  }
-
-  try {
-    const { data, error } = await sb.from(table).select('*');
-    if (error) throw error;
-    const result = transform ? data.map(transform) : data;
-    // Update localStorage cache
-    if (localKey) localStorage.setItem(localKey, JSON.stringify(result));
-    _remoteCache[table] = { data: result, ts: now };
-    return result;
-  } catch(e) {
-    console.warn(`[Remote] ${table} fetch failed, using local:`, e.message);
-    return null;
-  }
-}
-
-// Invalidate cache for a table (called by realtime updates)
-function _invalidateCache(table) {
-  delete _remoteCache[table];
-}
-
-// ── REMOTE-AWARE LOADER OVERRIDES ─────────────────────────────
-// Each override tries Supabase first, falls back to localStorage
-
-const _origShLoad = shLoad;
-shLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('shipments', '420craft_shipments', r => ({
-      ...r, id: r.internal_id || r.id,
-      status: r.status, items: r.items || [],
+// Table → local key + transform for cache update
+const _tableSync = {
+  batches: {
+    key: '420craft_batches',
+    transform: r => ({ ...r, Batch: r.batch_code, BatchCode: r.batch_code, SKU: r.sku_code,
+      MG: r.mg_strength, CanSize: r.can_size, CaseSize: r.case_size,
+      ProductionDate: r.production_date, COA_Link: r.coa_link, Status: r.status,
+      Inbound: r.cases_produced, OnHand: r.cases_on_hand, Outbound: r.cases_shipped }),
+    pages: ['inventory','inv-detail','inv-audit','dashboard','brand-velocity','reorder','acct-inventory-val','acct-costing','batch-calc'],
+    postFetch: (data) => { batchData = data; },
+  },
+  movements: {
+    key: '420craft_movements',
+    transform: r => ({ ...r, Timestamp: r.created_at, Batch_Code: r.batch_code, SKU: r.sku_code,
+      Quantity: r.quantity, Direction: r.direction,
+      Movement_Type: (r.movement_type||'').replace(/_/g,' ').replace(/\w/g,c=>c.toUpperCase()),
+      Notes: r.notes, Destination: r.destination }),
+    pages: ['inventory','inv-detail','movement-history','dashboard','brand-velocity'],
+    postFetch: (data) => { if(typeof movements!=='undefined') movements = data; },
+    orderBy: { col: 'created_at', asc: false }, limit: 2000,
+  },
+  sku_master: {
+    key: '420craft_skus',
+    transform: r => ({ ...r, SKU: r.sku_code, Full_SKU: r.sku_code, MG_Strength: r.mg_strength,
+      CanSize: r.can_size, CaseSize: r.case_size }),
+    pages: ['inventory','sku-manager','batch-calc','brand-velocity','reorder'],
+    postFetch: (data) => { if(typeof skuData!=='undefined') skuData = data; _fixSkuBrands && _fixSkuBrands(); },
+  },
+  production_runs: {
+    key: '420craft_prod_runs',
+    transform: r => ({ ...r, id: r.id, batchCode: r.batch_code, sku: r.sku_code,
+      status: r.status, crew: r.crew||[], totalCases: r.cases_produced,
+      costSummary: r.cost_summary, startedAt: r.started_at,
+      completedAt: r.completed_at, leadOperator: r.lead_operator }),
+    pages: ['prod-run','schedule','dashboard','inv-detail','acct-costing'],
+  },
+  production_schedule_blocks: {
+    key: '420craft_schedule',
+    transform: r => ({ ...r, id: r.id, title: r.title, skuCode: r.sku_code,
+      startTime: r.start_time, endTime: r.end_time,
+      status: r.status, casesPlanned: r.cases_planned }),
+    pages: ['schedule','prod-run','dashboard'],
+  },
+  operators: {
+    key: '420craft_operators',
+    transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
+      position: r.position, status: r.status }),
+    pages: ['operators','prod-run','schedule'],
+  },
+  consumables: {
+    key: '420craft_consumables',
+    transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
+      category: r.category, unit: r.unit, unitCost: r.unit_cost,
+      trueCostPerUnit: r.true_cost_per_unit, stockOnHand: r.stock_on_hand,
+      reorderPoint: r.reorder_point, reorderQty: r.reorder_qty }),
+    pages: ['consumables','prod-run','reorder'],
+  },
+  shipments: {
+    key: '420craft_shipments',
+    transform: r => ({ ...r, id: r.internal_id||r.id, status: r.status, items: r.items||[],
       recipientName: r.recipient_name, recipientAddr1: r.recipient_addr1,
       recipientCity: r.recipient_city, recipientState: r.recipient_state,
       recipientZip: r.recipient_zip, carrier: r.carrier,
       trackingNumber: r.tracking_number, shipDate: r.ship_date,
-      cogs: r.cogs || { carrierTotal: r.carrier_cost, totalCogs: r.total_cost },
-    }));
-    if (remote) { shipments = remote; return; }
-  }
-  _origShLoad();
+      cogs: r.cogs||{ carrierTotal: r.carrier_cost, totalCogs: r.total_cost } }),
+    pages: ['shipping','order-queue','dashboard','acct-shipment-costing'],
+  },
+  customer_orders: {
+    key: '420craft_customer_orders',
+    transform: r => ({ ...r, id: r.id, customerId: r.customer_id,
+      status: r.status, items: r.items||[], shipTo: r.ship_to }),
+    pages: ['order-queue','dashboard','shipping'],
+  },
+  vendors: {
+    key: null,
+    transform: r => ({ ...r, vendorId: r.id, name: r.name,
+      paymentTerms: r.payment_terms, accountNo: r.account_number }),
+    pages: ['acct-vendors','acct-ap'],
+  },
+  invoices: {
+    key: null,
+    transform: r => ({ ...r, invoiceId: r.id, invoiceNo: r.invoice_no,
+      customerId: r.customer_id, invoiceDate: r.invoice_date,
+      dueDate: r.due_date, totalAmount: r.total_amount,
+      paidAmount: r.paid_amount, openAmount: r.open_amount }),
+    pages: ['acct-ar','acct-home','acct-exceptions','acct-reports'],
+  },
+  customer_deals: {
+    key: null,
+    transform: r => ({ ...r, dealId: r.id, customerId: r.customer_id,
+      customerName: r.customer_name, brandName: r.brand_name,
+      dealType: r.deal_type, pricePerCase: r.price_per_case,
+      ourSharePct: r.our_share_pct, paymentTerms: r.payment_terms }),
+    pages: ['acct-deals','acct-home','acct-settlements'],
+  },
+  settlement_periods: {
+    key: null,
+    transform: r => ({ ...r, customerId: r.customer_id, netDue: r.net_due,
+      openingInventory: r.opening_inventory, shippedOut: r.shipped_out }),
+    pages: ['acct-settlements','acct-home','acct-reports'],
+  },
+  notification_contacts: {
+    key: '420craft_nt_contacts',
+    transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
+      company: r.company, email: r.email, phone: r.phone }),
+    pages: ['notifications'],
+  },
+  brands: {
+    key: '420craft_brands',
+    transform: r => ({ ...r, id: r.id, name: r.name, status: r.status||'Active',
+      devLog: r.dev_log||[], checklist: r.checklist||{} }),
+    pages: ['brand-launch','acct-deals'],
+  },
+  customers: {
+    key: '420craft_address_book',
+    transform: r => ({ ...r, id: r.id, name: r.name, email: r.email, phone: r.phone }),
+    pages: ['shipping','acct-ar','acct-ap'],
+  },
+  audit_logs: {
+    key: null,
+    transform: r => ({ ...r, action: r.action, entityType: r.entity_type,
+      entityId: r.entity_id, userName: r.user_name, timestamp: r.created_at }),
+    pages: ['inv-audit','acct-close'],
+  },
 };
 
-const _origOperatorLoad = operatorLoad;
-operatorLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('operators', '420craft_operators', r => ({
-      ...r, id: r.legacy_id || r.id, name: r.name,
-      position: r.position, status: r.status,
-    }));
-    if (remote && remote.length > 0) return remote;
-  }
-  return _origOperatorLoad();
-};
+// Debounce map for page re-renders
+const _renderDebounce = {};
 
-const _origConsumableLoad = consumableLoad;
-consumableLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('consumables', '420craft_consumables', r => ({
-      ...r, id: r.legacy_id || r.id, name: r.name,
-      category: r.category, unit: r.unit,
-      unitCost: r.unit_cost, trueCostPerUnit: r.true_cost_per_unit,
-      stockOnHand: r.stock_on_hand, reorderPoint: r.reorder_point,
-      reorderQty: r.reorder_qty, lastPurchaseDate: r.last_purchase_date,
-      lastUnitCost: r.last_unit_cost,
-    }));
-    if (remote && remote.length > 0) return remote;
-  }
-  return _origConsumableLoad();
-};
-
-const _origProdRunLoad = prodRunLoad;
-prodRunLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('production_runs', '420craft_prod_runs', r => ({
-      ...r, id: r.id, batchCode: r.batch_code, sku: r.sku_code,
-      status: r.status, crew: r.crew || [],
-      totalCases: r.cases_produced, costSummary: r.cost_summary,
-      startedAt: r.started_at, completedAt: r.completed_at,
-      leadOperator: r.lead_operator, notes: r.notes,
-    }));
-    if (remote) return remote;
-  }
-  return _origProdRunLoad();
-};
-
-const _origScheduleLoad = scheduleLoad;
-scheduleLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('production_schedule_blocks', '420craft_schedule', r => ({
-      ...r, id: r.id, title: r.title, skuCode: r.sku_code,
-      startTime: r.start_time, endTime: r.end_time,
-      status: r.status, casesPlanned: r.cases_planned,
-      leadOperator: r.lead_operator, notes: r.notes,
-    }));
-    if (remote) return remote;
-  }
-  return _origScheduleLoad();
-};
-
-const _origVendorsLoad = vendorsLoad;
-vendorsLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('vendors', null, r => ({
-      ...r, vendorId: r.id, name: r.name, email: r.email,
-      phone: r.phone, paymentTerms: r.payment_terms,
-      accountNo: r.account_number, notes: r.notes,
-    }));
-    if (remote && remote.length > 0) return remote;
-  }
-  return _origVendorsLoad();
-};
-
-// acctLoad override — pulls from Supabase for known accounting tables
-const ACCT_TABLE_MAP = {
-  [ACCT_KEYS?.DEALS]:          { table: 'customer_deals',    transform: r => ({...r, dealId: r.id, customerId: r.customer_id, customerName: r.customer_name, brandName: r.brand_name, dealType: r.deal_type, pricePerCase: r.price_per_case, ourSharePct: r.our_share_pct, paymentTerms: r.payment_terms, invoiceCadence: r.invoice_cadence, settlementBasis: r.settlement_basis, freightRebill: r.freight_rebill, storageEnabled: r.storage_enabled, storageRate: r.storage_rate}) },
-  [ACCT_KEYS?.INVOICES]:        { table: 'invoices',          transform: r => ({...r, invoiceId: r.id, invoiceNo: r.invoice_no, customerId: r.customer_id, invoiceDate: r.invoice_date, dueDate: r.due_date, totalAmount: r.total_amount, paidAmount: r.paid_amount, openAmount: r.open_amount}) },
-  [ACCT_KEYS?.PAYMENTS]:        { table: 'payments',          transform: r => ({...r}) },
-  [ACCT_KEYS?.VENDORS]:         { table: 'vendors',           transform: r => ({...r, vendorId: r.id, name: r.name, paymentTerms: r.payment_terms, accountNo: r.account_number}) },
-  [ACCT_KEYS?.SETTLEMENTS]:     { table: 'settlement_periods', transform: r => ({...r, customerId: r.customer_id, brandName: r.brand_name, netDue: r.net_due, openingInventory: r.opening_inventory, shippedOut: r.shipped_out, soldThrough: r.sold_through}) },
-  [ACCT_KEYS?.PURCHASE_ORDERS]: { table: 'purchase_orders',   transform: r => ({...r, poId: r.id, vendorId: r.vendor_id, poNumber: r.po_number, orderDate: r.order_date, totalAmount: r.total}) },
-  [ACCT_KEYS?.COST_SNAPSHOTS]:  { table: 'cost_snapshots',    transform: r => ({...r, snapshotId: r.id, batchCode: r.batch_code, costPerCase: r.cost_per_case, costPerCan: r.cost_per_can}) },
-  [ACCT_KEYS?.COA]:             { table: 'close_periods',     transform: r => ({...r}) },
-};
-
-const _origAcctLoad = acctLoad;
-acctLoad = async function(key) {
-  if (SUPABASE_CONFIG.remoteFirst && ACCT_TABLE_MAP[key]) {
-    const { table, transform } = ACCT_TABLE_MAP[key];
-    const remote = await _remoteLoad(table, key, transform);
-    if (remote) return remote;
-  }
-  return _origAcctLoad(key);
-};
-
-// Hook realtime invalidation into cache
-const _origInvalidate = window._invalidateCache || function(){};
-window._invalidateCache = function(table) {
-  delete _remoteCache[table];
-};
-
-// ── REMAINING REMOTE OVERRIDES ────────────────────────────────
-
-// loadData — core SKUs, movements, batches
-const _origLoadData = loadData;
-loadData = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const sb = getSupabaseClient();
-    if (sb) {
-      try {
-        // SKUs
-        const { data: skus } = await sb.from('sku_master').select('*');
-        if (skus?.length) {
-          skuData = skus.map(r => ({
-            ...r, SKU: r.sku_code, Full_SKU: r.sku_code,
-            MG_Strength: r.mg_strength, CanSize: r.can_size,
-            CaseSize: r.case_size, Brand: r.brand_id,
-          }));
-          localStorage.setItem('420craft_skus', JSON.stringify(skuData));
-        }
-        // Batches
-        const { data: batches } = await sb.from('batches').select('*');
-        if (batches?.length) {
-          batchData = batches.map(r => ({
-            ...r, Batch: r.batch_code, BatchCode: r.batch_code,
-            SKU: r.sku_code, MG: r.mg_strength, CanSize: r.can_size,
-            CaseSize: r.case_size, ProductionDate: r.production_date,
-            COA_Link: r.coa_link, Status: r.status,
-            Inbound: r.cases_produced, OnHand: r.cases_on_hand,
-            Outbound: r.cases_shipped,
-          }));
-          localStorage.setItem('420craft_batches', JSON.stringify(batchData));
-        }
-        // Movements
-        const { data: movs } = await sb.from('movements').select('*').order('created_at', { ascending: false }).limit(2000);
-        if (movs?.length) {
-          movements = movs.map(r => ({
-            ...r, Timestamp: r.created_at, Batch_Code: r.batch_code,
-            SKU: r.sku_code, Quantity: r.quantity, Direction: r.direction,
-            Movement_Type: r.movement_type?.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()),
-            Notes: r.notes, Destination: r.destination,
-          }));
-          localStorage.setItem('420craft_movements', JSON.stringify(movements));
-        }
-        _fixSkuBrands();
-        return;
-      } catch(e) { console.warn('[Remote] loadData failed, using local:', e.message); }
-    }
-  }
-  _origLoadData();
-};
-
-// oqLoadOrders — customer orders
-const _origOqLoadOrders = oqLoadOrders;
-oqLoadOrders = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('customer_orders', '420craft_customer_orders', r => ({
-      ...r, id: r.id, customerId: r.customer_id, brandId: r.brand_id,
-      poReference: r.po_reference, status: r.status,
-      requestedDate: r.requested_date, items: r.items || [],
-      shipTo: r.ship_to, notes: r.notes,
-    }));
-    if (remote) { customerOrders = remote; return; }
-  }
-  _origOqLoadOrders();
-};
-
-// abLoad — address book (customers/destinations)
-const _origAbLoad = abLoad;
-abLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('customers', '420craft_address_book', r => ({
-      ...r, id: r.id, name: r.name, company: r.name,
-      email: r.email, phone: r.phone,
-      address: r.billing_address?.address1 || '',
-      city: r.billing_address?.city || '',
-      state: r.billing_address?.state || '',
-      zip: r.billing_address?.zip || '',
-    }));
-    if (remote) { addressBook = remote; return; }
-  }
-  _origAbLoad();
-};
-
-// smLoad — shipping materials
-const _origSmLoad = smLoad;
-smLoad = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('shipping_materials', '420craft_shipping_materials', r => ({
-      ...r, id: r.legacy_id || r.id, name: r.name,
-      unit: r.unit, unitCost: r.unit_cost, stockOnHand: r.stock_on_hand,
-    }));
-    if (remote && remote.length > 0) { shippingMaterials = remote; return; }
-  }
-  _origSmLoad();
-};
-
-// loadBrandCatalog — brands
-const _origLoadBrandCatalog = loadBrandCatalog;
-loadBrandCatalog = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('brands', '420craft_brands', r => ({
-      ...r, id: r.id, name: r.name, status: r.status || 'Active',
-      devLog: r.dev_log || [], flavors: [], brandSkus: [],
-      checklist: r.checklist || _defaultChecklist(),
-      client: r.commercial_profile?.client || '',
-      clientEmail: r.commercial_profile?.clientEmail || '',
-      customerId: r.customer_id,
-    }));
-    if (remote && remote.length > 0) { brandCatalog = remote; return; }
-  }
-  _origLoadBrandCatalog();
-};
-
-// ntLoadData — notification contacts
-const _origNtLoadData = ntLoadData;
-ntLoadData = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('notification_contacts', '420craft_nt_contacts', r => ({
-      ...r, id: r.legacy_id || r.id, name: r.name,
-      company: r.company, role: r.role,
-      email: r.email, phone: r.phone, notes: r.notes,
-    }));
-    if (remote) { _ntContacts = remote; return; }
-  }
-  _origNtLoadData();
-};
-
-// auditLoadLog — audit logs
-const _origAuditLoadLog = auditLoadLog;
-auditLoadLog = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('audit_logs', null, r => ({
-      ...r, action: r.action, entityType: r.entity_type,
-      entityId: r.entity_id, userName: r.user_name,
-      note: r.note, timestamp: r.created_at,
-    }));
-    if (remote) return remote;
-  }
-  return _origAuditLoadLog();
-};
-
-// bcLoadData — batch log (production calculator history)
-const _origBcLoadData = bcLoadData;
-bcLoadData = async function() {
-  if (SUPABASE_CONFIG.remoteFirst) {
-    const remote = await _remoteLoad('batches', null, r => ({
-      batchCode: r.batch_code, skuCode: r.sku_code,
-      casesProduced: r.cases_produced, productionDate: r.production_date,
-    }));
-    if (remote) { bcBatchLog = remote; return; }
-  }
-  _origBcLoadData();
-};
-
-// Wire realtime to invalidate cache then re-render
-setTimeout(() => {
+// Core background sync function — fetches one table from Supabase,
+// updates localStorage cache, then re-renders affected pages
+async function _remoteSync(table, forceRender) {
+  if (!SUPABASE_CONFIG.remoteFirst) return;
   const sb = getSupabaseClient();
   if (!sb) return;
-  Object.keys(_remoteCache).forEach(k => delete _remoteCache[k]);
-}, 3000);
+
+  const cfg = _tableSync[table];
+  if (!cfg) return;
+
+  // Throttle: skip if fetched recently (unless forced by realtime)
+  const now = Date.now();
+  if (!forceRender && _remoteCache[table] && now - _remoteCache[table] < _remoteCacheTTL) return;
+  _remoteCache[table] = now;
+
+  try {
+    let query = sb.from(table).select('*');
+    if (cfg.orderBy) query = query.order(cfg.orderBy.col, { ascending: cfg.orderBy.asc });
+    if (cfg.limit) query = query.limit(cfg.limit);
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const mapped = cfg.transform ? data.map(cfg.transform) : data;
+
+    // Update localStorage cache so synchronous loaders get fresh data
+    if (cfg.key) localStorage.setItem(cfg.key, JSON.stringify(mapped));
+
+    // Run any post-fetch side effects (e.g. update global vars)
+    if (cfg.postFetch) cfg.postFetch(mapped);
+
+    // Re-render current page if it uses this table
+    const activePage = document.querySelector('.page.active')?.id?.replace('page-','');
+    if (activePage && (forceRender || cfg.pages?.includes(activePage))) {
+      if (_renderDebounce[activePage]) clearTimeout(_renderDebounce[activePage]);
+      _renderDebounce[activePage] = setTimeout(() => {
+        const fn = _pageRenderMap[activePage];
+        if (fn) { try { fn(); } catch(e) { console.warn('[Remote] render error:', e); } }
+      }, 300);
+    }
+
+    return mapped;
+  } catch(e) {
+    console.warn(`[Remote] ${table} sync failed:`, e.message);
+    _remoteCache[table] = 0; // allow retry
+  }
+}
+
+// Sync all critical tables on startup
+async function _remoteSyncAll() {
+  if (!SUPABASE_CONFIG.remoteFirst) return;
+  const priority = ['batches','movements','sku_master','production_runs','shipments','customer_orders','operators','consumables'];
+  for (const table of priority) {
+    await _remoteSync(table, false);
+  }
+  // Then background sync the rest
+  const rest = Object.keys(_tableSync).filter(t => !priority.includes(t));
+  rest.forEach(table => _remoteSync(table, false));
+}
+
+// Invalidate cache entry (called by realtime engine)
+function _invalidateCache(table) {
+  _remoteCache[table] = 0;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE BRIDGE — PHASE A/J (Data Access Abstraction)
@@ -19790,18 +19734,19 @@ const SUPABASE_CONFIG = {
 (function _loadSupabaseConfig() {
   try {
     // Hardcoded defaults — every device gets these automatically
-    const DEFAULTS = {
-      url: 'https://vuiorapiugmfmgwdolzq.supabase.co',
-      anonKey: 'sb_publishable_w9yQoKB2rw7ZTa9Pdsc5kw_wMQIxnh',
-    };
+    const DEFAULT_URL = 'https://vuiorapiugmfmgwdolzq.supabase.co';
+    const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1aW9yYXBpdWdtZm1nd2RvbHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODEwNjQsImV4cCI6MjA5MTA1NzA2NH0.eHHsGvc1__KyJBhUiImPUghVhdie08V42FPt8WZFcvA';
     const cfg = JSON.parse(localStorage.getItem('420craft_supabase_config') || '{}');
-    SUPABASE_CONFIG.url = cfg.url || DEFAULTS.url;
-    SUPABASE_CONFIG.anonKey = cfg.anonKey || DEFAULTS.anonKey;
-    // Auto-enable Remote First for everyone when Supabase is configured
-    // Only stays off if admin explicitly turned it off (cfg.remoteFirst === false)
-    if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey) {
-      SUPABASE_CONFIG.remoteFirst = cfg.remoteFirst !== false;
+    SUPABASE_CONFIG.url = cfg.url || DEFAULT_URL;
+    // Use saved key if valid JWT, otherwise use hardcoded default
+    const savedKey = cfg.anonKey || '';
+    SUPABASE_CONFIG.anonKey = savedKey.startsWith('eyJ') ? savedKey : DEFAULT_KEY;
+    // Always save correct config back to localStorage so all devices get it
+    if (!savedKey.startsWith('eyJ')) {
+      localStorage.setItem('420craft_supabase_config', JSON.stringify({ url: SUPABASE_CONFIG.url, anonKey: DEFAULT_KEY, remoteFirst: cfg.remoteFirst !== false }));
     }
+    // Auto-enable Remote First for everyone
+    SUPABASE_CONFIG.remoteFirst = cfg.remoteFirst !== false;
   } catch(e) {}
 })();
 
@@ -19977,14 +19922,10 @@ function _createSupabaseClient(sbLib) {
     allTables.forEach(table => {
       channel.on('postgres_changes', { event: '*', schema: 'public', table }, payload => {
         console.log(`[Realtime] ${table}:`, payload.eventType);
-        // Invalidate remote cache for this table so next render fetches fresh
-        delete _remoteCache[table];
-        // Refresh batch local cache
-        if (table === 'batches') loadBatchesFromRemote();
-        // Schedule re-render for all pages affected by this table
-        const affectedPages = _realtimePageMap[table] || [];
-        affectedPages.forEach(pageId => _scheduleRerender(pageId));
-        // Show live update indicator
+        // Invalidate cache and sync fresh data, then re-render current page
+        _invalidateCache(table);
+        _remoteSync(table, true);
+        // Show live update toast
         _showLiveUpdate(table, payload.eventType, payload);
       });
     });
@@ -20014,12 +19955,10 @@ function _initSupabaseWithRetry() {
     console.log('[Supabase] CDN ready — initializing...');
     _createSupabaseClient(sbLib);
     if (_sbClient && SUPABASE_CONFIG.remoteFirst) {
-      loadData().then(() => {
-        const active = document.querySelector('.page.active');
-        const pageId = active?.id?.replace('page-', '');
-        if (pageId) try { showPage(pageId); } catch(e) {}
-        console.log('[Supabase] ✅ Remote data loaded');
-      }).catch(e => console.warn('[Supabase] Initial load error:', e.message));
+      // Sync all tables in background, re-renders current page when done
+      _remoteSyncAll().then(() => {
+        console.log('[Supabase] ✅ Remote data synced');
+      }).catch(e => console.warn('[Supabase] Initial sync error:', e.message));
     }
   } else if (_sbInitAttempts < _sbMaxAttempts) {
     setTimeout(_initSupabaseWithRetry, 500);
