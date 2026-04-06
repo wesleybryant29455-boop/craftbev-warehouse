@@ -10930,7 +10930,20 @@ function renderProdRuns() {
       if (brandF  && getBrandLine(r.sku||'')!==brandF) return false;
       return true;
     })
-    .sort((a,b)=>b.startedAt.localeCompare(a.startedAt));
+    .map(r => ({
+      // Normalize Supabase snake_case to camelCase expected by renderer
+      ...r,
+      id:          r.id || r.batch_code || '',
+      batchCode:   r.batch_code  || r.batchCode  || '',
+      sku:         r.sku_code    || r.sku         || '',
+      flavorName:  r.sku_code    || r.flavorName  || r.sku || '',
+      totalCases:  r.cases_produced || r.totalCases || 0,
+      startedAt:   r.started_at  || r.startedAt   || r.start_date || '',
+      completedAt: r.completed_at|| r.completedAt  || r.end_date   || '',
+      costSummary: r.cost_summary || r.costSummary || null,
+      coaLink:     r.coa_link    || r.coaLink      || '',
+    }))
+    .sort((a,b)=>(b.startedAt||'').localeCompare(a.startedAt||''));
 
   const list = document.getElementById('prod-runs-list');
   if (!filtered.length) {
@@ -10946,7 +10959,12 @@ function renderProdRuns() {
     const costs = _prodCalcCosts(r);
     const isLive = r.status==='in-progress';
     const col = isLive?'var(--amber)':'var(--green)';
-    const cpc = r.totalCases>0?(costs.grand/r.totalCases).toFixed(2):'—';
+    const cs = r.costSummary || r.cost_summary;
+    const cpc = cs?.cost_per_case
+      ? '$'+parseFloat(cs.cost_per_case).toFixed(2)
+      : r.totalCases>0
+        ? '$'+(costs.grand/r.totalCases).toFixed(2)
+        : '—';
     const laborMins = (r.crew||[]).reduce((a,c)=>a+(c.totalMins||0),0);
     const laborHrs  = (laborMins/60).toFixed(1);
     return `<div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:20px;margin-bottom:14px;border-left:4px solid ${col}">
@@ -11299,13 +11317,23 @@ function _prodRunRenderExpendables() {
 
 // ── COSTS ─────────────────────────────────
 function _prodCalcCosts(run) {
+  // If this is a backloaded run (cost_summary has total), use that directly
+  const cs = run.cost_summary || run.costSummary;
+  if (cs && cs.total && (!run.crew || !run.crew.length) && (!run.expendables || !run.expendables.length)) {
+    return { labor: 0, materials: cs.total, grand: cs.total,
+             cost_per_can: cs.cost_per_can||0, cost_per_case: cs.cost_per_case||0 };
+  }
   const crew = run.crew||[];
   const labor = crew.reduce((a,c)=>{
     const hrs = c.totalMins ? c.totalMins/60 : 0;
     return a + hrs*(c.rate||0);
   },0);
   const materials = (run.expendables||[]).reduce((a,e)=>a+(e.qty||1)*(e.unitCost||0),0);
-  return { labor, materials, grand: labor+materials };
+  const grand = labor+materials;
+  // If still 0, check cost_summary fallback
+  if (grand === 0 && cs && cs.total) return { labor:0, materials:cs.total, grand:cs.total,
+    cost_per_can: cs.cost_per_can||0, cost_per_case: cs.cost_per_case||0 };
+  return { labor, materials, grand };
 }
 
 function _prodRunUpdateCosts() {
@@ -12801,11 +12829,12 @@ function schedMakeBlock(opts) {
 
 // ── Date blocking: returns blocked dates for customer portal ───────
 function schedGetBlockedDates() {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const cfg    = scheduleLoadConfig();
   const shiftMins = _schedShiftMins(cfg);
   const byDate = {};
-  blocks.filter(b => ['scheduled','in-progress','paused'].includes(b.status)).forEach(b => {
+  blocks.filter(b => ['scheduled','in-progress','paused','completed'].includes(b.status)).forEach(b => {
     if (!byDate[b.date]) byDate[b.date] = 0;
     byDate[b.date] += (b.estMins || 0) + (b.changeoverAfter ? (b.changeoverMins || 45) : 0);
   });
@@ -12827,7 +12856,8 @@ function schedGetBlockedDates() {
 // ── Changeover detection ───────────────────────────────────────────
 // After saving blocks, scan same-day adjacent blocks and flag changeovers
 function schedMarkChangeovers() {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const byDate = {};
   blocks.forEach(b => {
     if (!byDate[b.date]) byDate[b.date] = [];
@@ -12862,6 +12892,21 @@ function scheduleGoToToday() {
 }
 
 // ── Main render ────────────────────────────────────────────────────
+function _normalizeScheduleBlock(b) {
+  return {
+    ...b,
+    id:         b.id || '',
+    title:      b.title || b.sku_code || '',
+    skuCode:    b.sku_code    || b.skuCode    || '',
+    startTime:  b.start_time  || b.startTime  || '',
+    endTime:    b.end_time    || b.endTime    || '',
+    status:     b.status      || 'scheduled',
+    casesPlanned: b.cases_planned || b.casesPlanned || 0,
+    leadOperator: b.lead_operator || b.leadOperator || '',
+    notes:      b.notes || '',
+  };
+}
+
 function renderSchedule() {
   _schedRenderMonthLabel();
   _schedRenderCalendar();
@@ -13469,7 +13514,8 @@ function _schedAssignSave(orderId, batchIndex, runIndex) {
     notes:       notes
   });
 
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   blocks.push(block);
   scheduleSave(blocks);
   schedMarkChangeovers();
@@ -13479,7 +13525,8 @@ function _schedAssignSave(orderId, batchIndex, runIndex) {
 }
 // ── Edit / Delete blocks ───────────────────────────────────────────
 function scheduleEditBlock(blockId) {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b) return;
   scheduleCloseDayModal();
@@ -13499,7 +13546,8 @@ function scheduleDeleteBlock(blockId) {
 
 // ── Start / Pause / Resume run ─────────────────────────────────────
 function scheduleStartRun(blockId) {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b) return;
 
@@ -13529,7 +13577,8 @@ function scheduleStartRun(blockId) {
 }
 
 function schedulePauseRun(blockId) {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b) return;
   if (b.status !== 'in-progress') return;
@@ -13561,7 +13610,8 @@ function schedulePauseRun(blockId) {
 }
 
 function scheduleResumeRun(blockId) {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b) return;
 
@@ -13588,7 +13638,8 @@ function scheduleResumeRun(blockId) {
 }
 
 function scheduleGoToLive(blockId) {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b || !b.prodRunId) return;
   scheduleCloseDayModal();
@@ -13597,7 +13648,8 @@ function scheduleGoToLive(blockId) {
 
 // ── Postpone Run ───────────────────────────────────────────────────
 function scheduleOpenPostpone(blockId) {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b) return;
 
@@ -13728,7 +13780,8 @@ function _ppCheckDateConflict() {
   const dateEl    = document.getElementById('pp-new-date');
   const conflictEl= document.getElementById('pp-date-conflict');
   if (!dateEl || !conflictEl) return;
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const hasRuns = blocks.some(b => b.date === dateEl.value && ['scheduled','in-progress','paused'].includes(b.status));
   conflictEl.style.display = hasRuns ? 'block' : 'none';
 }
@@ -13840,7 +13893,8 @@ function _schedSavePostpone() {
   const notes   = notesEl?.value.trim() || '';
   const newDate = newDateEl?.value || '';
 
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b) return;
 
@@ -14003,7 +14057,8 @@ function _schedSavePostpone() {
 }
 // Reschedule a postponed block (pick a new date from the tombstone)
 function scheduleReschedulePostponed(blockId) {
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b || b.status !== 'postponed') return;
 
@@ -14057,7 +14112,8 @@ function _schedSaveReschedule(blockId) {
   const newDate   = newDateEl?.value;
   if (!newDate) { showToast('⚠ Pick a new date'); return; }
 
-  const blocks = scheduleLoad();
+  const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
   const b = blocks.find(x => x.id === blockId);
   if (!b) return;
 
@@ -14179,7 +14235,8 @@ prodRunSaveActive = function() {
     schedIntelligenceRecord(prodRunActive);
     // Update the linked schedule block if exists
     if (prodRunActive.schedBlockId) {
-      const blocks = scheduleLoad();
+      const rawBlocks = scheduleLoad();
+  const blocks = (Array.isArray(rawBlocks)?rawBlocks:[]).map(_normalizeScheduleBlock);
       const b = blocks.find(x => x.id === prodRunActive.schedBlockId);
       if (b) {
         b.status     = 'completed';
