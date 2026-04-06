@@ -17163,12 +17163,22 @@ function _acctBtnGreen(label,onclick){return`<button onclick="${onclick}" style=
 function renderAcctHome(){
   const el=document.getElementById('acct-home-content');
   if(!el)return;
-  if(!el.innerHTML.trim())el.innerHTML='<div style="padding:48px;text-align:center;color:var(--text3)">⏳ Loading accounting data...</div>';
-  acctSeedIfEmpty();
-  const aging=arAgingReport();const agingTotal=Object.values(aging).reduce((a,v)=>a+v.reduce((b,i)=>b+(i.openAmount||0),0),0);
-  const invVal=inventoryValuationSummary();
-  el.innerHTML=`<div style="padding:24px;max-width:1200px">
-    ${_acctSectionHeader('ACCOUNTING HOME','Live financial overview — '+kpi.period,_acctBtn('⚠ Exceptions ('+exceptions.length+')','renderAcctExceptions();showPage("acct-exceptions",document.querySelector("[onclick*=acct-exceptions]"))')+_acctBtnGreen('+ New Invoice','acctNewInvoiceModal()'))}
+  el.innerHTML='<div style="padding:48px;text-align:center;color:var(--text3)">⏳ Loading...</div>';
+  try{
+    acctSeedIfEmpty();
+    const kpi=acctKPIs();
+    const exceptions=runExceptionEngine();
+    const errors=exceptions.filter(e=>e.sev==='error').length;
+    const warnings=exceptions.filter(e=>e.sev==='warning').length;
+    const aging=arAgingReport();
+    const invVal=inventoryValuationSummary();
+    // System health diagnostics
+    const diag=acctDiagnostics();
+    el.innerHTML=`<div style="padding:24px;max-width:1200px">
+    ${_acctSectionHeader('ACCOUNTING HOME','Live financial overview — '+kpi.period,
+      _acctBtn('⚠ Exceptions ('+(errors+warnings)+')','showPage("acct-exceptions",document.querySelector("[onclick*=acct-exceptions]"))')+
+      _acctBtnGreen('+ New Invoice','acctNewInvoiceModal()'))}
+    ${diag.issues.length?`<div style="background:rgba(255,77,109,0.08);border:1px solid rgba(255,77,109,0.3);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px"><strong style="color:var(--red)">⚠ System Issues (${diag.issues.length}):</strong> ${diag.issues.slice(0,3).join(' · ')}${diag.issues.length>3?' and '+(diag.issues.length-3)+' more':''} <button onclick="acctShowDiagModal()" style="margin-left:8px;background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px">View all →</button></div>`:''}
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:24px">
       ${_acctCard('REVENUE MTD',acctFmt(kpi.revMTD),kpi.period,'var(--green)','💵')}
       ${_acctCard('OPEN AR',acctFmt(kpi.arOpen),kpi.overdueInvs+' overdue','var(--blue)','📄')}
@@ -17185,8 +17195,16 @@ function renderAcctHome(){
         ${(()=>{const rows=[['Current',aging.current],['1–30',aging['1-30']],['31–60',aging['31-60']],['61–90',aging['61-90']],['90+',aging['90+']]];const grand=rows.reduce((a,[,v])=>a+v.reduce((b,i)=>b+(i.openAmount||0),0),0);if(!grand)return'<div style="color:var(--text3);font-size:12px">No open invoices 🎉</div>';return'<table style="width:100%;border-collapse:collapse;font-size:12px">'+rows.map(([label,inv])=>{const amt=inv.reduce((a,i)=>a+(i.openAmount||0),0);const c=label==='90+'?'var(--red)':label.includes('61')?'var(--amber)':'var(--text)';return amt>0?`<tr><td style="padding:4px 0;color:var(--text3)">${label}</td><td style="text-align:right;font-family:var(--font-mono);color:${c}">${acctFmt(amt)}</td><td style="padding-left:8px;color:var(--text3);font-size:10px">${inv.length} inv</td></tr>`:''}).join('')+`<tr><td style="padding:6px 0;font-weight:700;border-top:1px solid var(--border2)">Total</td><td style="text-align:right;font-weight:700;border-top:1px solid var(--border2);font-family:var(--font-mono);color:var(--blue)">${acctFmt(grand)}</td><td></td></tr></table>`;})()}
       </div>
       <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:18px">
-        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">⏱ RECENT ACTIVITY</div>
-        ${(()=>{const log=acctLoad(ACCT_KEYS.ACCT_AUDIT).slice(-6).reverse();if(!log.length)return'<div style="color:var(--text3);font-size:12px">No activity yet</div>';return log.map(l=>`<div style="display:flex;gap:8px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border2)"><div style="font-size:16px;flex-shrink:0">${{create:'✅',update:'✏️',approve:'🎯',lock:'🔒',unlock:'⚠️'}[l.action]||'📝'}</div><div><div style="font-size:12px;color:var(--text)">${l.note||l.action+' '+l.entity}</div><div style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${l.ts.slice(0,16).replace('T',' ')} · ${l.user}</div></div></div>`).join('');})()}
+        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">🔧 SYSTEM HEALTH</div>
+        <div style="font-size:11px">
+          ${[
+            ['Accounting routes',diag.routesOk,'registered','missing'],
+            ['Data migrations',diag.migrationsOk,'complete','incomplete'],
+            ['Sync errors',diag.syncErrors===0,diag.syncErrors+' errors','check integrations'],
+            ['Duplicate SKUs',diag.dupeSKUs===0,diag.dupeSKUs+' dupes found','run dedupe'],
+            ['Missing mappings',diag.missingMappings===0,diag.missingMappings+' items','review mappings'],
+          ].map(([label,ok,good,bad])=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border2)"><span style="color:var(--text3)">${label}</span><span style="color:${ok?'var(--green)':'var(--red)'};font-weight:600">${ok?good:bad}</span></div>`).join('')}
+        </div>
       </div>
     </div>
     <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:18px;margin-bottom:24px">
@@ -17200,9 +17218,13 @@ function renderAcctHome(){
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">
-      ${[['📝 Deals','acct-deals'],['🧮 Batch Costing','acct-costing'],['🤝 Settlements','acct-settlements'],['💵 AR','acct-ar'],['🧾 AP & POs','acct-ap'],['🏪 Vendors','acct-vendors'],['📊 Inventory Val','acct-inventory-val'],['🔒 Close Center','acct-close'],['⚠️ Exceptions','acct-exceptions']].map(([label,page])=>`<button onclick="showPage('${page}',document.querySelector('[onclick*=${page}]'))" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:12px;font-size:12px;cursor:pointer;text-align:left">${label}</button>`).join('')}
+      ${[['📝 Deals','acct-deals'],['🧮 Batch Costing','acct-costing'],['🤝 Settlements','acct-settlements'],['💵 AR','acct-ar'],['🧾 AP & POs','acct-ap'],['🏪 Vendors','acct-vendors'],['📊 Inventory Val','acct-inventory-val'],['🔒 Close Center','acct-close'],['⚠️ Exceptions','acct-exceptions'],['📝 Invoice Types','acct-invoice-types'],['🔗 QuickBooks','acct-qbo']].map(([label,page])=>`<button onclick="showPage('${page}',document.querySelector('[onclick*=${page}]'))" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:12px;font-size:12px;cursor:pointer;text-align:left">${label}</button>`).join('')}
     </div>
   </div>`;
+  }catch(err){
+    console.error('renderAcctHome failed:',err);
+    el.innerHTML=`<div style="padding:32px;max-width:800px"><div style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);border-radius:12px;padding:24px"><div style="font-size:16px;font-weight:700;color:var(--red);margin-bottom:8px">⚠ Accounting Home Error</div><div style="font-size:13px;color:var(--text2);margin-bottom:16px">${err.message}</div><button onclick="renderAcctHome()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer">↻ Retry</button></div></div>`;
+  }
 }
 
 function renderAcctDeals(){
@@ -18212,6 +18234,995 @@ runExceptionEngine=function(){
 
 // ── PHASE 2 INIT ─────────────────────────────────────────────
 setTimeout(()=>{try{taxRulesLoad();runExceptionEngine();}catch(e){console.warn('P2 init:',e);}},3500);
+
+// ═══════════════════════════════════════════════════════════════
+// AUSTIN'S ADDENDUM — 37A-37N
+// Diagnostics · Invoice Types · Settlement Lifecycle · QBO Portal
+// SKU Dedupe · AR Reminders · AP Accounts · Employees/Permissions
+// ═══════════════════════════════════════════════════════════════
+
+// ── 37A: DIAGNOSTICS ENGINE ──────────────────────────────────
+function acctDiagnostics() {
+  const issues = [];
+  const warnings = [];
+  try {
+    // Route checks
+    const routePages = ['acct-home','acct-deals','acct-settlements','acct-ar','acct-ap','acct-exceptions','acct-invoice-types','acct-qbo'];
+    const missingRoutes = routePages.filter(p => !document.getElementById('page-'+p));
+    if (missingRoutes.length) issues.push('Missing page containers: '+missingRoutes.join(', '));
+    const routesOk = missingRoutes.length === 0;
+
+    // Storage key checks
+    const expectedKeys = Object.values(ACCT_KEYS);
+    let missingKeys = 0;
+    expectedKeys.forEach(k => { if (!localStorage.getItem(k)) missingKeys++; });
+
+    // Sync errors
+    const syncLog = acctLoad(QBO_KEYS?.SYNC_LOG||'420craft_acct_sync_log');
+    const syncErrors = syncLog.filter(l => l.status === 'error' && l.ts > _prevPeriod(acctPeriod(acctToday()))+'-01').length;
+    if (syncErrors > 0) warnings.push(syncErrors+' QBO sync errors');
+
+    // Duplicate SKUs
+    const skus = typeof skuData !== 'undefined' ? skuData : [];
+    const skuKeys = skus.map(s => (s.SKU+s.MG_Strength+s.CanSize).toLowerCase());
+    const dupeSKUs = skuKeys.length - new Set(skuKeys).size;
+    if (dupeSKUs > 0) warnings.push(dupeSKUs+' duplicate SKUs detected');
+
+    // Missing invoice type mappings
+    const invTypes = invoiceTypesLoad();
+    const missingMappings = invTypes.filter(t => t.status === 'active' && !t.qboItemMapping).length;
+
+    // Overdue invoices with no reminder sent
+    const invs = invoicesLoad();
+    const today = acctToday();
+    const overdueNoReminder = invs.filter(i =>
+      !['paid','void'].includes(i.status) && i.dueDate < today && !i.lastReminderSent
+    ).length;
+    if (overdueNoReminder > 0) warnings.push(overdueNoReminder+' overdue invoices with no reminder sent');
+
+    return { routesOk, missingKeys, syncErrors, dupeSKUs, missingMappings, issues, warnings,
+      migrationsOk: missingKeys < 3 };
+  } catch(e) {
+    return { routesOk:false, missingKeys:0, syncErrors:0, dupeSKUs:0, missingMappings:0,
+      issues:['Diagnostics error: '+e.message], warnings:[], migrationsOk:false };
+  }
+}
+
+function acctShowDiagModal() {
+  const diag = acctDiagnostics();
+  const rows = [
+    ...diag.issues.map(i => ['❌ ERROR', i]),
+    ...diag.warnings.map(w => ['⚠ WARNING', w]),
+    ['Routes OK', diag.routesOk ? '✅ Yes' : '❌ Missing pages'],
+    ['Migrations', diag.migrationsOk ? '✅ Complete' : '⚠ Incomplete'],
+    ['Sync Errors', diag.syncErrors === 0 ? '✅ None' : '❌ '+diag.syncErrors],
+    ['Duplicate SKUs', diag.dupeSKUs === 0 ? '✅ None' : '⚠ '+diag.dupeSKUs],
+    ['Missing Mappings', diag.missingMappings === 0 ? '✅ None' : '⚠ '+diag.missingMappings],
+  ];
+  acctModal('SYSTEM DIAGNOSTICS',
+    '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+    rows.map(([label,val]) =>
+      `<tr style="border-bottom:1px solid var(--border2)"><td style="padding:6px 0;color:var(--text3);width:140px">${label}</td><td style="padding:6px 8px">${val}</td></tr>`
+    ).join('')+'</table>',
+    null, 'Close');
+}
+
+// ── 37B: INVOICE TYPE ADMIN ───────────────────────────────────
+const INVOICE_TYPES_KEY = '420craft_acct_invoice_types';
+const SYSTEM_INVOICE_TYPES = [
+  {id:'IT01',name:'Shipment Invoice',code:'SHIP',status:'system',desc:'Standard outbound shipment invoice',prefix:'INV',defaultTerms:'Net30',allowAutoShipment:true,allowAutoSettlement:false,showInAR:true,requiresApproval:false,qboItemMapping:'',sortOrder:1},
+  {id:'IT02',name:'Manufacturing Invoice',code:'MFG',status:'system',desc:'Co-pack/toll manufacturing fee',prefix:'MFG',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:false,qboItemMapping:'',sortOrder:2},
+  {id:'IT03',name:'Co-Pack / Toll Invoice',code:'CPAK',status:'system',desc:'Toll/co-pack production invoice',prefix:'CPK',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:false,qboItemMapping:'',sortOrder:3},
+  {id:'IT04',name:'Settlement Invoice',code:'SETT',status:'system',desc:'Monthly settlement statement invoice',prefix:'SET',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:true,showInAR:true,requiresApproval:true,qboItemMapping:'',sortOrder:4},
+  {id:'IT05',name:'Profit Share Invoice',code:'PROF',status:'system',desc:'Profit-share distribution invoice',prefix:'PSH',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:true,showInAR:true,requiresApproval:true,qboItemMapping:'',sortOrder:5},
+  {id:'IT06',name:'Pass-Through Invoice',code:'PASS',status:'system',desc:'Customer pass-through cost rebill',prefix:'PAS',defaultTerms:'Net15',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:false,qboItemMapping:'',sortOrder:6},
+  {id:'IT07',name:'Freight Rebill Invoice',code:'FRGT',status:'system',desc:'Carrier freight rebilled to customer',prefix:'FRT',defaultTerms:'Net15',allowAutoShipment:true,allowAutoSettlement:false,showInAR:true,requiresApproval:false,qboItemMapping:'',sortOrder:7},
+  {id:'IT08',name:'Storage Invoice',code:'STOR',status:'system',desc:'Inventory storage/carrying fee',prefix:'STR',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:false,qboItemMapping:'',sortOrder:8},
+  {id:'IT09',name:'Setup Fee Invoice',code:'SETP',status:'system',desc:'One-time brand/product setup fee',prefix:'SUP',defaultTerms:'Due on receipt',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:true,qboItemMapping:'',sortOrder:9},
+  {id:'IT10',name:'Formulation / R&D Invoice',code:'RND',status:'system',desc:'Formula development fee',prefix:'RND',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:true,qboItemMapping:'',sortOrder:10},
+  {id:'IT11',name:'Sample Charge Invoice',code:'SMPL',status:'system',desc:'Sample product charge',prefix:'SMP',defaultTerms:'Net15',allowAutoShipment:false,allowAutoSettlement:false,showInAR:false,requiresApproval:false,qboItemMapping:'',sortOrder:11},
+  {id:'IT12',name:'Debit Memo',code:'DM',status:'system',desc:'Charge adjustment / debit memo',prefix:'DM',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:true,qboItemMapping:'',sortOrder:12},
+  {id:'IT13',name:'Credit Memo',code:'CM',status:'system',desc:'Credit / refund memo',prefix:'CM',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:true,qboItemMapping:'',sortOrder:13},
+  {id:'IT14',name:'Adjustment Invoice',code:'ADJ',status:'system',desc:'Manual accounting adjustment',prefix:'ADJ',defaultTerms:'Net30',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:true,qboItemMapping:'',sortOrder:14},
+  {id:'IT15',name:'Recurring Monthly Fee',code:'REC',status:'system',desc:'Fixed monthly recurring fee',prefix:'REC',defaultTerms:'Net15',allowAutoShipment:false,allowAutoSettlement:false,showInAR:true,requiresApproval:false,qboItemMapping:'',sortOrder:15},
+];
+
+function invoiceTypesLoad() {
+  const saved = acctLoad(INVOICE_TYPES_KEY);
+  if (saved.length) return saved;
+  acctSave(INVOICE_TYPES_KEY, SYSTEM_INVOICE_TYPES);
+  return SYSTEM_INVOICE_TYPES;
+}
+
+function invoiceTypeCreate(data) {
+  const types = invoiceTypesLoad();
+  const type = {
+    id: acctId('IT'), name: data.name||'', code: (data.code||'').toUpperCase(),
+    status: 'active', desc: data.desc||'', prefix: data.prefix||'INV',
+    defaultTerms: data.defaultTerms||'Net30', taxTreatment: data.taxTreatment||'standard',
+    qboItemMapping: data.qboItemMapping||'', qboIncomeAccount: data.qboIncomeAccount||'',
+    allowAutoShipment: data.allowAutoShipment||false,
+    allowAutoSettlement: data.allowAutoSettlement||false,
+    showInAR: data.showInAR!==false, requiresApproval: data.requiresApproval||false,
+    supportsCredits: data.supportsCredits||false, supportsRecurring: data.supportsRecurring||false,
+    sortOrder: types.length+1, createdBy:'Admin', createdAt: acctNow(), updatedAt: acctNow(),
+  };
+  types.push(type);
+  acctSave(INVOICE_TYPES_KEY, types);
+  acctAudit('create','invoice_type',type.id,{name:type.name},'Invoice type created');
+  return type;
+}
+
+function renderAcctInvoiceTypes() {
+  const el = document.getElementById('acct-invoice-types-content');
+  if (!el) return;
+  try {
+    const types = invoiceTypesLoad();
+    el.innerHTML = `<div style="padding:24px;max-width:1100px">
+      ${_acctSectionHeader('INVOICE TYPES',types.length+' types — define billing categories, QBO mappings, and auto-create rules',_acctBtnGreen('+ New Type','acctNewInvoiceTypeModal()')+'<button onclick="acctInvoiceTypeSettingsInfo()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer">ℹ Help</button>')}
+      <div style="background:rgba(56,189,248,0.07);border:1px solid rgba(56,189,248,0.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:var(--text3)">
+        <strong style="color:var(--blue)">System types</strong> (gray badge) are protected — they can be deactivated but not deleted. <strong style="color:var(--amber)">Custom types</strong> can be fully edited or deleted. Invoice types control default terms, QBO mapping, auto-create behavior, and AR reminder rules.
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--card);border-radius:10px;overflow:hidden">
+        <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+          <th style="text-align:left;padding:10px 14px">Name</th>
+          <th style="padding:10px 6px">Code</th>
+          <th style="padding:10px 6px">Terms</th>
+          <th style="padding:10px 6px">Auto-Ship</th>
+          <th style="padding:10px 6px">Auto-Sett</th>
+          <th style="padding:10px 6px">AR Aging</th>
+          <th style="padding:10px 6px">Approval</th>
+          <th style="padding:10px 6px">QBO Item</th>
+          <th style="padding:10px 14px">Actions</th>
+        </tr>
+        ${types.sort((a,b)=>a.sortOrder-b.sortOrder).map(t => {
+          const isSystem = t.status === 'system';
+          const statusColor = t.status==='active'?'var(--green)':t.status==='system'?'var(--blue)':t.status==='inactive'?'var(--text3)':'var(--text3)';
+          return `<tr style="border-top:1px solid var(--border2)">
+            <td style="padding:10px 14px">
+              <div style="font-weight:600">${_esc(t.name)}</div>
+              <div style="font-size:10px;color:var(--text3)">${_esc(t.desc||'')}</div>
+              <span style="font-size:9px;font-family:var(--font-mono);padding:1px 6px;border-radius:3px;background:var(--bg3);color:${statusColor}">${t.status.toUpperCase()}</span>
+            </td>
+            <td style="padding:10px 6px;text-align:center;font-family:var(--font-mono);font-size:11px">${_esc(t.code)}</td>
+            <td style="padding:10px 6px;text-align:center;font-size:11px;color:var(--text3)">${_esc(t.defaultTerms)}</td>
+            <td style="padding:10px 6px;text-align:center">${t.allowAutoShipment?'✅':'—'}</td>
+            <td style="padding:10px 6px;text-align:center">${t.allowAutoSettlement?'✅':'—'}</td>
+            <td style="padding:10px 6px;text-align:center">${t.showInAR?'✅':'—'}</td>
+            <td style="padding:10px 6px;text-align:center">${t.requiresApproval?'⚠️':'—'}</td>
+            <td style="padding:10px 6px;text-align:center;font-size:10px;color:${t.qboItemMapping?'var(--green)':'var(--text3)'}">${t.qboItemMapping||'—'}</td>
+            <td style="padding:10px 14px">
+              <div style="display:flex;gap:5px">
+                <button onclick="acctEditInvoiceType('${t.id}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer">Edit</button>
+                ${!isSystem?`<button onclick="acctDeleteInvoiceType('${t.id}')" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);color:var(--red);border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer">Del</button>`:''}
+                ${t.status!=='inactive'&&!isSystem?`<button onclick="acctToggleInvoiceType('${t.id}')" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer">Deactivate</button>`:''}
+                ${t.status==='inactive'?`<button onclick="acctToggleInvoiceType('${t.id}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer">Activate</button>`:''}
+              </div>
+            </td>
+          </tr>`;
+        }).join('')}
+      </table>
+    </div>`;
+  } catch(e) {
+    el.innerHTML = `<div style="padding:32px;color:var(--red)">Error loading invoice types: ${e.message}</div>`;
+  }
+}
+
+function acctNewInvoiceTypeModal(prefill) {
+  const d = prefill || {};
+  acctModal('NEW INVOICE TYPE',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Name *</label><input class="form-input" id="nit-name" value="${_esc(d.name||'')}" placeholder="e.g. Custom Storage Fee"></div>
+    <div class="form-group"><label class="form-label">Short Code *</label><input class="form-input" id="nit-code" value="${_esc(d.code||'')}" placeholder="STOR" style="text-transform:uppercase"></div>
+    <div class="form-group"><label class="form-label">Invoice # Prefix</label><input class="form-input" id="nit-prefix" value="${_esc(d.prefix||'INV')}" placeholder="INV"></div>
+    <div class="form-group"><label class="form-label">Default Terms</label>
+      <select class="form-input" id="nit-terms"><option>Net15</option><option selected>Net30</option><option>Net45</option><option>Due on receipt</option><option>COD</option></select></div>
+    <div class="form-group"><label class="form-label">Tax Treatment</label>
+      <select class="form-input" id="nit-tax"><option value="standard">Standard</option><option value="exempt">Tax Exempt</option><option value="excise">Excise</option></select></div>
+    <div class="form-group"><label class="form-label">QBO Item Mapping</label><input class="form-input" id="nit-qbo" value="${_esc(d.qboItemMapping||'')}" placeholder="QBO item/service name"></div>
+    <div class="form-group"><label class="form-label">QBO Income Account</label><input class="form-input" id="nit-qboacct" value="${_esc(d.qboIncomeAccount||'')}" placeholder="Revenue account name"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description</label><textarea class="form-input" id="nit-desc" style="height:50px">${_esc(d.desc||'')}</textarea></div>
+    <div class="form-group" style="grid-column:1/-1">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px"><input type="checkbox" id="nit-autoship" ${d.allowAutoShipment?'checked':''}> Auto-create from Shipment</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;margin-top:6px"><input type="checkbox" id="nit-autosett" ${d.allowAutoSettlement?'checked':''}> Auto-create from Settlement</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;margin-top:6px"><input type="checkbox" id="nit-showinar" ${d.showInAR!==false?'checked':''}> Show in AR Aging</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;margin-top:6px"><input type="checkbox" id="nit-approval" ${d.requiresApproval?'checked':''}> Requires Approval Before Send</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;margin-top:6px"><input type="checkbox" id="nit-recur" ${d.supportsRecurring?'checked':''}> Supports Recurring</label>
+    </div>
+  </div>`,
+  () => {
+    const name = document.getElementById('nit-name').value.trim();
+    const code = document.getElementById('nit-code').value.trim().toUpperCase();
+    if (!name || !code) { showToast('⚠ Name and code required'); return; }
+    invoiceTypeCreate({
+      name, code, prefix: document.getElementById('nit-prefix').value.trim()||'INV',
+      defaultTerms: document.getElementById('nit-terms').value,
+      taxTreatment: document.getElementById('nit-tax').value,
+      qboItemMapping: document.getElementById('nit-qbo').value.trim(),
+      qboIncomeAccount: document.getElementById('nit-qboacct').value.trim(),
+      desc: document.getElementById('nit-desc').value,
+      allowAutoShipment: document.getElementById('nit-autoship').checked,
+      allowAutoSettlement: document.getElementById('nit-autosett').checked,
+      showInAR: document.getElementById('nit-showinar').checked,
+      requiresApproval: document.getElementById('nit-approval').checked,
+      supportsRecurring: document.getElementById('nit-recur').checked,
+    });
+    showToast('✅ Invoice type created');
+    renderAcctInvoiceTypes();
+  }, 'Create');
+}
+
+function acctEditInvoiceType(id) {
+  const types = invoiceTypesLoad();
+  const t = types.find(x => x.id === id);
+  if (!t) return;
+  acctModal('EDIT — '+t.name,`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Name</label><input class="form-input" id="eit-name" value="${_esc(t.name)}"></div>
+    <div class="form-group"><label class="form-label">Default Terms</label>
+      <select class="form-input" id="eit-terms">${['Net15','Net30','Net45','Due on receipt','COD'].map(x=>`<option ${t.defaultTerms===x?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">QBO Item Mapping</label><input class="form-input" id="eit-qbo" value="${_esc(t.qboItemMapping||'')}"></div>
+    <div class="form-group"><label class="form-label">QBO Income Account</label><input class="form-input" id="eit-qboacct" value="${_esc(t.qboIncomeAccount||'')}"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description</label><textarea class="form-input" id="eit-desc" style="height:50px">${_esc(t.desc||'')}</textarea></div>
+    <div class="form-group" style="grid-column:1/-1">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px"><input type="checkbox" id="eit-autoship" ${t.allowAutoShipment?'checked':''}> Auto-create from Shipment</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;margin-top:6px"><input type="checkbox" id="eit-approval" ${t.requiresApproval?'checked':''}> Requires Approval Before Send</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;margin-top:6px"><input type="checkbox" id="eit-showinar" ${t.showInAR?'checked':''}> Show in AR Aging</label>
+    </div>
+  </div>`,
+  () => {
+    t.name = document.getElementById('eit-name').value.trim() || t.name;
+    t.defaultTerms = document.getElementById('eit-terms').value;
+    t.qboItemMapping = document.getElementById('eit-qbo').value.trim();
+    t.qboIncomeAccount = document.getElementById('eit-qboacct').value.trim();
+    t.desc = document.getElementById('eit-desc').value;
+    t.allowAutoShipment = document.getElementById('eit-autoship').checked;
+    t.requiresApproval = document.getElementById('eit-approval').checked;
+    t.showInAR = document.getElementById('eit-showinar').checked;
+    t.updatedAt = acctNow();
+    acctSave(INVOICE_TYPES_KEY, types);
+    acctAudit('update','invoice_type',id,{name:t.name},'Invoice type updated');
+    showToast('✅ Invoice type saved');
+    renderAcctInvoiceTypes();
+  }, 'Save');
+}
+
+function acctToggleInvoiceType(id) {
+  const types = invoiceTypesLoad();
+  const t = types.find(x => x.id === id);
+  if (!t || t.status === 'system') { showToast('⚠ System types cannot be deactivated this way'); return; }
+  t.status = t.status === 'active' ? 'inactive' : 'active';
+  t.updatedAt = acctNow();
+  acctSave(INVOICE_TYPES_KEY, types);
+  showToast((t.status==='active'?'✅ Activated: ':'⏸ Deactivated: ')+t.name);
+  renderAcctInvoiceTypes();
+}
+
+function acctDeleteInvoiceType(id) {
+  const types = invoiceTypesLoad();
+  const t = types.find(x => x.id === id);
+  if (!t) return;
+  if (t.status === 'system') { showToast('⚠ Cannot delete system invoice types'); return; }
+  if (!confirm('Delete invoice type "'+t.name+'"? This cannot be undone.')) return;
+  acctSave(INVOICE_TYPES_KEY, types.filter(x => x.id !== id));
+  acctAudit('delete','invoice_type',id,{name:t.name},'Invoice type deleted');
+  showToast('Invoice type deleted');
+  renderAcctInvoiceTypes();
+}
+
+function acctInvoiceTypeSettingsInfo() {
+  acctModal('INVOICE TYPES — HOW THEY WORK',`<div style="font-size:12px;line-height:1.8;color:var(--text2)">
+    <p style="margin-bottom:10px">Invoice types define how each invoice behaves — its numbering prefix, default payment terms, QuickBooks sync mapping, and automation rules.</p>
+    <div style="margin-bottom:8px"><strong style="color:var(--green)">Auto-create from Shipment</strong> — when enabled, invoices of this type are generated automatically when a shipment is submitted (if the deal's invoice cadence is "on shipment").</div>
+    <div style="margin-bottom:8px"><strong style="color:var(--green)">Auto-create from Settlement</strong> — when enabled, invoices of this type can be auto-generated from finalized settlements.</div>
+    <div style="margin-bottom:8px"><strong style="color:var(--blue)">QBO Item Mapping</strong> — the QuickBooks item/service name to use when pushing this invoice type. Must match exactly.</div>
+    <div style="margin-bottom:8px"><strong style="color:var(--amber)">Requires Approval</strong> — invoices of this type must be approved before they can be sent to the customer.</div>
+    <div><strong style="color:var(--text3)">System types</strong> cannot be deleted but can be deactivated. Clone a system type to create a custom version with different settings.</div>
+  </div>`, null, 'Got it');
+}
+
+// ── 37C: SETTLEMENT LIFECYCLE ─────────────────────────────────
+function settlementDelete(settlementId, force) {
+  const settlements = settlementsLoad();
+  const s = settlements.find(x => x.id === settlementId);
+  if (!s) return { error: 'Settlement not found' };
+  if (s.status === 'paid') return { error: 'Cannot delete a paid settlement' };
+  if (['finalized','invoiced'].includes(s.status) && !force) return { error: 'Use void/reverse for finalized settlements', requiresVoid: true };
+  // Check if it hit QBO
+  const hitQBO = !!(s.qboId || (invoicesLoad().find(i => i.refSettlementId === s.id && i.qboInvoiceId)));
+  if (hitQBO && !force) return { error: 'Settlement has been pushed to QuickBooks — void instead', requiresVoid: true };
+  // Safe to delete
+  const filtered = settlements.filter(x => x.id !== settlementId);
+  acctSave(ACCT_KEYS.SETTLEMENTS, filtered);
+  acctAudit('delete', 'settlement', settlementId, { status: s.status, brandName: s.brandName, period: s.period }, 'Settlement deleted');
+  return { ok: true };
+}
+
+function settlementVoidRecord(settlementId, reason) {
+  const settlements = settlementsLoad();
+  const s = settlements.find(x => x.id === settlementId);
+  if (!s) return { error: 'Not found' };
+  if (s.status === 'paid') return { error: 'Cannot void a paid settlement — use reversal' };
+  s.status = 'voided';
+  s.voidedAt = acctNow();
+  s.voidReason = reason || '';
+  acctSave(ACCT_KEYS.SETTLEMENTS, settlements);
+  acctAudit('update', 'settlement', settlementId, { status: 'voided', reason }, 'Settlement voided: ' + reason);
+  return { ok: true, settlement: s };
+}
+
+function settlementRevertToDraft(settlementId, reason) {
+  const settlements = settlementsLoad();
+  const s = settlements.find(x => x.id === settlementId);
+  if (!s) return { error: 'Not found' };
+  if (['paid','voided'].includes(s.status)) return { error: 'Cannot revert a '+s.status+' settlement' };
+  const prevStatus = s.status;
+  s.status = 'draft';
+  s.revertedAt = acctNow();
+  s.revertReason = reason || '';
+  acctSave(ACCT_KEYS.SETTLEMENTS, settlements);
+  acctAudit('update', 'settlement', settlementId, { prevStatus, reason }, 'Settlement reverted to draft: '+reason);
+  return { ok: true };
+}
+
+function settlementClone(settlementId) {
+  const s = settlementsLoad().find(x => x.id === settlementId);
+  if (!s) return null;
+  const clone = { ...s, id: acctId('SETT'), status: 'draft', createdAt: acctNow(), updatedAt: acctNow(), finalizedAt: null, voidedAt: null, invoicedAt: null };
+  delete clone.qboId;
+  const settlements = settlementsLoad();
+  settlements.push(clone);
+  acctSave(ACCT_KEYS.SETTLEMENTS, settlements);
+  acctAudit('create', 'settlement', clone.id, { clonedFrom: settlementId }, 'Cloned from settlement '+settlementId);
+  return clone;
+}
+
+function acctSettlementActions(settlementId) {
+  const s = settlementsLoad().find(x => x.id === settlementId);
+  if (!s) { showToast('Settlement not found'); return; }
+  const linkedInv = invoicesLoad().find(i => i.refSettlementId === settlementId);
+  const hasPayments = linkedInv && (linkedInv.paidAmount||0) > 0;
+  const hitQBO = !!(s.qboId || linkedInv?.qboInvoiceId);
+
+  acctModal('SETTLEMENT ACTIONS — '+s.brandName+' '+s.period,`
+    <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px">
+      <div><strong>Customer:</strong> ${_esc(s.customerId)}</div>
+      <div><strong>Brand:</strong> ${_esc(s.brandName)}</div>
+      <div><strong>Period:</strong> ${s.period}</div>
+      <div><strong>Status:</strong> <span style="color:var(--amber)">${s.status.toUpperCase()}</span></div>
+      <div><strong>Net Due:</strong> ${acctFmt(s.netDue)}</div>
+      <div><strong>Invoice:</strong> ${linkedInv ? linkedInv.invoiceNo : 'None'}</div>
+      <div><strong>Payments:</strong> ${hasPayments ? acctFmt(linkedInv.paidAmount)+' received' : 'None'}</div>
+      <div><strong>QBO:</strong> ${hitQBO ? '⚠ Already synced' : 'Not synced'}</div>
+    </div>
+    <div style="display:grid;gap:8px">
+      ${s.status === 'draft' ? `<button onclick="acctConfirmDeleteSettlement('${settlementId}')" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);color:var(--red);border-radius:8px;padding:10px;font-size:12px;cursor:pointer;text-align:left">🗑 Delete Draft — permanent removal</button>` : ''}
+      ${!['paid','voided','draft'].includes(s.status) ? `<button onclick="acctConfirmRevertSettlement('${settlementId}')" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:8px;padding:10px;font-size:12px;cursor:pointer;text-align:left">↩ Revert to Draft — keeps record, resets status</button>` : ''}
+      ${['finalized','invoiced'].includes(s.status) && !hasPayments ? `<button onclick="acctConfirmVoidSettlement('${settlementId}')" style="background:rgba(176,108,255,0.1);border:1px solid rgba(176,108,255,0.3);color:var(--purple);border-radius:8px;padding:10px;font-size:12px;cursor:pointer;text-align:left">⊘ Void Settlement — preserves record, marks voided</button>` : ''}
+      <button onclick="acctCloneSettlement('${settlementId}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:10px;font-size:12px;cursor:pointer;text-align:left">📋 Clone to New Draft — duplicate as new draft</button>
+    </div>
+  `, null, 'Cancel');
+}
+
+function acctConfirmDeleteSettlement(id) {
+  document.getElementById('acct-modal-overlay')?.remove();
+  const s = settlementsLoad().find(x => x.id === id);
+  if (!confirm('Permanently delete this draft settlement for '+s?.brandName+' '+s?.period+'?\n\nThis cannot be undone.')) return;
+  const result = settlementDelete(id);
+  if (result.error) { showToast('❌ '+result.error); return; }
+  showToast('✅ Settlement deleted');
+  renderAcctSettlements();
+}
+
+function acctConfirmRevertSettlement(id) {
+  document.getElementById('acct-modal-overlay')?.remove();
+  const reason = prompt('Reason for reverting to draft:');
+  if (!reason) return;
+  const result = settlementRevertToDraft(id, reason);
+  if (result.error) { showToast('❌ '+result.error); return; }
+  showToast('✅ Reverted to draft');
+  renderAcctSettlements();
+}
+
+function acctConfirmVoidSettlement(id) {
+  document.getElementById('acct-modal-overlay')?.remove();
+  const reason = prompt('Reason for voiding this settlement:');
+  if (!reason) return;
+  const result = settlementVoidRecord(id, reason);
+  if (result.error) { showToast('❌ '+result.error); return; }
+  showToast('✅ Settlement voided — audit logged');
+  renderAcctSettlements();
+}
+
+function acctCloneSettlement(id) {
+  document.getElementById('acct-modal-overlay')?.remove();
+  const clone = settlementClone(id);
+  if (!clone) { showToast('❌ Clone failed'); return; }
+  showToast('✅ Cloned to new draft settlement');
+  renderAcctSettlements();
+}
+
+// ── 37D: QBO PORTAL PAGE ────────────────────────────────────
+function renderAcctQBO() {
+  const el = document.getElementById('acct-qbo-content');
+  if (!el) return;
+  const cfg = qboConfigLoad();
+  const syncLog = acctLoad(QBO_KEYS?.SYNC_LOG||'420craft_acct_sync_log');
+  const pending = { invoices: invoicesLoad().filter(i=>i.qboSyncStatus==='pending'&&!['draft','void'].includes(i.status)).length, bills: acctLoad(ACCT_KEYS.VENDOR_BILLS).filter(b=>b.qboSyncStatus==='pending').length };
+  const errors = syncLog.filter(l=>l.status==='error').slice(-20).reverse();
+  const recent = syncLog.filter(l=>l.status==='success').slice(-10).reverse();
+
+  el.innerHTML = `<div style="padding:24px;max-width:1000px">
+    ${_acctSectionHeader('QUICKBOOKS ONLINE INTEGRATION','Connect, sync, and monitor your QBO accounting integration')}
+
+    <!-- Connection Card -->
+    <div style="background:var(--card);border:1px solid ${cfg.connected?'rgba(57,232,122,0.3)':'var(--border2)'};border-radius:12px;padding:20px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px">${cfg.connected?'🟢':'⚫'} QuickBooks Online</div>
+          <div style="font-size:12px;color:var(--text3)">${cfg.connected?'Connected to: '+cfg.companyName+' · Last token: '+(cfg.connectedAt||'—').slice(0,10):'Not connected — enter your QBO credentials below'}</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          ${cfg.connected?`<button onclick="qboBulkSync()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:7px;padding:8px 16px;font-size:12px;cursor:pointer">⬆ Sync Pending (${pending.invoices+pending.bills})</button>`:''}
+          <button onclick="acctQBOConfigModal()" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:7px;padding:8px 16px;font-size:12px;cursor:pointer">${cfg.connected?'⚙ Reconnect / Settings':'+ Connect QBO'}</button>
+          ${cfg.connected?`<button onclick="acctQBODisconnect()" style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.3);color:var(--red);border-radius:7px;padding:8px 16px;font-size:12px;cursor:pointer">Disconnect</button>`:''}
+        </div>
+      </div>
+
+      <!-- Sync Stats -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:16px">
+        ${[['Pending Invoices',pending.invoices,'var(--amber)'],['Pending Bills',pending.bills,'var(--amber)'],['Sync Errors',errors.length,'var(--red)'],['Synced Today',syncLog.filter(l=>l.status==='success'&&l.ts.slice(0,10)===acctToday()).length,'var(--green)']].map(([label,val,c])=>`<div style="background:var(--bg3);border-radius:8px;padding:10px 12px;text-align:center"><div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);margin-bottom:2px">${label.toUpperCase()}</div><div style="font-size:18px;font-family:var(--font-mono);color:${c}">${val}</div></div>`).join('')}
+      </div>
+
+      <!-- Sync Rules -->
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:8px">WHAT SYNCS TO QBO</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">
+        ${[['✅ Invoices','push on finalize or manually'],['✅ Payments','sync when recorded'],['✅ Bills','sync on create'],['✅ Customers','synced before invoices'],['✅ Vendors','synced before bills'],['✅ Credit Memos','sync on create'],['❌ Batch/COA data','stays internal — source of truth'],['❌ Production runs','stays internal — source of truth'],['❌ Settlement calcs','stays internal — source of truth'],['❌ Shipping labor','stays internal — source of truth']].map(([l,s])=>`<div style="background:var(--bg3);border-radius:6px;padding:7px 10px"><div style="color:var(--text2);font-weight:600;margin-bottom:1px">${l}</div><div style="color:var(--text3);font-size:10px">${s}</div></div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Invoice Type → QBO Mappings -->
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px">INVOICE TYPE → QBO ITEM MAPPINGS</div>
+        <button onclick="showPage('acct-invoice-types',document.querySelector('[onclick*=acct-invoice-types]'))" style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer">Manage Types →</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <tr style="color:var(--text3);font-size:10px;font-family:var(--font-mono)"><th style="text-align:left;padding:4px">Invoice Type</th><th style="text-align:left;padding:4px">QBO Item</th><th style="text-align:left;padding:4px">Income Account</th><th style="padding:4px">Status</th></tr>
+        ${invoiceTypesLoad().filter(t=>t.status!=='inactive').map(t=>`<tr style="border-top:1px solid var(--border2)">
+          <td style="padding:6px 4px;font-weight:500">${_esc(t.name)}</td>
+          <td style="padding:6px 4px;font-family:var(--font-mono);color:${t.qboItemMapping?'var(--green)':'var(--red)'}">${t.qboItemMapping||'⚠ NOT MAPPED'}</td>
+          <td style="padding:6px 4px;color:var(--text3)">${t.qboIncomeAccount||'—'}</td>
+          <td style="padding:6px 4px;text-align:center">${t.qboItemMapping?'✅':'❌'}</td>
+        </tr>`).join('')}
+      </table>
+    </div>
+
+    <!-- Failed Sync Queue -->
+    ${errors.length?`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:10px;font-family:var(--font-mono);color:var(--red);letter-spacing:2px">⚠ FAILED SYNC QUEUE (${errors.length})</div>
+        <button onclick="qboBulkSync();showToast('↻ Retrying failed syncs...')" style="font-size:11px;color:var(--amber);background:none;border:none;cursor:pointer">↻ Retry All</button>
+      </div>
+      ${errors.map(l=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2);font-size:11px"><span style="color:var(--red);flex-shrink:0">●</span><span style="font-family:var(--font-mono);color:var(--text3);min-width:120px;flex-shrink:0">${l.ts.slice(0,16).replace('T',' ')}</span><span style="color:var(--text2)">${l.action} ${l.entity} — ${l.detail||'error'}</span></div>`).join('')}
+    </div>`:''}
+
+    <!-- Recent Sync Log -->
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">RECENT SYNC LOG</div>
+      ${syncLog.length===0?'<div style="color:var(--text3);font-size:12px">No sync activity yet</div>':syncLog.slice(-15).reverse().map(l=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2);font-size:11px"><span style="color:${l.status==='success'?'var(--green)':l.status==='error'?'var(--red)':'var(--amber)'};flex-shrink:0">●</span><span style="font-family:var(--font-mono);color:var(--text3);min-width:120px;flex-shrink:0">${l.ts.slice(0,16).replace('T',' ')}</span><span style="color:var(--text2)">${l.action} ${l.entity} — ${l.detail||l.status}</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function acctQBODisconnect() {
+  if (!confirm('Disconnect QuickBooks Online? Sync will stop until reconnected.')) return;
+  qboConfigSave({ connected: false, disconnectedAt: acctNow() });
+  acctAudit('update','qbo_config','connection',{},'QBO disconnected');
+  showToast('QBO disconnected');
+  renderAcctQBO();
+}
+
+// ── 37E: AR REMINDER ENGINE ──────────────────────────────────
+const AR_REMINDER_KEY = '420craft_acct_ar_reminders';
+const AR_REMINDER_HISTORY_KEY = '420craft_acct_ar_reminder_history';
+
+function arRemindersLoad() { return acctLoad(AR_REMINDER_KEY); }
+function arReminderHistoryLoad() { return acctLoad(AR_REMINDER_HISTORY_KEY); }
+
+function arReminderRulesDefault() {
+  return [
+    { ruleId:'RR1', name:'15-Day Reminder', daysAfterDue:15, stage:1, template:'polite', active:true },
+    { ruleId:'RR2', name:'30-Day Reminder', daysAfterDue:30, stage:2, template:'firm', active:true },
+    { ruleId:'RR3', name:'45-Day Final Notice', daysAfterDue:45, stage:3, template:'urgent', active:true },
+  ];
+}
+
+function buildARReminderQueue() {
+  const rules = arRemindersLoad().length ? arRemindersLoad() : arReminderRulesDefault();
+  const invs = invoicesLoad().filter(i => !['paid','void'].includes(i.status) && i.dueDate);
+  const today = acctToday();
+  const queue = [];
+  invs.forEach(inv => {
+    const daysOverdue = Math.floor((new Date(today) - new Date(inv.dueDate)) / 86400000);
+    if (daysOverdue <= 0) return;
+    rules.filter(r => r.active && daysOverdue >= r.daysAfterDue).forEach(rule => {
+      // Check if already sent this stage for this invoice
+      const hist = arReminderHistoryLoad();
+      const alreadySent = hist.some(h => h.invoiceId === inv.invoiceId && h.stage === rule.stage);
+      if (!alreadySent) {
+        queue.push({
+          invoiceId: inv.invoiceId, invoiceNo: inv.invoiceNo,
+          customerName: inv.customerName, brandName: inv.brandName||'',
+          dueDate: inv.dueDate, daysOverdue, openAmount: inv.openAmount,
+          stage: rule.stage, ruleName: rule.name, ruleId: rule.ruleId,
+          template: rule.template,
+        });
+      }
+    });
+  });
+  return queue;
+}
+
+function arSendReminder(queueItem, auto) {
+  // Log the send (actual email via existing notification framework)
+  const hist = arReminderHistoryLoad();
+  hist.push({
+    id: acctId('RH'), invoiceId: queueItem.invoiceId, invoiceNo: queueItem.invoiceNo,
+    stage: queueItem.stage, ruleName: queueItem.ruleName,
+    customerName: queueItem.customerName, sentAt: acctNow(),
+    method: auto ? 'auto' : 'manual', status: 'sent',
+  });
+  acctSave(AR_REMINDER_HISTORY_KEY, hist);
+  // Update invoice lastReminderSent
+  const invs = invoicesLoad();
+  const inv = invs.find(i => i.invoiceId === queueItem.invoiceId);
+  if (inv) { inv.lastReminderSent = acctNow(); inv.lastReminderStage = queueItem.stage; acctSave(ACCT_KEYS.INVOICES, invs); }
+  acctAudit('create','ar_reminder',queueItem.invoiceId,{ stage: queueItem.stage },'AR reminder stage '+queueItem.stage+' sent for '+queueItem.invoiceNo);
+  return { ok: true };
+}
+
+function renderAcctARReminders() {
+  const el = document.getElementById('acct-ar-reminders-content');
+  if (!el) return;
+  const queue = buildARReminderQueue();
+  const hist = arReminderHistoryLoad().slice(-20).reverse();
+  const rules = arRemindersLoad().length ? arRemindersLoad() : arReminderRulesDefault();
+
+  el.innerHTML = `<div style="padding:24px;max-width:1000px">
+    ${_acctSectionHeader('AR REMINDER RULES & QUEUE','Automated dunning at 15, 30, and 45 days overdue',
+      _acctBtnGreen('Send All Pending','acctSendAllReminders()')+_acctBtn('Reminder Rules','acctEditReminderRulesModal()'))}
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+      ${_acctCard('PENDING REMINDERS',queue.length,'invoices need outreach',queue.length>0?'var(--red)':'var(--green)','📧')}
+      ${_acctCard('STAGE 1 (15-day)',queue.filter(q=>q.stage===1).length,'pending','var(--amber)','📩')}
+      ${_acctCard('STAGE 2 (30-day)',queue.filter(q=>q.stage===2).length,'pending','var(--amber)','📩')}
+    </div>
+
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">PENDING REMINDER QUEUE</div>
+    ${queue.length===0
+      ? `<div style="text-align:center;padding:24px;color:var(--green);background:rgba(57,232,122,0.06);border:1px solid rgba(57,232,122,0.2);border-radius:10px;margin-bottom:20px;font-size:12px">✅ No reminders pending — all invoices are current or already notified</div>`
+      : queue.map(q=>`<div style="background:var(--card);border:1px solid ${q.stage===3?'rgba(255,77,109,0.3)':q.stage===2?'rgba(255,184,48,0.3)':'var(--border2)'};border-left:3px solid ${q.stage===3?'var(--red)':q.stage===2?'var(--amber)':'var(--blue)'};border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:600;font-size:13px">${_esc(q.customerName)} — ${q.invoiceNo}</div>
+          <div style="font-size:11px;color:var(--text3)">${q.daysOverdue} days overdue · ${acctFmt(q.openAmount)} open · ${q.ruleName}</div>
+        </div>
+        <button onclick="acctSendSingleReminder('${q.invoiceId}',${q.stage},'${q.ruleId}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">📧 Send</button>
+      </div>`).join('')}
+
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin:16px 0 10px">REMINDER HISTORY (LAST 20)</div>
+    ${hist.length===0?'<div style="color:var(--text3);font-size:12px">No reminder history yet</div>':hist.map(h=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2);font-size:11px"><span style="color:var(--green);flex-shrink:0">●</span><span style="font-family:var(--font-mono);color:var(--text3);min-width:130px;flex-shrink:0">${h.sentAt.slice(0,16).replace('T',' ')}</span><span style="color:var(--text2)">Stage ${h.stage} → ${_esc(h.customerName)} / ${h.invoiceNo}</span><span style="color:var(--text3);margin-left:auto;font-size:10px">${h.method}</span></div>`).join('')}
+  </div>`;
+}
+
+function acctSendAllReminders() {
+  const queue = buildARReminderQueue();
+  if (!queue.length) { showToast('No reminders pending'); return; }
+  if (!confirm('Send '+queue.length+' reminder emails now?')) return;
+  queue.forEach(q => arSendReminder(q, true));
+  showToast('✅ '+queue.length+' reminders sent');
+  renderAcctARReminders();
+}
+
+function acctSendSingleReminder(invoiceId, stage, ruleId) {
+  const queue = buildARReminderQueue();
+  const item = queue.find(q => q.invoiceId === invoiceId && q.stage === stage);
+  if (!item) { showToast('Reminder already sent or not found'); return; }
+  arSendReminder(item, false);
+  showToast('✅ Reminder sent for '+item.invoiceNo);
+  renderAcctARReminders();
+}
+
+function acctEditReminderRulesModal() {
+  const rules = arRemindersLoad().length ? arRemindersLoad() : arReminderRulesDefault();
+  acctModal('REMINDER RULES',`<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Configure when reminder emails are sent based on days past due date. Reminders stop when an invoice is paid, disputed, or on hold.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr style="color:var(--text3);font-size:10px;font-family:var(--font-mono)"><th style="text-align:left;padding:4px">Stage</th><th style="padding:4px">Days Overdue</th><th style="padding:4px">Tone</th><th style="padding:4px">Active</th></tr>
+      ${rules.map((r,i)=>`<tr style="border-top:1px solid var(--border2)">
+        <td style="padding:6px 4px;font-weight:600">Stage ${r.stage}</td>
+        <td style="padding:6px 4px;text-align:center"><input type="number" value="${r.daysAfterDue}" id="rr-days-${i}" style="width:60px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:4px;padding:3px;text-align:center"></td>
+        <td style="padding:6px 4px;text-align:center"><select id="rr-tone-${i}" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:4px;padding:3px"><option ${r.template==='polite'?'selected':''}>polite</option><option ${r.template==='firm'?'selected':''}>firm</option><option ${r.template==='urgent'?'selected':''}>urgent</option></select></td>
+        <td style="padding:6px 4px;text-align:center"><input type="checkbox" id="rr-active-${i}" ${r.active?'checked':''}></td>
+      </tr>`).join('')}
+    </table>`,
+  () => {
+    rules.forEach((r, i) => {
+      r.daysAfterDue = parseInt(document.getElementById('rr-days-'+i)?.value) || r.daysAfterDue;
+      r.template = document.getElementById('rr-tone-'+i)?.value || r.template;
+      r.active = document.getElementById('rr-active-'+i)?.checked;
+    });
+    acctSave(AR_REMINDER_KEY, rules);
+    showToast('✅ Reminder rules saved');
+  }, 'Save Rules');
+}
+
+// ── 37F: AP PAYMENT ACCOUNTS ──────────────────────────────────
+const AP_ACCOUNTS_KEY = '420craft_acct_ap_accounts';
+function apAccountsLoad() { return acctLoad(AP_ACCOUNTS_KEY); }
+
+function apAccountCreate(data) {
+  const accounts = apAccountsLoad();
+  const acc = {
+    accountId: acctId('APA'), name: data.name||'', type: data.type||'checking',
+    institution: data.institution||'', last4: data.last4||'',
+    owner: data.owner||'', active: true,
+    accountingMapping: data.accountingMapping||'',
+    reconciliationNotes: data.reconciliationNotes||'',
+    createdAt: acctNow(),
+  };
+  accounts.push(acc);
+  acctSave(AP_ACCOUNTS_KEY, accounts);
+  acctAudit('create','ap_account',acc.accountId,{name:acc.name},'AP payment account created');
+  return acc;
+}
+
+function renderAcctAPAccounts() {
+  const el = document.getElementById('acct-ap-accounts-content');
+  if (!el) return;
+  const accounts = apAccountsLoad();
+  const bills = acctLoad(ACCT_KEYS.VENDOR_BILLS);
+  const today = acctToday();
+  const curQ = Math.floor((new Date().getMonth())/3)+1;
+  const curY = new Date().getFullYear();
+
+  // Quarter spend breakdown
+  const qSpend = {};
+  [1,2,3,4].forEach(q => qSpend['Q'+q] = 0);
+  bills.forEach(b => {
+    const d = new Date(b.billDate||'');
+    if (d.getFullYear() === curY) {
+      const q = Math.floor(d.getMonth()/3)+1;
+      qSpend['Q'+q] += b.totalAmount||0;
+    }
+  });
+
+  el.innerHTML = `<div style="padding:24px;max-width:1000px">
+    ${_acctSectionHeader('AP PAYMENT ACCOUNTS & ORGANIZATION','Link bills to payment accounts, organize by quarter',
+      _acctBtnGreen('+ Add Account','acctNewAPAccountModal()'))}
+
+    <!-- Quarter Spend -->
+    <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:16px;margin-bottom:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:12px">${curY} SPEND BY QUARTER</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        ${[1,2,3,4].map(q=>`<div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text3);margin-bottom:4px;font-family:var(--font-mono)">Q${q} ${curY}</div><div style="font-family:var(--font-display);font-size:18px;color:${q===curQ?'var(--amber)':'var(--text)'}">${acctFmt(qSpend['Q'+q])}</div>${q===curQ?'<div style="font-size:9px;color:var(--amber)">CURRENT</div>':''}</div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Payment Accounts -->
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">PAYMENT ACCOUNTS</div>
+    ${accounts.length===0
+      ? `<div style="text-align:center;padding:32px;color:var(--text3);background:var(--card);border-radius:10px;margin-bottom:16px">No payment accounts yet. Add checking accounts, corporate cards, or other payment methods to link to vendor bills.</div>`
+      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:16px">
+          ${accounts.map(a=>`<div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px 16px">
+            <div style="font-weight:700;font-size:13px;margin-bottom:4px">${_esc(a.name)}</div>
+            <div style="font-size:11px;color:var(--text3)">${a.type.replace(/_/g,' ')} · ${a.institution||'No institution'}</div>
+            ${a.last4?`<div style="font-size:11px;color:var(--text3)">●●●● ${a.last4}</div>`:''}
+            ${a.accountingMapping?`<div style="font-size:10px;color:var(--blue);margin-top:4px">→ ${a.accountingMapping}</div>`:''}
+            <div style="display:flex;gap:6px;margin-top:10px">
+              <button onclick="acctEditAPAccount('${a.accountId}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Edit</button>
+            </div>
+          </div>`).join('')}
+        </div>`}
+
+    <!-- Recent Bills with Account -->
+    <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">RECENT BILLS — Q${curQ} ${curY}</div>
+    ${bills.filter(b=>{const d=new Date(b.billDate||'');return d.getFullYear()===curY&&Math.floor(d.getMonth()/3)+1===curQ;}).slice(-10).reverse().map(b=>`<div style="background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div><div style="font-size:12px;font-weight:500">${_esc(b.vendorName)}</div><div style="font-size:10px;color:var(--text3)">${b.billDate} · ${b.matchStatus}</div></div>
+      <div style="font-family:var(--font-mono);color:var(--amber)">${acctFmt(b.totalAmount)}</div>
+    </div>`).join('') || '<div style="color:var(--text3);font-size:12px">No bills for Q'+curQ+' '+curY+'</div>'}
+  </div>`;
+}
+
+function acctNewAPAccountModal() {
+  acctModal('NEW PAYMENT ACCOUNT',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Account Name *</label><input class="form-input" id="apa-name" placeholder="e.g. Chase Business Checking"></div>
+    <div class="form-group"><label class="form-label">Type</label>
+      <select class="form-input" id="apa-type"><option value="checking">Checking</option><option value="savings">Savings</option><option value="corporate_card">Corporate Card</option><option value="other">Other</option></select></div>
+    <div class="form-group"><label class="form-label">Institution</label><input class="form-input" id="apa-inst" placeholder="Chase, Wells Fargo..."></div>
+    <div class="form-group"><label class="form-label">Last 4 digits</label><input class="form-input" id="apa-last4" placeholder="1234" maxlength="4" style="font-family:var(--font-mono)"></div>
+    <div class="form-group"><label class="form-label">Account Owner</label><input class="form-input" id="apa-owner" placeholder="Business name or owner"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Accounting Mapping (GL Account)</label><input class="form-input" id="apa-map" placeholder="e.g. 1010 Cash — Chase Checking"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><textarea class="form-input" id="apa-notes" style="height:50px" placeholder="Reconciliation notes..."></textarea></div>
+  </div>`,
+  () => {
+    const name = document.getElementById('apa-name').value.trim();
+    if (!name) { showToast('⚠ Account name required'); return; }
+    apAccountCreate({
+      name, type: document.getElementById('apa-type').value,
+      institution: document.getElementById('apa-inst').value,
+      last4: document.getElementById('apa-last4').value.slice(-4),
+      owner: document.getElementById('apa-owner').value,
+      accountingMapping: document.getElementById('apa-map').value,
+      reconciliationNotes: document.getElementById('apa-notes').value,
+    });
+    showToast('✅ Payment account added');
+    renderAcctAPAccounts();
+  }, 'Add Account');
+}
+
+function acctEditAPAccount(id) {
+  const accounts = apAccountsLoad();
+  const a = accounts.find(x => x.accountId === id);
+  if (!a) return;
+  acctModal('EDIT ACCOUNT — '+a.name,`<div style="display:grid;gap:12px">
+    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="eapa-name" value="${_esc(a.name)}"></div>
+    <div class="form-group"><label class="form-label">Institution</label><input class="form-input" id="eapa-inst" value="${_esc(a.institution||'')}"></div>
+    <div class="form-group"><label class="form-label">Accounting Mapping</label><input class="form-input" id="eapa-map" value="${_esc(a.accountingMapping||'')}"></div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="eapa-notes" style="height:50px">${_esc(a.reconciliationNotes||'')}</textarea></div>
+    <div class="form-group"><label class="form-label"><input type="checkbox" id="eapa-active" ${a.active?'checked':''}> Active</label></div>
+  </div>`,
+  () => {
+    a.name = document.getElementById('eapa-name').value.trim() || a.name;
+    a.institution = document.getElementById('eapa-inst').value;
+    a.accountingMapping = document.getElementById('eapa-map').value;
+    a.reconciliationNotes = document.getElementById('eapa-notes').value;
+    a.active = document.getElementById('eapa-active').checked;
+    a.updatedAt = acctNow();
+    acctSave(AP_ACCOUNTS_KEY, accounts);
+    showToast('✅ Account updated');
+    renderAcctAPAccounts();
+  }, 'Save');
+}
+
+// ── 37G: EMPLOYEE PROFILES ────────────────────────────────────
+const EMPLOYEES_KEY = '420craft_acct_employees';
+const ROLES_KEY = '420craft_acct_roles';
+const PAY_VISIBLE_ROLES = ['owner','accounting_manager','admin'];
+
+function employeesLoad() { return acctLoad(EMPLOYEES_KEY); }
+function rolesLoad() {
+  const saved = acctLoad(ROLES_KEY);
+  if (saved.length) return saved;
+  const defaults = [
+    {roleId:'R01',name:'Owner / Admin',code:'owner',payVisible:true,acctAccess:true,canApprovePO:true,canLockPeriod:true},
+    {roleId:'R02',name:'Accounting Manager',code:'accounting_manager',payVisible:true,acctAccess:true,canApprovePO:true,canLockPeriod:true},
+    {roleId:'R03',name:'Accounting AP/AR',code:'accounting_ap_ar',payVisible:false,acctAccess:true,canApprovePO:false,canLockPeriod:false},
+    {roleId:'R04',name:'Operations Manager',code:'ops_manager',payVisible:false,acctAccess:false,canApprovePO:false,canLockPeriod:false},
+    {roleId:'R05',name:'Shipping Lead',code:'shipping_lead',payVisible:false,acctAccess:false,canApprovePO:false,canLockPeriod:false},
+    {roleId:'R06',name:'Production Lead',code:'prod_lead',payVisible:false,acctAccess:false,canApprovePO:false,canLockPeriod:false},
+    {roleId:'R07',name:'Read-Only Auditor',code:'auditor',payVisible:false,acctAccess:true,canApprovePO:false,canLockPeriod:false},
+  ];
+  acctSave(ROLES_KEY, defaults);
+  return defaults;
+}
+
+function currentUserRole() {
+  // Get from auth or default to owner for now
+  try {
+    const auth = JSON.parse(localStorage.getItem('420craft_auth_user')||'{}');
+    return auth.role || 'owner';
+  } catch { return 'owner'; }
+}
+
+function canViewPay() {
+  return PAY_VISIBLE_ROLES.includes(currentUserRole());
+}
+
+function renderAcctEmployees() {
+  const el = document.getElementById('acct-employees-content');
+  if (!el) return;
+  const employees = employeesLoad();
+  const roles = rolesLoad();
+  const userCanSeePay = canViewPay();
+
+  el.innerHTML = `<div style="padding:24px;max-width:1000px">
+    ${_acctSectionHeader('EMPLOYEE PROFILES',employees.length+' employees — compensation data is access-controlled',
+      _acctBtnGreen('+ Add Employee','acctNewEmployeeModal()')+'<button onclick="showPage(\'acct-roles\',document.querySelector(\'[onclick*=acct-roles]\'))" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer">⚙ Roles</button>')}
+
+    ${!userCanSeePay?`<div style="background:rgba(56,189,248,0.07);border:1px solid rgba(56,189,248,0.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:var(--text3)">🔒 Pay rate and compensation details are hidden based on your role. Contact your accounting manager for access.</div>`:''}
+
+    ${employees.length===0
+      ? `<div style="text-align:center;padding:48px;color:var(--text3);background:var(--card);border-radius:10px">No employee profiles yet. Add employees to manage permissions and (optionally) compensation data.</div>`
+      : `<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--card);border-radius:10px;overflow:hidden">
+          <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+            <th style="text-align:left;padding:10px 14px">Name</th>
+            <th style="padding:10px 8px">Role</th>
+            <th style="padding:10px 8px">Dept</th>
+            <th style="padding:10px 8px">Status</th>
+            ${userCanSeePay?'<th style="text-align:right;padding:10px 8px">Rate</th>':''}
+            <th style="padding:10px 14px">Actions</th>
+          </tr>
+          ${employees.map(emp => {
+            const role = roles.find(r => r.code === emp.roleCode) || { name: emp.roleCode||'—' };
+            return `<tr style="border-top:1px solid var(--border2)">
+              <td style="padding:10px 14px">
+                <div style="font-weight:600">${_esc(emp.name)}</div>
+                <div style="font-size:10px;color:var(--text3)">${_esc(emp.email||'')}</div>
+              </td>
+              <td style="padding:10px 8px;text-align:center;font-size:11px">${_esc(role.name)}</td>
+              <td style="padding:10px 8px;text-align:center;color:var(--text3);font-size:11px">${_esc(emp.department||'—')}</td>
+              <td style="padding:10px 8px;text-align:center"><span style="color:${emp.status==='active'?'var(--green)':'var(--text3)'}">${emp.status||'active'}</span></td>
+              ${userCanSeePay?`<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono)">${emp.hourlyRate?'$'+emp.hourlyRate+'/hr':emp.salary?'Salary':'—'}</td>`:''}
+              <td style="padding:10px 14px">
+                <button onclick="acctEditEmployeeModal('${emp.employeeId}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer">Edit</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </table>`}
+  </div>`;
+}
+
+function renderAcctRoles() {
+  const el = document.getElementById('acct-roles-content');
+  if (!el) return;
+  const roles = rolesLoad();
+  el.innerHTML = `<div style="padding:24px;max-width:900px">
+    ${_acctSectionHeader('ROLES & PERMISSIONS','Define what each role can see and do — pay visibility is enforced portal-wide')}
+    <div style="background:rgba(255,184,48,0.07);border:1px solid rgba(255,184,48,0.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:var(--text3)">
+      <strong style="color:var(--amber)">Privacy Rule:</strong> Users without pay permission will never see individual hourly rates, salaries, or compensation notes in any UI view. Labor totals may be shown without individual rates.
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--card);border-radius:10px;overflow:hidden">
+      <tr style="background:var(--bg3);color:var(--text3);font-size:10px;font-family:var(--font-mono)">
+        <th style="text-align:left;padding:10px 14px">Role</th>
+        <th style="padding:10px 8px">See Pay</th>
+        <th style="padding:10px 8px">Accounting</th>
+        <th style="padding:10px 8px">Approve PO</th>
+        <th style="padding:10px 8px">Lock Period</th>
+      </tr>
+      ${roles.map(r=>`<tr style="border-top:1px solid var(--border2)">
+        <td style="padding:10px 14px"><div style="font-weight:600">${_esc(r.name)}</div><div style="font-size:10px;font-family:var(--font-mono);color:var(--text3)">${r.code}</div></td>
+        <td style="padding:10px 8px;text-align:center">${r.payVisible?'✅':'❌'}</td>
+        <td style="padding:10px 8px;text-align:center">${r.acctAccess?'✅':'❌'}</td>
+        <td style="padding:10px 8px;text-align:center">${r.canApprovePO?'✅':'❌'}</td>
+        <td style="padding:10px 8px;text-align:center">${r.canLockPeriod?'✅':'❌'}</td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+function acctNewEmployeeModal() {
+  const roles = rolesLoad();
+  const ops = JSON.parse(localStorage.getItem('420craft_operators')||'[]');
+  const userCanSeePay = canViewPay();
+  acctModal('NEW EMPLOYEE PROFILE',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Full Name *</label><input class="form-input" id="ne-name" placeholder="Full name"></div>
+    <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="ne-email" placeholder="email@company.com"></div>
+    <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="ne-phone" placeholder="555-000-0000"></div>
+    <div class="form-group"><label class="form-label">Role *</label>
+      <select class="form-input" id="ne-role">${roles.map(r=>`<option value="${r.code}">${r.name}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="ne-dept" placeholder="Operations, Accounting..."></div>
+    <div class="form-group"><label class="form-label">Status</label>
+      <select class="form-input" id="ne-status"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+    <div class="form-group"><label class="form-label">Linked Operator Profile</label>
+      <select class="form-input" id="ne-op"><option value="">— None —</option>${ops.map(o=>`<option value="${o.id}">${o.name}</option>`).join('')}</select></div>
+    ${userCanSeePay?`<div class="form-group"><label class="form-label">🔒 Hourly Rate ($)</label><input class="form-input" type="number" id="ne-rate" step="0.01" placeholder="0.00"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">🔒 Compensation Notes</label><textarea class="form-input" id="ne-comp" style="height:40px" placeholder="Internal notes — pay grade, bonus structure..."></textarea></div>`:'<div style="grid-column:1/-1;font-size:11px;color:var(--text3);padding:8px;background:var(--bg3);border-radius:6px">🔒 Pay fields hidden — contact accounting manager to set compensation details</div>'}
+  </div>`,
+  () => {
+    const name = document.getElementById('ne-name').value.trim();
+    if (!name) { showToast('⚠ Name required'); return; }
+    const emps = employeesLoad();
+    const emp = {
+      employeeId: acctId('EMP'), name, email: document.getElementById('ne-email').value,
+      phone: document.getElementById('ne-phone').value, roleCode: document.getElementById('ne-role').value,
+      department: document.getElementById('ne-dept').value, status: document.getElementById('ne-status').value,
+      linkedOperatorId: document.getElementById('ne-op').value,
+      hourlyRate: userCanSeePay ? (parseFloat(document.getElementById('ne-rate')?.value)||null) : null,
+      compensationNotes: userCanSeePay ? (document.getElementById('ne-comp')?.value||'') : '',
+      createdAt: acctNow(),
+    };
+    emps.push(emp);
+    acctSave(EMPLOYEES_KEY, emps);
+    acctAudit('create','employee',emp.employeeId,{name:emp.name},'Employee profile created');
+    showToast('✅ Employee added');
+    renderAcctEmployees();
+  }, 'Add Employee');
+}
+
+function acctEditEmployeeModal(id) {
+  const emps = employeesLoad();
+  const emp = emps.find(e => e.employeeId === id);
+  if (!emp) return;
+  const roles = rolesLoad();
+  const userCanSeePay = canViewPay();
+  acctModal('EDIT EMPLOYEE — '+emp.name,`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Name</label><input class="form-input" id="ee-name" value="${_esc(emp.name)}"></div>
+    <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="ee-email" value="${_esc(emp.email||'')}"></div>
+    <div class="form-group"><label class="form-label">Role</label>
+      <select class="form-input" id="ee-role">${roles.map(r=>`<option value="${r.code}" ${emp.roleCode===r.code?'selected':''}>${r.name}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="ee-dept" value="${_esc(emp.department||'')}"></div>
+    <div class="form-group"><label class="form-label">Status</label>
+      <select class="form-input" id="ee-status"><option value="active" ${emp.status==='active'?'selected':''}>Active</option><option value="inactive" ${emp.status==='inactive'?'selected':''}>Inactive</option></select></div>
+    ${userCanSeePay?`<div class="form-group"><label class="form-label">🔒 Hourly Rate ($)</label><input class="form-input" type="number" id="ee-rate" step="0.01" value="${emp.hourlyRate||''}"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">🔒 Comp Notes</label><textarea class="form-input" id="ee-comp" style="height:40px">${_esc(emp.compensationNotes||'')}</textarea></div>`:'<div style="grid-column:1/-1;font-size:11px;color:var(--text3);padding:8px;background:var(--bg3);border-radius:6px">🔒 Pay fields hidden based on your role</div>'}
+  </div>`,
+  () => {
+    emp.name = document.getElementById('ee-name').value.trim()||emp.name;
+    emp.email = document.getElementById('ee-email').value;
+    emp.roleCode = document.getElementById('ee-role').value;
+    emp.department = document.getElementById('ee-dept').value;
+    emp.status = document.getElementById('ee-status').value;
+    if (userCanSeePay) {
+      emp.hourlyRate = parseFloat(document.getElementById('ee-rate')?.value)||null;
+      emp.compensationNotes = document.getElementById('ee-comp')?.value||'';
+    }
+    emp.updatedAt = acctNow();
+    acctSave(EMPLOYEES_KEY, emps);
+    acctAudit('update','employee',id,{name:emp.name},'Employee profile updated');
+    showToast('✅ Employee updated');
+    renderAcctEmployees();
+  }, 'Save');
+}
+
+// ── WIRE NEW PAGES INTO showPage AND NAV ─────────────────────
+function _acctInjectAustinNav() {
+  if (document.querySelector('[onclick*="acct-invoice-types"]')) return;
+  const exceptionsItem = document.querySelector('[onclick*="acct-exceptions"]');
+  if (!exceptionsItem) return;
+
+  const newNavItems = [
+    ['acct-invoice-types','📝','Invoice Types'],
+    ['acct-qbo','🔗','QuickBooks'],
+    ['acct-ar-reminders','📧','AR Reminders'],
+    ['acct-ap-accounts','🏦','Payment Accounts'],
+    ['acct-employees','👤','Employees'],
+    ['acct-roles','🛡','Roles & Permissions'],
+  ];
+
+  newNavItems.forEach(([page, icon, label]) => {
+    pageTitles[page] = label.toUpperCase();
+    if (!document.getElementById('page-'+page)) {
+      const pageDiv = document.createElement('div');
+      pageDiv.className = 'page';
+      pageDiv.id = 'page-'+page;
+      pageDiv.innerHTML = `<div id="${page}-content"></div>`;
+      document.getElementById('page-acct-exceptions').after(pageDiv);
+    }
+    if (!document.querySelector('[onclick*="'+page+'"]')) {
+      const div = document.createElement('div');
+      div.className = 'nav-item';
+      div.setAttribute('onclick', `showPage('${page}',this)`);
+      div.innerHTML = `<span class="icon">${icon}</span> ${label}`;
+      exceptionsItem.parentElement.appendChild(div);
+    }
+  });
+}
+
+// Extend showPage for Austin's pages
+const _austinP3ShowPage = showPage;
+showPage = function(id, el) {
+  _austinP3ShowPage(id, el);
+  if (id === 'acct-invoice-types') renderAcctInvoiceTypes();
+  if (id === 'acct-qbo')           renderAcctQBO();
+  if (id === 'acct-ar-reminders')  renderAcctARReminders();
+  if (id === 'acct-ap-accounts')   renderAcctAPAccounts();
+  if (id === 'acct-employees')     renderAcctEmployees();
+  if (id === 'acct-roles')         renderAcctRoles();
+};
+
+// Patch settlement card to add actions button
+const _origRenderSettCard = typeof _renderSettlementCard === 'function' ? _renderSettlementCard : null;
+_renderSettlementCard = function(s) {
+  const base = _origRenderSettCard ? _origRenderSettCard(s) : '';
+  // Inject actions button before closing </div>
+  return base.replace(
+    '</div></div>',
+    `<button onclick="acctSettlementActions('${s.id}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer;margin-top:6px">⋯ Actions</button></div></div>`
+  );
+};
+
+// Austin init
+setTimeout(() => {
+  try { _acctInjectAustinNav(); } catch(e) { console.warn('Austin nav init:', e); }
+}, 1200);
 
 // ═══════════════════════════════════════════════════════════════
 // PHASE 3 — ADVANCED REPORTS, DEAL EDITOR, PRICE BOOKS, TAX UI
