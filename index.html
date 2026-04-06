@@ -704,7 +704,8 @@
   }
 
   /* Page nav active glow */
-  .nav-item.active .icon { filter: drop-shadow(0 0 6px var(--green)); }
+  .nav-more-toggle:hover { background: var(--green-glow); color: var(--text2); }
+  .nav-more-toggle:hover span { color: var(--green); }
 
 
 /* ══════════════════════════════════════════
@@ -1062,7 +1063,8 @@ window.addEventListener('load', function() {
     <div class="logo-badge">⚡ WAREHOUSE PORTAL</div>
   </div>
   <nav>
-    <div class="nav-section">Main</div>
+    <!-- ── OPERATIONS ─────────────────────────────────── -->
+    <div class="nav-section">Operations</div>
     <div class="nav-item active" onclick="showPage('dashboard',this)">
       <span class="icon">📊</span> Dashboard
     </div>
@@ -1072,34 +1074,11 @@ window.addEventListener('load', function() {
     <div class="nav-item" onclick="showPage('inventory',this)">
       <span class="icon">📦</span> Inventory
     </div>
-    <div class="nav-item" onclick="showPage('inv-detail',this)">
-      <span class="icon">🔬</span> Inventory Detail
-    </div>
-    <div class="nav-item" onclick="showPage('inv-audit',this)">
-      <span class="icon">🔎</span> Inventory Audit
-    </div>
     <div class="nav-item" onclick="showPage('log-movement',this)">
       <span class="icon">✏️</span> Log Movement
     </div>
-    <div class="nav-section">Reports</div>
-    <div class="nav-item" onclick="showPage('brand-velocity',this)">
-      <span class="icon">⚡</span> Brand Velocity
-    </div>
-    <div class="nav-item" onclick="showPage('movement-history',this)">
-      <span class="icon">📋</span> Movement History
-    </div>
-    <div class="nav-item" onclick="showPage('reorder',this)">
-      <span class="icon">🔔</span> Reorder Queue
-    </div>
-    <div class="nav-section">Manage</div>
-    <div class="nav-item" onclick="showPage('flavor-mgr',this)">
-      <span class="icon">🧪</span> In-House Flavors
-    </div>
-    <div class="nav-item" onclick="showPage('consumables',this)">
-      <span class="icon">⚙️</span> Consumables
-    </div>
-    <div class="nav-item" onclick="showPage('operators',this)">
-      <span class="icon">👷</span> Operators
+    <div class="nav-item" onclick="showPage('shipping',this)">
+      <span class="icon">🚚</span> Shipping
     </div>
     <div class="nav-item" onclick="showPage('prod-run',this)">
       <span class="icon">🏗️</span> Production Runs
@@ -1108,54 +1087,66 @@ window.addEventListener('load', function() {
     <div class="nav-item" onclick="showPage('schedule',this)">
       <span class="icon">📅</span> Production Schedule
     </div>
-    <div class="nav-item" onclick="showPage('batch-calc',this)">
-      <span class="icon">🧮</span> Batch Calculator
+    <!-- Ops More -->
+    <div class="nav-more-toggle" onclick="navToggle('ops-more',this)" style="display:flex;align-items:center;gap:6px;padding:5px 12px;font-size:11px;color:var(--text3);cursor:pointer;border-radius:6px;margin:2px 6px;">
+      <span id="ops-more-arrow" style="font-size:9px;transition:transform 0.2s">▶</span> More Operations
     </div>
-    <div class="nav-item" onclick="showPage('brand-launch',this)">
-      <span class="icon">🏢</span> Brand Portal
+    <div id="ops-more" style="display:none">
+      <div class="nav-item" onclick="showPage('inv-detail',this)"><span class="icon">🔬</span> Inventory Detail</div>
+      <div class="nav-item" onclick="showPage('inv-audit',this)"><span class="icon">🔎</span> Inventory Audit</div>
+      <div class="nav-item" onclick="showPage('batch-calc',this)"><span class="icon">🧮</span> Batch Calculator</div>
+      <div class="nav-item" onclick="showPage('reorder',this)"><span class="icon">🔔</span> Reorder Queue</div>
+      <div class="nav-item" onclick="showPage('brand-velocity',this)"><span class="icon">⚡</span> Brand Velocity</div>
+      <div class="nav-item" onclick="showPage('movement-history',this)"><span class="icon">📋</span> Movement History</div>
+      <div class="nav-item" onclick="showPage('sku-manager',this)"><span class="icon">🏷️</span> SKU Manager</div>
+      <div class="nav-item" onclick="showPage('flavor-mgr',this)"><span class="icon">🧪</span> In-House Flavors</div>
+      <div class="nav-item" onclick="showPage('consumables',this)"><span class="icon">⚙️</span> Consumables</div>
+      <div class="nav-item" onclick="showPage('operators',this)"><span class="icon">👷</span> Operators</div>
+      <div class="nav-item" onclick="showPage('brand-launch',this)"><span class="icon">🏢</span> Brand Portal</div>
     </div>
-    <div class="nav-item" onclick="showPage('shipping',this)">
-      <span class="icon">📦</span> Shipping
-    </div>
-    <div class="nav-item" onclick="showPage('sku-manager',this)">
-      <span class="icon">🏷️</span> SKU Manager
-    </div>
+
+    <!-- ── ACCOUNTING ──────────────────────────────────── -->
     <div class="nav-section" style="color:var(--amber);border-color:rgba(255,184,48,0.2)">💰 Accounting</div>
     <div class="nav-item" onclick="showPage('acct-home',this)"><span class="icon">🏦</span> Accounting Home</div>
-    <div class="nav-item" onclick="showPage('acct-deals',this)"><span class="icon">📝</span> Deals & Contracts</div>
-    <div class="nav-item" onclick="showPage('acct-costing',this)"><span class="icon">🧮</span> Batch Costing</div>
-    <div class="nav-item" onclick="showPage('acct-settlements',this)"><span class="icon">🤝</span> Settlements</div>
     <div class="nav-item" onclick="showPage('acct-ar',this)"><span class="icon">💵</span> Accounts Receivable</div>
     <div class="nav-item" onclick="showPage('acct-ap',this)"><span class="icon">🧾</span> AP & Purchase Orders</div>
-    <div class="nav-item" onclick="showPage('acct-vendors',this)"><span class="icon">🏪</span> Vendors</div>
-    <div class="nav-item" onclick="showPage('acct-inventory-val',this)"><span class="icon">📊</span> Inventory Valuation</div>
+    <div class="nav-item" onclick="showPage('acct-settlements',this)"><span class="icon">🤝</span> Settlements</div>
     <div class="nav-item" onclick="showPage('acct-close',this)"><span class="icon">🔒</span> Close & Audit</div>
     <div class="nav-item" onclick="showPage('acct-exceptions',this)"><span class="icon">⚠️</span> Exceptions<span id="acct-exception-badge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:800;font-family:var(--font-mono);margin-left:4px"></span></div>
-    <div class="nav-item" onclick="showPage('acct-reports',this)"><span class="icon">📈</span> Reports</div>
-    <div class="nav-item" onclick="showPage('acct-shipment-costing',this)"><span class="icon">🚚</span> Shipment Costing</div>
-    <div class="nav-item" onclick="showPage('acct-invoice-types',this)"><span class="icon">📝</span> Invoice Types</div>
-    <div class="nav-item" onclick="showPage('acct-integrations',this)"><span class="icon">🔗</span> Integrations</div>
-    <div class="nav-item" onclick="showPage('acct-qbo',this)"><span class="icon">💼</span> QuickBooks</div>
-    <div class="nav-item" onclick="showPage('acct-ar-reminders',this)"><span class="icon">📧</span> AR Reminders</div>
-    <div class="nav-item" onclick="showPage('acct-ap-accounts',this)"><span class="icon">🏦</span> Payment Accounts</div>
-    <div class="nav-item" onclick="showPage('acct-price-books',this)"><span class="icon">💲</span> Price Books</div>
-    <div class="nav-item" onclick="showPage('acct-tax-rules',this)"><span class="icon">🏛️</span> Tax Rules</div>
+    <!-- Accounting More -->
+    <div class="nav-more-toggle" onclick="navToggle('acct-more',this)" style="display:flex;align-items:center;gap:6px;padding:5px 12px;font-size:11px;color:var(--text3);cursor:pointer;border-radius:6px;margin:2px 6px;">
+      <span id="acct-more-arrow" style="font-size:9px;transition:transform 0.2s">▶</span> More Accounting
+    </div>
+    <div id="acct-more" style="display:none">
+      <div class="nav-item" onclick="showPage('acct-deals',this)"><span class="icon">📝</span> Deals & Contracts</div>
+      <div class="nav-item" onclick="showPage('acct-costing',this)"><span class="icon">🧮</span> Batch Costing</div>
+      <div class="nav-item" onclick="showPage('acct-vendors',this)"><span class="icon">🏪</span> Vendors</div>
+      <div class="nav-item" onclick="showPage('acct-inventory-val',this)"><span class="icon">📊</span> Inventory Valuation</div>
+      <div class="nav-item" onclick="showPage('acct-reports',this)"><span class="icon">📈</span> Reports</div>
+      <div class="nav-item" onclick="showPage('acct-shipment-costing',this)"><span class="icon">🚚</span> Shipment Costing</div>
+      <div class="nav-item" onclick="showPage('acct-invoice-types',this)"><span class="icon">📝</span> Invoice Types</div>
+      <div class="nav-item" onclick="showPage('acct-price-books',this)"><span class="icon">💲</span> Price Books</div>
+      <div class="nav-item" onclick="showPage('acct-tax-rules',this)"><span class="icon">🏛️</span> Tax Rules</div>
+      <div class="nav-item" onclick="showPage('acct-ar-reminders',this)"><span class="icon">📧</span> AR Reminders</div>
+      <div class="nav-item" onclick="showPage('acct-ap-accounts',this)"><span class="icon">🏦</span> Payment Accounts</div>
+      <div class="nav-item" onclick="showPage('acct-integrations',this)"><span class="icon">🔗</span> Integrations</div>
+      <div class="nav-item" onclick="showPage('acct-qbo',this)"><span class="icon">💼</span> QuickBooks</div>
+    </div>
+
+    <!-- ── ADMIN ───────────────────────────────────────── -->
     <div class="nav-section" style="color:var(--blue);border-color:rgba(56,189,248,0.2)">👥 Admin</div>
     <div class="nav-item" onclick="showPage('acct-employees',this)"><span class="icon">👤</span> Employees</div>
-    <div class="nav-item" onclick="showPage('admin-diagnostics',this)"><span class="icon">🩺</span> Diagnostics</div>
-    <div class="nav-item" onclick="showPage('acct-roles',this)"><span class="icon">🛡️</span> Roles & Permissions</div>
-    <div class="nav-section">Export</div>
-    <div class="nav-item" onclick="showPage('notifications',this)">
-      <span class="icon">📧</span> Notifications
+    <div class="nav-item" onclick="showPage('settings',this)"><span class="icon">⚙️</span> Settings</div>
+    <div class="nav-item" onclick="showPage('backup',this)"><span class="icon">💾</span> Backup & Restore</div>
+    <!-- Admin More -->
+    <div class="nav-more-toggle" onclick="navToggle('admin-more',this)" style="display:flex;align-items:center;gap:6px;padding:5px 12px;font-size:11px;color:var(--text3);cursor:pointer;border-radius:6px;margin:2px 6px;">
+      <span id="admin-more-arrow" style="font-size:9px;transition:transform 0.2s">▶</span> More Admin
     </div>
-    <div class="nav-item" onclick="showPage('settings',this)">
-      <span class="icon">⚙️</span> Settings
-    </div>
-    <div class="nav-item" onclick="showPage('backup',this)">
-      <span class="icon">💾</span> Backup & Restore
-    </div>
-    <div class="nav-item" onclick="exportCSV()">
-      <span class="icon">⬇️</span> Export CSV
+    <div id="admin-more" style="display:none">
+      <div class="nav-item" onclick="showPage('acct-roles',this)"><span class="icon">🛡️</span> Roles & Permissions</div>
+      <div class="nav-item" onclick="showPage('notifications',this)"><span class="icon">📧</span> Notifications</div>
+      <div class="nav-item" onclick="showPage('admin-diagnostics',this)"><span class="icon">🩺</span> Diagnostics</div>
+      <div class="nav-item" onclick="exportCSV()"><span class="icon">⬇️</span> Export CSV</div>
     </div>
   </nav>
   <div class="sidebar-footer">
@@ -4415,6 +4406,43 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+function navToggle(id, toggleEl) {
+  const section = document.getElementById(id);
+  const arrow = document.getElementById(id + '-arrow');
+  if (!section) return;
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
+}
+
+// Auto-expand the section containing the active page
+function navAutoExpand(pageId) {
+  const opMore = ['inv-detail','inv-audit','batch-calc','reorder','brand-velocity',
+    'movement-history','sku-manager','flavor-mgr','consumables','operators','brand-launch'];
+  const acctMore = ['acct-deals','acct-costing','acct-vendors','acct-inventory-val',
+    'acct-reports','acct-shipment-costing','acct-invoice-types','acct-price-books',
+    'acct-tax-rules','acct-ar-reminders','acct-ap-accounts','acct-integrations','acct-qbo'];
+  const adminMore = ['acct-roles','notifications','admin-diagnostics'];
+  if (opMore.includes(pageId)) {
+    const s = document.getElementById('ops-more');
+    if (s) s.style.display = 'block';
+    const a = document.getElementById('ops-more-arrow');
+    if (a) a.style.transform = 'rotate(90deg)';
+  }
+  if (acctMore.includes(pageId)) {
+    const s = document.getElementById('acct-more');
+    if (s) s.style.display = 'block';
+    const a = document.getElementById('acct-more-arrow');
+    if (a) a.style.transform = 'rotate(90deg)';
+  }
+  if (adminMore.includes(pageId)) {
+    const s = document.getElementById('admin-more');
+    if (s) s.style.display = 'block';
+    const a = document.getElementById('admin-more-arrow');
+    if (a) a.style.transform = 'rotate(90deg)';
+  }
+}
+
 function fetchFromSheets() {
   const url = localStorage.getItem('420craft_sheets_url');
   if (!url) { showToast('⚠ No Apps Script URL set'); return; }
@@ -4608,6 +4636,7 @@ function showPage(id, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
   if (el) el.classList.add('active');
+  navAutoExpand(id);
   document.getElementById('page-title').textContent = pageTitles[id] || id.toUpperCase();
   if (id === 'dashboard') renderDashboard();
   if (id === 'inv-detail') renderInvDetail();
