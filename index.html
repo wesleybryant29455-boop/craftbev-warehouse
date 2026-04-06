@@ -1175,6 +1175,7 @@ window.addEventListener('load', function() {
     </div>
     <div class="topbar-right" style="display:flex;align-items:center;gap:12px">
       <div id="sheets-sync-indicator" style="font-size:11px;font-family:var(--font-mono);color:var(--text3);cursor:pointer" onclick="showPage('backup',document.querySelector('[onclick*=backup]'))" title="Google Sheets sync status"></div>
+      <div id="sb-live-indicator" style="font-size:11px;font-family:var(--font-mono);padding:2px 8px;border-radius:10px;background:rgba(255,184,48,0.15);color:var(--amber);cursor:pointer;display:none" onclick="showPage('admin-diagnostics',document.querySelector('[onclick*=admin-diagnostics]'))" title="Supabase connection status">⏳ Connecting...</div>
       <div class="topbar-time" id="clock">--:--:--</div>
       <button class="btn btn-ghost" onclick="showPage('log-movement', document.querySelector('[onclick*=log-movement]'))">+ Log Movement</button>
     </div>
@@ -8968,6 +8969,18 @@ function smSaveNew() {
 function shGetShippingConsumables() {
   smLoad();
   return shippingMaterials;
+}
+
+function _showKeyStatus(hasKey, note) {
+  const el = document.getElementById('ss-api-status');
+  if (!el) return;
+  if (hasKey) {
+    el.textContent = '✅ ShipStation key configured' + (note ? ' — ' + note : '');
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = '⚪ ShipStation not configured';
+    el.style.color = 'var(--text3)';
+  }
 }
 
 function renderBackup() {
@@ -19443,63 +19456,621 @@ setTimeout(() => {
 }, 1200);
 
 // ═══════════════════════════════════════════════════════════════
+// REMOTE-AWARE DATA LAYER
+// When Remote First is ON, all loaders pull from Supabase.
+// Falls back to localStorage if Supabase is unavailable.
+// ═══════════════════════════════════════════════════════════════
+
+// Cache for remote data — avoids redundant fetches within same session
+const _remoteCache = {};
+const _remoteCacheTTL = 30000; // 30 seconds
+
+async function _remoteLoad(table, localKey, transform) {
+  if (!SUPABASE_CONFIG.remoteFirst) return null;
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+
+  const now = Date.now();
+  if (_remoteCache[table] && now - _remoteCache[table].ts < _remoteCacheTTL) {
+    return _remoteCache[table].data;
+  }
+
+  try {
+    const { data, error } = await sb.from(table).select('*');
+    if (error) throw error;
+    const result = transform ? data.map(transform) : data;
+    // Update localStorage cache
+    if (localKey) localStorage.setItem(localKey, JSON.stringify(result));
+    _remoteCache[table] = { data: result, ts: now };
+    return result;
+  } catch(e) {
+    console.warn(`[Remote] ${table} fetch failed, using local:`, e.message);
+    return null;
+  }
+}
+
+// Invalidate cache for a table (called by realtime updates)
+function _invalidateCache(table) {
+  delete _remoteCache[table];
+}
+
+// ── REMOTE-AWARE LOADER OVERRIDES ─────────────────────────────
+// Each override tries Supabase first, falls back to localStorage
+
+const _origShLoad = shLoad;
+shLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('shipments', '420craft_shipments', r => ({
+      ...r, id: r.internal_id || r.id,
+      status: r.status, items: r.items || [],
+      recipientName: r.recipient_name, recipientAddr1: r.recipient_addr1,
+      recipientCity: r.recipient_city, recipientState: r.recipient_state,
+      recipientZip: r.recipient_zip, carrier: r.carrier,
+      trackingNumber: r.tracking_number, shipDate: r.ship_date,
+      cogs: r.cogs || { carrierTotal: r.carrier_cost, totalCogs: r.total_cost },
+    }));
+    if (remote) { shipments = remote; return; }
+  }
+  _origShLoad();
+};
+
+const _origOperatorLoad = operatorLoad;
+operatorLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('operators', '420craft_operators', r => ({
+      ...r, id: r.legacy_id || r.id, name: r.name,
+      position: r.position, status: r.status,
+    }));
+    if (remote && remote.length > 0) return remote;
+  }
+  return _origOperatorLoad();
+};
+
+const _origConsumableLoad = consumableLoad;
+consumableLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('consumables', '420craft_consumables', r => ({
+      ...r, id: r.legacy_id || r.id, name: r.name,
+      category: r.category, unit: r.unit,
+      unitCost: r.unit_cost, trueCostPerUnit: r.true_cost_per_unit,
+      stockOnHand: r.stock_on_hand, reorderPoint: r.reorder_point,
+      reorderQty: r.reorder_qty, lastPurchaseDate: r.last_purchase_date,
+      lastUnitCost: r.last_unit_cost,
+    }));
+    if (remote && remote.length > 0) return remote;
+  }
+  return _origConsumableLoad();
+};
+
+const _origProdRunLoad = prodRunLoad;
+prodRunLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('production_runs', '420craft_prod_runs', r => ({
+      ...r, id: r.id, batchCode: r.batch_code, sku: r.sku_code,
+      status: r.status, crew: r.crew || [],
+      totalCases: r.cases_produced, costSummary: r.cost_summary,
+      startedAt: r.started_at, completedAt: r.completed_at,
+      leadOperator: r.lead_operator, notes: r.notes,
+    }));
+    if (remote) return remote;
+  }
+  return _origProdRunLoad();
+};
+
+const _origScheduleLoad = scheduleLoad;
+scheduleLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('production_schedule_blocks', '420craft_schedule', r => ({
+      ...r, id: r.id, title: r.title, skuCode: r.sku_code,
+      startTime: r.start_time, endTime: r.end_time,
+      status: r.status, casesPlanned: r.cases_planned,
+      leadOperator: r.lead_operator, notes: r.notes,
+    }));
+    if (remote) return remote;
+  }
+  return _origScheduleLoad();
+};
+
+const _origVendorsLoad = vendorsLoad;
+vendorsLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('vendors', null, r => ({
+      ...r, vendorId: r.id, name: r.name, email: r.email,
+      phone: r.phone, paymentTerms: r.payment_terms,
+      accountNo: r.account_number, notes: r.notes,
+    }));
+    if (remote && remote.length > 0) return remote;
+  }
+  return _origVendorsLoad();
+};
+
+// acctLoad override — pulls from Supabase for known accounting tables
+const ACCT_TABLE_MAP = {
+  [ACCT_KEYS?.DEALS]:          { table: 'customer_deals',    transform: r => ({...r, dealId: r.id, customerId: r.customer_id, customerName: r.customer_name, brandName: r.brand_name, dealType: r.deal_type, pricePerCase: r.price_per_case, ourSharePct: r.our_share_pct, paymentTerms: r.payment_terms, invoiceCadence: r.invoice_cadence, settlementBasis: r.settlement_basis, freightRebill: r.freight_rebill, storageEnabled: r.storage_enabled, storageRate: r.storage_rate}) },
+  [ACCT_KEYS?.INVOICES]:        { table: 'invoices',          transform: r => ({...r, invoiceId: r.id, invoiceNo: r.invoice_no, customerId: r.customer_id, invoiceDate: r.invoice_date, dueDate: r.due_date, totalAmount: r.total_amount, paidAmount: r.paid_amount, openAmount: r.open_amount}) },
+  [ACCT_KEYS?.PAYMENTS]:        { table: 'payments',          transform: r => ({...r}) },
+  [ACCT_KEYS?.VENDORS]:         { table: 'vendors',           transform: r => ({...r, vendorId: r.id, name: r.name, paymentTerms: r.payment_terms, accountNo: r.account_number}) },
+  [ACCT_KEYS?.SETTLEMENTS]:     { table: 'settlement_periods', transform: r => ({...r, customerId: r.customer_id, brandName: r.brand_name, netDue: r.net_due, openingInventory: r.opening_inventory, shippedOut: r.shipped_out, soldThrough: r.sold_through}) },
+  [ACCT_KEYS?.PURCHASE_ORDERS]: { table: 'purchase_orders',   transform: r => ({...r, poId: r.id, vendorId: r.vendor_id, poNumber: r.po_number, orderDate: r.order_date, totalAmount: r.total}) },
+  [ACCT_KEYS?.COST_SNAPSHOTS]:  { table: 'cost_snapshots',    transform: r => ({...r, snapshotId: r.id, batchCode: r.batch_code, costPerCase: r.cost_per_case, costPerCan: r.cost_per_can}) },
+  [ACCT_KEYS?.COA]:             { table: 'close_periods',     transform: r => ({...r}) },
+};
+
+const _origAcctLoad = acctLoad;
+acctLoad = async function(key) {
+  if (SUPABASE_CONFIG.remoteFirst && ACCT_TABLE_MAP[key]) {
+    const { table, transform } = ACCT_TABLE_MAP[key];
+    const remote = await _remoteLoad(table, key, transform);
+    if (remote) return remote;
+  }
+  return _origAcctLoad(key);
+};
+
+// Hook realtime invalidation into cache
+const _origInvalidate = window._invalidateCache || function(){};
+window._invalidateCache = function(table) {
+  delete _remoteCache[table];
+};
+
+// ── REMAINING REMOTE OVERRIDES ────────────────────────────────
+
+// loadData — core SKUs, movements, batches
+const _origLoadData = loadData;
+loadData = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        // SKUs
+        const { data: skus } = await sb.from('sku_master').select('*');
+        if (skus?.length) {
+          skuData = skus.map(r => ({
+            ...r, SKU: r.sku_code, Full_SKU: r.sku_code,
+            MG_Strength: r.mg_strength, CanSize: r.can_size,
+            CaseSize: r.case_size, Brand: r.brand_id,
+          }));
+          localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+        }
+        // Batches
+        const { data: batches } = await sb.from('batches').select('*');
+        if (batches?.length) {
+          batchData = batches.map(r => ({
+            ...r, Batch: r.batch_code, BatchCode: r.batch_code,
+            SKU: r.sku_code, MG: r.mg_strength, CanSize: r.can_size,
+            CaseSize: r.case_size, ProductionDate: r.production_date,
+            COA_Link: r.coa_link, Status: r.status,
+            Inbound: r.cases_produced, OnHand: r.cases_on_hand,
+            Outbound: r.cases_shipped,
+          }));
+          localStorage.setItem('420craft_batches', JSON.stringify(batchData));
+        }
+        // Movements
+        const { data: movs } = await sb.from('movements').select('*').order('created_at', { ascending: false }).limit(2000);
+        if (movs?.length) {
+          movements = movs.map(r => ({
+            ...r, Timestamp: r.created_at, Batch_Code: r.batch_code,
+            SKU: r.sku_code, Quantity: r.quantity, Direction: r.direction,
+            Movement_Type: r.movement_type?.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()),
+            Notes: r.notes, Destination: r.destination,
+          }));
+          localStorage.setItem('420craft_movements', JSON.stringify(movements));
+        }
+        _fixSkuBrands();
+        return;
+      } catch(e) { console.warn('[Remote] loadData failed, using local:', e.message); }
+    }
+  }
+  _origLoadData();
+};
+
+// oqLoadOrders — customer orders
+const _origOqLoadOrders = oqLoadOrders;
+oqLoadOrders = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('customer_orders', '420craft_customer_orders', r => ({
+      ...r, id: r.id, customerId: r.customer_id, brandId: r.brand_id,
+      poReference: r.po_reference, status: r.status,
+      requestedDate: r.requested_date, items: r.items || [],
+      shipTo: r.ship_to, notes: r.notes,
+    }));
+    if (remote) { customerOrders = remote; return; }
+  }
+  _origOqLoadOrders();
+};
+
+// abLoad — address book (customers/destinations)
+const _origAbLoad = abLoad;
+abLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('customers', '420craft_address_book', r => ({
+      ...r, id: r.id, name: r.name, company: r.name,
+      email: r.email, phone: r.phone,
+      address: r.billing_address?.address1 || '',
+      city: r.billing_address?.city || '',
+      state: r.billing_address?.state || '',
+      zip: r.billing_address?.zip || '',
+    }));
+    if (remote) { addressBook = remote; return; }
+  }
+  _origAbLoad();
+};
+
+// smLoad — shipping materials
+const _origSmLoad = smLoad;
+smLoad = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('shipping_materials', '420craft_shipping_materials', r => ({
+      ...r, id: r.legacy_id || r.id, name: r.name,
+      unit: r.unit, unitCost: r.unit_cost, stockOnHand: r.stock_on_hand,
+    }));
+    if (remote && remote.length > 0) { shippingMaterials = remote; return; }
+  }
+  _origSmLoad();
+};
+
+// loadBrandCatalog — brands
+const _origLoadBrandCatalog = loadBrandCatalog;
+loadBrandCatalog = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('brands', '420craft_brands', r => ({
+      ...r, id: r.id, name: r.name, status: r.status || 'Active',
+      devLog: r.dev_log || [], flavors: [], brandSkus: [],
+      checklist: r.checklist || _defaultChecklist(),
+      client: r.commercial_profile?.client || '',
+      clientEmail: r.commercial_profile?.clientEmail || '',
+      customerId: r.customer_id,
+    }));
+    if (remote && remote.length > 0) { brandCatalog = remote; return; }
+  }
+  _origLoadBrandCatalog();
+};
+
+// ntLoadData — notification contacts
+const _origNtLoadData = ntLoadData;
+ntLoadData = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('notification_contacts', '420craft_nt_contacts', r => ({
+      ...r, id: r.legacy_id || r.id, name: r.name,
+      company: r.company, role: r.role,
+      email: r.email, phone: r.phone, notes: r.notes,
+    }));
+    if (remote) { _ntContacts = remote; return; }
+  }
+  _origNtLoadData();
+};
+
+// auditLoadLog — audit logs
+const _origAuditLoadLog = auditLoadLog;
+auditLoadLog = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('audit_logs', null, r => ({
+      ...r, action: r.action, entityType: r.entity_type,
+      entityId: r.entity_id, userName: r.user_name,
+      note: r.note, timestamp: r.created_at,
+    }));
+    if (remote) return remote;
+  }
+  return _origAuditLoadLog();
+};
+
+// bcLoadData — batch log (production calculator history)
+const _origBcLoadData = bcLoadData;
+bcLoadData = async function() {
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const remote = await _remoteLoad('batches', null, r => ({
+      batchCode: r.batch_code, skuCode: r.sku_code,
+      casesProduced: r.cases_produced, productionDate: r.production_date,
+    }));
+    if (remote) { bcBatchLog = remote; return; }
+  }
+  _origBcLoadData();
+};
+
+// Wire realtime to invalidate cache then re-render
+setTimeout(() => {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  Object.keys(_remoteCache).forEach(k => delete _remoteCache[k]);
+}, 3000);
+
+// ═══════════════════════════════════════════════════════════════
 // SUPABASE BRIDGE — PHASE A/J (Data Access Abstraction)
 // Dual-write layer: localStorage + optional Supabase remote
-// Feature flag: SUPABASE_REMOTE_FIRST controls read source
+// Remote First is ON automatically for all users when Supabase is configured
 // ═══════════════════════════════════════════════════════════════
 
 const SUPABASE_CONFIG = {
-  url: '',          // Set via Settings → Apps Script / Supabase URL
-  anonKey: '',      // Set via Settings → Supabase Anon Key
+  url: '',
+  anonKey: '',
   remoteFirst: false,
   get configured() { return !!(this.url && this.anonKey); }
 };
 
-// Load config from localStorage (non-sensitive anon key only)
+// Load config — Remote First is ON by default when URL+key are saved
 (function _loadSupabaseConfig() {
   try {
+    // Hardcoded defaults — every device gets these automatically
+    const DEFAULTS = {
+      url: 'https://vuiorapiugmfmgwdolzq.supabase.co',
+      anonKey: 'sb_publishable_w9yQoKB2rw7ZTa9Pdsc5kw_wMQIxnh',
+    };
     const cfg = JSON.parse(localStorage.getItem('420craft_supabase_config') || '{}');
-    if (cfg.url) SUPABASE_CONFIG.url = cfg.url;
-    if (cfg.anonKey) SUPABASE_CONFIG.anonKey = cfg.anonKey;
-    if (cfg.remoteFirst) SUPABASE_CONFIG.remoteFirst = cfg.remoteFirst;
+    SUPABASE_CONFIG.url = cfg.url || DEFAULTS.url;
+    SUPABASE_CONFIG.anonKey = cfg.anonKey || DEFAULTS.anonKey;
+    // Auto-enable Remote First for everyone when Supabase is configured
+    // Only stays off if admin explicitly turned it off (cfg.remoteFirst === false)
+    if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey) {
+      SUPABASE_CONFIG.remoteFirst = cfg.remoteFirst !== false;
+    }
   } catch(e) {}
 })();
 
-// ── SUPABASE CLIENT (CDN-loaded, lazy) ───────────────────────
+// ── SUPABASE CLIENT (CDN-loaded, with retry) ─────────────────
 let _sbClient = null;
+let _sbInitAttempts = 0;
+const _sbMaxAttempts = 20; // try for up to 10 seconds
+
 function getSupabaseClient() {
   if (_sbClient) return _sbClient;
   if (!SUPABASE_CONFIG.configured) return null;
-  // The CDN exposes supabase.createClient (lowercase)
   const sbLib = window.supabase || window.Supabase;
-  if (!sbLib) {
-    console.warn('[Supabase] Client library not loaded yet');
-    return null;
-  }
+  if (!sbLib) return null; // will be retried by _initSupabaseWithRetry
+  return _createSupabaseClient(sbLib);
+}
+
+function _createSupabaseClient(sbLib) {
+  if (_sbClient) return _sbClient;
   try {
     _sbClient = sbLib.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
       auth: { autoRefreshToken: true, persistSession: true },
+      realtime: { params: { eventsPerSecond: 20 } },
     });
-    // Subscribe to realtime channels
-    _sbClient.channel('inventory-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'batches' }, payload => {
-        console.log('[Realtime] Batch change:', payload.eventType, payload.new?.batch_code);
-        if (SUPABASE_CONFIG.remoteFirst) loadBatchesFromRemote();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'movements' }, payload => {
-        console.log('[Realtime] Movement:', payload.eventType);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, payload => {
-        console.log('[Realtime] Invoice change:', payload.new?.invoice_no);
-      })
-      .subscribe();
-    console.log('[Supabase] Client initialized ✅');
+
+    // ── REALTIME ENGINE ───────────────────────────────────────
+    // Maps each DB table to the render functions that should fire
+    // when that table changes. Only re-renders the currently active page.
+
+    const _realtimePageMap = {
+      // Inventory & batches
+      batches:                   ['inventory','inv-detail','inv-audit','dashboard','brand-velocity','reorder','acct-inventory-val','acct-costing','batch-calc'],
+      movements:                 ['inventory','inv-detail','movement-history','dashboard','brand-velocity','log-movement','acct-inventory-val'],
+      reservations:              ['inventory','inv-detail','acct-deals','acct-settlements'],
+      sku_master:                ['inventory','sku-manager','batch-calc','brand-velocity','reorder','acct-costing'],
+      sku_aliases:               ['inventory','sku-manager'],
+      // Production
+      production_runs:           ['prod-run','schedule','dashboard','inv-detail','acct-costing'],
+      production_schedule_blocks:['schedule','prod-run','dashboard'],
+      cost_snapshots:            ['acct-costing','acct-inventory-val','prod-run','acct-reports'],
+      cost_snapshot_lines:       ['acct-costing','prod-run'],
+      // Orders & shipping
+      customer_orders:           ['order-queue','dashboard','shipping'],
+      shipments:                 ['shipping','order-queue','dashboard','acct-shipment-costing','movement-history'],
+      // Customers & brands
+      customers:                 ['acct-deals','acct-ar','acct-ap','acct-settlements','brand-launch'],
+      brands:                    ['brand-launch','acct-deals','inventory','brand-velocity'],
+      // Accounting — AR
+      invoices:                  ['acct-ar','acct-home','acct-exceptions','acct-reports'],
+      invoice_lines:             ['acct-ar','acct-reports'],
+      payments:                  ['acct-ar','acct-home','acct-reports'],
+      ar_reminder_rules:         ['acct-ar-reminders'],
+      ar_reminder_history:       ['acct-ar-reminders','acct-ar'],
+      invoice_types:             ['acct-invoice-types','acct-ar'],
+      // Accounting — deals & settlements
+      customer_deals:            ['acct-deals','acct-home','acct-settlements','acct-shipment-costing'],
+      settlement_periods:        ['acct-settlements','acct-home','acct-reports','acct-exceptions'],
+      sell_through_reports:      ['acct-settlements','acct-reports'],
+      price_books:               ['acct-price-books','acct-deals'],
+      // Accounting — AP & vendors
+      vendors:                   ['acct-vendors','acct-ap'],
+      purchase_orders:           ['acct-ap','acct-vendors','acct-exceptions'],
+      po_lines:                  ['acct-ap','acct-vendors'],
+      vendor_bills:              ['acct-ap','acct-exceptions','acct-reports'],
+      bill_lines:                ['acct-ap'],
+      payment_accounts:          ['acct-ap-accounts','acct-ap'],
+      ap_transactions:           ['acct-ap-accounts','acct-ap','acct-reports'],
+      // Accounting — close & audit
+      close_periods:             ['acct-close','acct-home'],
+      audit_logs:                ['acct-close','acct-exceptions'],
+      tax_rules:                 ['acct-tax-rules'],
+      // Ops
+      operators:                 ['operators','prod-run','schedule'],
+      consumables:               ['consumables','prod-run','reorder'],
+      shipping_materials:        ['shipping'],
+      notification_contacts:     ['notifications'],
+      // Admin & integrations
+      user_profiles:             ['acct-employees','acct-roles','admin-diagnostics'],
+      employee_profiles:         ['acct-employees'],
+      integrations:              ['acct-integrations','acct-qbo','admin-diagnostics'],
+      integration_mappings:      ['acct-integrations','acct-qbo'],
+      sync_logs:                 ['acct-integrations','acct-qbo','admin-diagnostics'],
+      file_attachments:          ['inv-detail','acct-ar','acct-ap','acct-settlements'],
+    };
+
+    // Page → render function map
+    const _pageRenderFns = {
+      'inventory':          () => { if(typeof shLoad==='function') shLoad(); },
+      'inv-detail':         () => { if(typeof renderInvDetail==='function') renderInvDetail(); },
+      'inv-audit':          () => { if(typeof renderInvAudit==='function') renderInvAudit(); },
+      'dashboard':          () => { if(typeof renderDashboard==='function') renderDashboard(); },
+      'brand-velocity':     () => { if(typeof renderBrandVelocity==='function') renderBrandVelocity(); },
+      'reorder':            () => { if(typeof renderReorder==='function') renderReorder(); },
+      'movement-history':   () => { if(typeof renderMovementHistory==='function') renderMovementHistory(); },
+      'log-movement':       () => { if(typeof renderLogMovement==='function') renderLogMovement(); },
+      'prod-run':           () => { if(typeof prodRunLoad==='function'&&typeof renderProdRuns==='function') renderProdRuns(); },
+      'schedule':           () => { if(typeof renderSchedule==='function') renderSchedule(); },
+      'order-queue':        () => { if(typeof renderOrderQueue==='function') renderOrderQueue(); },
+      'shipping':           () => { if(typeof renderShipping==='function') renderShipping(); },
+      'sku-manager':        () => { if(typeof renderSKUManager==='function') renderSKUManager(); },
+      'operators':          () => { if(typeof renderOperators==='function') renderOperators(); },
+      'consumables':        () => { if(typeof renderConsumables==='function') renderConsumables(); },
+      'batch-calc':         () => { if(typeof renderBatchCalc==='function') renderBatchCalc(); },
+      'acct-home':          () => { if(typeof renderAcctHome==='function') renderAcctHome(); },
+      'acct-ar':            () => { if(typeof renderAcctAR==='function') renderAcctAR(); },
+      'acct-ap':            () => { if(typeof renderAcctAP==='function') renderAcctAP(); },
+      'acct-settlements':   () => { if(typeof renderAcctSettlements==='function') renderAcctSettlements(); },
+      'acct-deals':         () => { if(typeof renderAcctDeals==='function') renderAcctDeals(); },
+      'acct-vendors':       () => { if(typeof renderAcctVendors==='function') renderAcctVendors(); },
+      'acct-costing':       () => { if(typeof renderAcctCosting==='function') renderAcctCosting(); },
+      'acct-inventory-val': () => { if(typeof renderAcctInventoryVal==='function') renderAcctInventoryVal(); },
+      'acct-reports':       () => { if(typeof renderAcctReports==='function') renderAcctReports(); },
+      'acct-exceptions':    () => { if(typeof renderAcctExceptions==='function') renderAcctExceptions(); },
+      'acct-shipment-costing': () => { if(typeof renderAcctShipmentCosting==='function') renderAcctShipmentCosting(); },
+    };
+
+    // Debounce re-renders to avoid hammering on rapid changes (e.g. bulk import)
+    const _renderDebounce = {};
+    function _scheduleRerender(pageId) {
+      if (_renderDebounce[pageId]) clearTimeout(_renderDebounce[pageId]);
+      _renderDebounce[pageId] = setTimeout(() => {
+        const activePage = document.querySelector('.page.active');
+        const activeId = activePage?.id?.replace('page-', '');
+        if (activeId === pageId && _pageRenderFns[pageId]) {
+          console.log('[Realtime] Re-rendering:', pageId);
+          try { _pageRenderFns[pageId](); } catch(e) { console.warn('[Realtime] render error:', e.message); }
+        }
+      }, 400); // 400ms debounce
+    }
+
+    // Show a live indicator toast for changes from other users
+    function _showLiveUpdate(table, eventType, payload) {
+      const who = payload.new?.updated_by || payload.new?.operator || payload.new?.lead_operator || payload.new?.full_name || '';
+      const what = {
+        batches:                    'Inventory updated',
+        movements:                  'Movement logged',
+        production_runs:            'Production run updated',
+        production_schedule_blocks: 'Schedule updated',
+        customer_orders:            'Order queue updated',
+        shipments:                  'Shipment updated',
+        invoices:                   'Invoice updated',
+        invoice_lines:              'Invoice updated',
+        payments:                   'Payment recorded',
+        settlement_periods:         'Settlement updated',
+        customer_deals:             'Deal updated',
+        sell_through_reports:       'Sell-through report updated',
+        vendors:                    'Vendor updated',
+        purchase_orders:            'Purchase order updated',
+        vendor_bills:               'Vendor bill updated',
+        cost_snapshots:             'Cost snapshot updated',
+        operators:                  'Operators updated',
+        consumables:                'Consumables updated',
+        sku_master:                 'SKU list updated',
+        reservations:               'Reservation updated',
+        close_periods:              'Close period updated',
+        customers:                  'Customer updated',
+        brands:                     'Brand updated',
+        price_books:                'Price book updated',
+        tax_rules:                  'Tax rules updated',
+        ar_reminder_rules:          'AR reminder rules updated',
+        payment_accounts:           'Payment accounts updated',
+        shipping_materials:         'Shipping materials updated',
+        notification_contacts:      'Notification contacts updated',
+        user_profiles:              'User profile updated',
+        integrations:               'Integration updated',
+      }[table] || `${table.replace(/_/g,' ')} updated`;
+      showToast(`🔄 ${what}${who ? ' by ' + who : ''}`);
+    }
+
+    // Subscribe to ALL tables
+    const allTables = Object.keys(_realtimePageMap);
+    const channel = _sbClient.channel('420craft-live');
+
+    allTables.forEach(table => {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, payload => {
+        console.log(`[Realtime] ${table}:`, payload.eventType);
+        // Invalidate remote cache for this table so next render fetches fresh
+        delete _remoteCache[table];
+        // Refresh batch local cache
+        if (table === 'batches') loadBatchesFromRemote();
+        // Schedule re-render for all pages affected by this table
+        const affectedPages = _realtimePageMap[table] || [];
+        affectedPages.forEach(pageId => _scheduleRerender(pageId));
+        // Show live update indicator
+        _showLiveUpdate(table, payload.eventType, payload);
+      });
+    });
+
+    channel.subscribe(status => {
+      console.log('[Realtime] Channel status:', status);
+      if (status === 'SUBSCRIBED') {
+        console.log('[Realtime] ✅ Live updates active for', allTables.length, 'tables');
+      }
+    });
+
+    console.log('[Supabase] Client initialized ✅ — realtime active');
   } catch(e) {
     console.error('[Supabase] Client init failed:', e.message);
     return null;
   }
   return _sbClient;
 }
+
+// Retry initializing Supabase until CDN script is loaded
+function _initSupabaseWithRetry() {
+  if (_sbClient) return;
+  if (!SUPABASE_CONFIG.configured) return;
+  _sbInitAttempts++;
+  const sbLib = window.supabase || window.Supabase;
+  if (sbLib) {
+    console.log('[Supabase] CDN ready — initializing...');
+    _createSupabaseClient(sbLib);
+    if (_sbClient && SUPABASE_CONFIG.remoteFirst) {
+      loadData().then(() => {
+        const active = document.querySelector('.page.active');
+        const pageId = active?.id?.replace('page-', '');
+        if (pageId) try { showPage(pageId); } catch(e) {}
+        console.log('[Supabase] ✅ Remote data loaded');
+      }).catch(e => console.warn('[Supabase] Initial load error:', e.message));
+    }
+  } else if (_sbInitAttempts < _sbMaxAttempts) {
+    setTimeout(_initSupabaseWithRetry, 500);
+  } else {
+    console.warn('[Supabase] CDN failed to load — running local mode');
+  }
+}
+
+// Auto-start: try immediately, on DOM ready, and after delays for slow networks
+_initSupabaseWithRetry();
+document.addEventListener('DOMContentLoaded', () => { if (!_sbClient) _initSupabaseWithRetry(); });
+setTimeout(() => { if (!_sbClient) _initSupabaseWithRetry(); }, 1000);
+setTimeout(() => { if (!_sbClient) _initSupabaseWithRetry(); }, 3000);
+
+// ── LIVE CONNECTION INDICATOR ─────────────────────────────────
+function _updateLiveIndicator(status) {
+  const el = document.getElementById('sb-live-indicator');
+  if (!el) return;
+  const states = {
+    connecting: { text: '⏳ Connecting...', bg: 'rgba(255,184,48,0.15)', color: 'var(--amber)', show: true },
+    live:       { text: '🟢 Live',          bg: 'rgba(57,232,122,0.15)',  color: 'var(--green)', show: true },
+    error:      { text: '🔴 Offline',        bg: 'rgba(255,77,109,0.15)',  color: 'var(--red)',   show: true },
+    local:      { text: '📦 Local',          bg: 'rgba(100,100,100,0.15)', color: 'var(--text3)', show: false },
+  };
+  const s = states[status] || states.local;
+  el.style.display = s.show ? 'block' : 'none';
+  el.style.background = s.bg;
+  el.style.color = s.color;
+  el.textContent = s.text;
+}
+
+// Show connecting on load if Supabase configured
+if (SUPABASE_CONFIG.configured) _updateLiveIndicator('connecting');
+
+// Check connection and update indicator every 10 seconds
+async function _checkLiveStatus() {
+  const sb = getSupabaseClient();
+  if (!sb) {
+    _updateLiveIndicator(SUPABASE_CONFIG.configured ? 'error' : 'local');
+    return;
+  }
+  try {
+    const { error } = await sb.from('batches').select('count', { count: 'exact', head: true });
+    _updateLiveIndicator(error ? 'error' : 'live');
+  } catch(e) {
+    _updateLiveIndicator('error');
+  }
+}
+
+setTimeout(_checkLiveStatus, 2000);
+setInterval(_checkLiveStatus, 10000);
 
 // ── DUAL-WRITE HELPERS ────────────────────────────────────────
 
