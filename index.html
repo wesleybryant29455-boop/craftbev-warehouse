@@ -417,10 +417,11 @@
   /* ── DESKTOP-ONLY ELEMENTS ── */
   .topbar-brand-wrap { display:flex; align-items:center; gap:10px; }
   .topbar-brand-label { font-size:10px; font-family:var(--font-mono); color:var(--text3); letter-spacing:2px; white-space:nowrap; }
+  #prod-run-live { left: 220px; }
+  body.mobile-view #prod-run-live { left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 1500 !important; }
   #mobile-menu-btn { display:none; }
   #mobile-brand-bar { display:none; }
   html, body { overflow-x: hidden; }
-
   body.mobile-view { --sidebar-w: 0px; }
   body.mobile-view #sidebar { position: fixed !important; left: -280px !important; transform: none !important; top: 0 !important; bottom: 0 !important; width: 260px !important; z-index: 1000 !important; transition: left 0.28s ease !important; overflow-y: auto !important; }
   body.mobile-view #sidebar.mobile-open { left: 0 !important; box-shadow: 6px 0 40px rgba(0,0,0,0.85) !important; }
@@ -2763,7 +2764,7 @@ window.addEventListener('load', function() {
     </div>
 
     <!-- ── LIVE RUN OVERLAY ───────────────────────────────────────── -->
-    <div id="prod-run-live" class="hidden" style="position:fixed;inset:0;left:220px;background:var(--bg);z-index:900;display:flex;flex-direction:column;overflow:hidden">
+    <div id="prod-run-live" class="hidden" style="position:fixed;inset:0;background:var(--bg);z-index:900;display:flex;flex-direction:column;overflow:hidden">
 
       <!-- Live header bar -->
       <div id="prl-header" style="background:rgba(10,14,8,.97);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;flex-wrap:wrap;gap:8px">
@@ -11542,6 +11543,14 @@ function prodRunGoLive() {
   if (!prodRunActive) return;
   const screen = document.getElementById('prod-run-live');
   screen.classList.remove('hidden');
+  // On mobile-view, ensure overlay covers full screen (not offset by sidebar)
+  if (document.body.classList.contains('mobile-view')) {
+    screen.style.left = '0';
+    screen.style.width = '100vw';
+  } else {
+    screen.style.left = '220px';
+    screen.style.width = '';
+  }
   document.getElementById('prl-flavor-label').textContent = prodRunActive.flavorName||prodRunActive.sku||'—';
   document.getElementById('prl-run-id').textContent = prodRunActive.id;
   document.getElementById('prl-notes').value = prodRunActive.notes||'';
