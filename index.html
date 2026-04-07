@@ -6996,7 +6996,11 @@ function shLoad() {
 }
 function shSave() {
   localStorage.setItem('420craft_shipments', JSON.stringify(shipments));
-  _sbWriteAfterSave('420craft_shipments');
+  // Write to Supabase — background write, user sees shipment immediately
+  _sbWriteAfterSave('420craft_shipments').catch(e => {
+    showToast('⚠ Shipment sync failed — saved locally, will retry');
+    console.error('[shSave] Supabase write failed:', e);
+  });
   _syncShipmentCOCToSheets(); // compliance backup
   if (sheetsEnabled()) sheetsQueue('sync_all', { shipments });
 }
@@ -14927,6 +14931,8 @@ function auditLoadLog() {
 }
 function auditSaveLog(log) {
   localStorage.setItem('420craft_audit_log', JSON.stringify(log));
+  // Write to Supabase (background, non-blocking — audit logs are append-only)
+  _sbWriteAfterSave('420craft_audit_log');
   if (sheetsEnabled()) sheetsQueue('save_audit_log', { auditLog: log });
 }
 
@@ -20668,6 +20674,22 @@ const _SB_WRITE_MAP = {
     }),
     conflict: 'id',
   },
+  '420craft_audit_log': {
+    table: 'audit_logs',
+    getRows: () => {
+      try { return JSON.parse(localStorage.getItem('420craft_audit_log')||'[]'); } catch { return []; }
+    },
+    toRow: r => ({
+      action:      r.action || r.type || 'audit',
+      entity_type: r.entityType || r.type || '',
+      entity_id:   String(r.entityId || r.batchCode || r.sku || ''),
+      user_name:   r.userName || r.operator || r.user || '',
+      note:        r.note || r.notes || '',
+      created_at:  r.timestamp || r.ts || new Date().toISOString(),
+    }),
+    conflict: null,
+    insertOnly: false,
+  },
   '420craft_nt_contacts': {
     table: 'notification_contacts',
     getRows: () => {
@@ -20729,6 +20751,67 @@ const _SB_ACCT_MAP = {
 };
 
 // Core write function — non-blocking, fires after localStorage update
+
+// Generic confirmed write — returns {ok, error}
+async function _sbWriteConfirmed(table, rows, conflictCol) {
+  if (!SUPABASE_CONFIG.remoteFirst) return { ok: true };
+  const sb = getSupabaseClient();
+  if (!sb) return { ok: false, error: 'No Supabase connection' };
+  try {
+    const arr = Array.isArray(rows) ? rows : [rows];
+    if (!arr.length) return { ok: true };
+    const result = conflictCol
+      ? await sb.from(table).upsert(arr, { onConflict: conflictCol })
+      : await sb.from(table).insert(arr);
+    if (result.error) {
+      console.error('[ConfirmedWrite] ' + table + ':', result.error.message);
+      return { ok: false, error: result.error.message };
+    }
+    return { ok: true };
+  } catch(e) { return { ok: false, error: e.message }; }
+}
+
+// Confirmed write for logMovement — awaited before showing success to user
+async function _sbWriteMovementConfirmed(movement, skuIdx, moveType, qty) {
+  if (!SUPABASE_CONFIG.remoteFirst) return true;
+  const sb = getSupabaseClient();
+  if (!sb) return false;
+  try {
+    const typeMap = {
+      'New Batch':'inbound_receipt','Inbound':'inbound_receipt','Return':'inbound_receipt',
+      'Outbound':'outbound_shipment','Write-Off':'write_off',
+      'Pull to Sample':'pull_to_sample','Send Sample':'send_sample',
+    };
+    const row = {
+      batch_code:       movement.Batch_Code || movement.batch_code || '',
+      sku_code:         movement.Full_SKU || ((movement.SKU||'') + ' ' + (movement.MG_Strength||'')),
+      movement_type:    typeMap[movement.Movement_Type || moveType] || 'outbound_shipment',
+      direction:        movement.Direction === 'Inbound' ? 'inbound' : 'outbound',
+      quantity:         parseInt(movement.Quantity || qty || 0),
+      operator:         movement.Operator || '',
+      notes:            movement.Notes || '',
+      write_off_reason: movement.WriteOffReason || null,
+      created_at:       movement.Timestamp || new Date().toISOString(),
+    };
+    const { error: insErr } = await sb.from('movements').insert(row);
+    if (insErr) { console.error('[ConfirmedWrite] movements:', insErr.message); return false; }
+
+    // Update batch inventory counts in Supabase atomically
+    const bc = row.batch_code;
+    if (bc && bc !== 'UNKNOWN') {
+      const isIn = row.direction === 'inbound';
+      const { data: bRow } = await sb.from('batches').select('cases_on_hand,cases_produced,cases_shipped').eq('batch_code', bc).single();
+      if (bRow) {
+        await sb.from('batches').update({
+          cases_on_hand:  isIn ? (bRow.cases_on_hand||0)+row.quantity : Math.max(0,(bRow.cases_on_hand||0)-row.quantity),
+          cases_produced: isIn ? (bRow.cases_produced||0)+row.quantity : bRow.cases_produced,
+          cases_shipped:  !isIn ? (bRow.cases_shipped||0)+row.quantity : bRow.cases_shipped,
+        }).eq('batch_code', bc);
+      }
+    }
+    return true;
+  } catch(e) { console.error('[ConfirmedWrite] error:', e.message); return false; }
+}
 async function _sbWriteAfterSave(lsKey) {
   if (!SUPABASE_CONFIG.remoteFirst) return;
   const sb = getSupabaseClient();
@@ -20741,8 +20824,10 @@ async function _sbWriteAfterSave(lsKey) {
     const rows = cfg.getRows();
     if (!rows || !rows.length) return;
 
-    if (cfg.insertOnly) {
-      // Movements — only insert new ones (find by created_at threshold)
+    if (cfg.appendOnly || cfg.insertOnly) {
+      // Append-only tables (audit_logs, movements) — only insert new rows
+      // For movements: find by created_at threshold
+      // For audit_logs: always append, never update
       const cutoff = new Date(Date.now() - 10000).toISOString(); // last 10 seconds
       const newRows = rows.filter(r => (r.created_at||r.Timestamp||'') > cutoff);
       if (newRows.length) {
