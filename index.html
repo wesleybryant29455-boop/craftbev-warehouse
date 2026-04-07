@@ -17418,6 +17418,152 @@ function ntBuildWeeklyDigest() {
   /* Tab bar hidden on desktop */
   #prl-mobile-tabs { display: none; }
 
+
+  /* ════════════════════════════════════════════════════════════════
+     PRODUCTION RUN LIVE OVERLAY — PURE CSS MEDIA QUERY
+     No JS class dependency — works on all phones immediately
+     ════════════════════════════════════════════════════════════════ */
+  @media screen and (max-width: 768px) {
+
+    /* Lock live overlay to exact phone screen */
+    #prod-run-live {
+      left: 0 !important;
+      top: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      position: fixed !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+    }
+
+    /* Header — compact, wraps cleanly */
+    #prl-header {
+      padding: 8px 12px !important;
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+      flex-shrink: 0 !important;
+    }
+    #prl-header > div:first-child {
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+    }
+    #prl-header > div:last-child {
+      width: 100% !important;
+      display: flex !important;
+      justify-content: space-between !important;
+      align-items: center !important;
+    }
+    #prl-elapsed { font-size: 18px !important; }
+
+    /* Complete run button — full width */
+    #prod-run-live button[onclick="prodRunCompletePrompt()"] {
+      flex: 1 !important;
+      min-height: 44px !important;
+    }
+
+    /* Live body — single column, fills remaining height */
+    #prl-live-body {
+      grid-template-columns: 1fr !important;
+      flex: 1 !important;
+      min-height: 0 !important;
+      overflow: hidden !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    /* All three panels hidden by default */
+    #prl-live-body > div {
+      display: none !important;
+      flex: 1 !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      border: none !important;
+      border-right: none !important;
+      border-left: none !important;
+    }
+
+    /* Active tab panel visible */
+    #prl-live-body > div.prl-tab-active {
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    /* First panel shows if no tab selected yet */
+    #prl-live-body > div:first-child:not(.prl-tab-inactive) {
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    /* Inactive panels hidden */
+    #prl-live-body > div.prl-tab-inactive {
+      display: none !important;
+    }
+
+    /* Tab bar visible on mobile */
+    #prl-mobile-tabs {
+      display: flex !important;
+      flex-shrink: 0 !important;
+      background: var(--bg2) !important;
+      border-top: 2px solid var(--border) !important;
+    }
+    #prl-mobile-tabs button {
+      flex: 1 !important;
+      min-height: 54px !important;
+      font-size: 12px !important;
+      font-weight: 700 !important;
+      border: none !important;
+      cursor: pointer !important;
+      font-family: var(--font-mono) !important;
+      padding: 8px 4px !important;
+    }
+
+    /* Expendable form — 1 column */
+    #prl-exp-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Clock-in form buttons — full touch target */
+    #prl-clockin-form button {
+      min-height: 44px !important;
+    }
+
+    /* Wizard — full screen */
+    #prod-run-wizard {
+      padding: 6px !important;
+      align-items: flex-start !important;
+    }
+    #prod-run-wizard > div {
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: calc(100vh - 12px) !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      border-radius: 12px !important;
+    }
+    #prod-run-wizard #prw-body {
+      padding: 14px !important;
+    }
+    #prod-run-wizard [id="prw-next-btn"] {
+      width: 100% !important;
+      min-height: 48px !important;
+      font-size: 14px !important;
+    }
+    #prod-run-wizard [style*="grid-template-columns:1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+
+  }
+
+  /* Tab bar hidden on desktop */
+  @media screen and (min-width: 769px) {
+    #prl-mobile-tabs { display: none !important; }
+    #prl-live-body > div { display: flex !important; }
+    #prl-live-body > div.prl-tab-inactive { display: flex !important; }
+  }
+
 </style></head><body>
 <div class="wrap">
 <div class="header"><h1>420 CRAFT BEVERAGES</h1><p>Weekly Warehouse Report · ${week}</p></div>
