@@ -1268,7 +1268,7 @@ window.addEventListener('load', function() {
     </div>
   </nav>
   <div class="sidebar-footer">
-    v2.0 · Data: LocalStorage<br>
+    v2.0 · Data: Supabase<br>
     <span class="dot-live"></span>Live Session
   </div>
 </aside>
@@ -20984,7 +20984,7 @@ async function renderAdminDiagnostics() {
       <div id="diag-migration-log" style="font-family:var(--font-mono);font-size:11px;background:var(--bg3);border-radius:8px;padding:12px;min-height:60px;max-height:200px;overflow-y:auto;margin-bottom:12px;color:var(--text3)">Ready to migrate. Click button to start.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${checks.supabase_connected && checks.supabase_auth
-          ? `<button onclick="diagRunMigration()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer;font-weight:600">▶ Migrate localStorage → Supabase</button>
+          ? `<button onclick="diagRunMigration()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer;font-weight:600">▶ Force Sync Cache → Supabase</button>
              <button onclick="diagEnableRemoteFirst()" style="background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.3);color:var(--blue);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer">${SUPABASE_CONFIG.remoteFirst?'⬇ Switch to Local First':'⬆ Switch to Remote First'}</button>`
           : `<div style="color:var(--text3);font-size:12px">Connect Supabase and sign in to enable migration</div>`}
         <button onclick="renderAdminDiagnostics()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer">↻ Refresh</button>
