@@ -1136,7 +1136,7 @@ function addUserBadge(user) {
   `;
   badge.onclick = () => {
     if (confirm('Sign out of ' + user.email + '?')) {
-      sessionStorage.removeItem('${AUTH_KEY}');
+      sessionStorage.removeItem(AUTH_KEY);
       location.reload();
     }
   };
@@ -1550,8 +1550,6 @@ window.addEventListener('load', function() {
             <option value="Return">📦 Return — Cases coming back to warehouse</option>
             <option value="Outbound">🚚 Outbound — Cases leaving to a customer</option>
             <option value="Pull to Sample">🧪 Pull to Sample — Move case to sample area</option>
-              <option value="Send Sample">📬 Send Sample — Send sample pack to customer</option>
-              <option value="Pull to Sample">🧪 Pull to Sample — Move case to sample area</option>
               <option value="Send Sample">📬 Send Sample — Send sample pack to customer</option>
               <option value="Write-Off">🗑 Write-Off — Damage, loss, expiry</option>
           </select>
@@ -2412,7 +2410,7 @@ window.addEventListener('load', function() {
         <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">BACKUP FILE CONTENTS</div>
         <div id="backup-preview-content"></div>
         <div style="display:flex;gap:10px;margin-top:16px">
-          <button onclick="backupImport()" class="btn btn-primary" style="width:auto;font-size:13px;padding:10px 24px;background:var(--red);box-shadow:none">
+          <button onclick="if(currentUserRole()!=='owner'&&currentUserRole()!=='admin'){alert('⛔ Restore is admin-only');return;}backupImport()" class="btn btn-primary" style="width:auto;font-size:13px;padding:10px 24px;background:var(--red);box-shadow:none">
             ⚠ Restore This Backup
           </button>
           <button onclick="document.getElementById('backup-preview').style.display='none'" class="btn btn-ghost" style="width:auto">Cancel</button>
@@ -4819,9 +4817,13 @@ function loadData() {
   _fixSkuBrands();
 }
 function saveData() {
+  // Write to Supabase FIRST for movements (most critical for multi-user sync)
+  // localStorage becomes the local cache after the remote write
+  _sbWriteAfterSave('420craft_movements');
+  _sbWriteAfterSave('420craft_batches');
+  // Then update local cache
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
   localStorage.setItem('420craft_movements', JSON.stringify(movements));
-  _sbWriteAfterSave('420craft_movements');
   localStorage.setItem('420craft_batches', JSON.stringify(batchData));
   // Auto-sync to Google Sheets
   // Supabase handles skuData, batchData, movements — only send lightweight data to Sheets
@@ -20858,6 +20860,13 @@ showPage = function(id, el) {
 async function renderAdminDiagnostics() {
   const el = document.getElementById('admin-diagnostics-content');
   if (!el) return;
+  // Gate to admin roles only
+  const role = currentUserRole ? currentUserRole() : 'owner';
+  const allowedRoles = ['owner','admin','manager'];
+  if (role && !allowedRoles.includes(role)) {
+    el.innerHTML = '<div style="padding:60px;text-align:center;color:var(--red);font-size:16px">⛔ Admin access required</div>';
+    return;
+  }
   el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text3)">🔍 Running diagnostics...</div>';
 
   const sb = getSupabaseClient();
@@ -20967,7 +20976,7 @@ async function renderAdminDiagnostics() {
           const statusText = !checks.supabase_connected ? '—' :
             !hasRemote ? '⚠ query error' :
             synced ? '<span style="color:var(--green)">✅ Synced</span>' :
-            '<span style="color:var(--amber)">⚠ Needs migration</span>';
+            '<span style="color:var(--amber)">⚠ Cache behind remote</span>';
           return `<tr style="border-top:1px solid var(--border2)">
             <td style="padding:6px 8px;font-weight:500;text-transform:capitalize">${entity.replace(/_/g,' ')}</td>
             <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">${localCount}</td>
