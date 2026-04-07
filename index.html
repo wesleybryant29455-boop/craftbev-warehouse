@@ -1009,14 +1009,7 @@
     ">Access restricted to<br><strong style="color:#b06cff;">@420craftbeverages.com</strong> accounts</div>
 
     <!-- Google Sign In Button -->
-    <div id="g-signin-btn" style="display:flex; justify-content:center; margin-bottom:12px; min-height:44px;"></div>
-    <!-- Fallback button if Google GSI fails to render -->
-    <div id="g-signin-fallback" style="display:none; justify-content:center; margin-bottom:12px;">
-      <button onclick="_googleSignInFallback()" style="background:#4285f4;color:#fff;border:none;border-radius:6px;padding:12px 24px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;width:280px;display:flex;align-items:center;justify-content:center;gap:10px">
-        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-        Sign in with Google
-      </button>
-    </div>
+    <div id="g-signin-btn" style="display:flex; justify-content:center; margin-bottom:20px;"></div>
 
     <div id="auth-error" style="
       display:none;
@@ -1330,7 +1323,6 @@ async function _fetchRemotePermissions() {
   console.warn('[Perms] Supabase not ready after retries — using cached permissions');
   return false;
 }
-}
 
 // ── Render the permissions admin panel ───────────────────────
 function renderUserPermissions() {
@@ -1465,64 +1457,32 @@ function permRemoveUser(email) {
 }
 
 // Initialize Google Sign-In when GSI library loads
-function _initGoogleSignIn() {
-  if (!document.getElementById('auth-gate')) return; // already logged in
-  const btn = document.getElementById('g-signin-btn');
-  if (!btn) return;
-
-  if (window.google && google.accounts && google.accounts.id) {
-    google.accounts.id.initialize({
-      client_id: '397169137330-glrpkt9v4gqaduc042us94bf22k66arc.apps.googleusercontent.com',
-      callback: handleGoogleCredential,
-      hosted_domain: ALLOWED_DOMAIN,
-      login_hint: '@' + ALLOWED_DOMAIN,
-      auto_select: false,
-      cancel_on_tap_outside: true,
-    });
-    google.accounts.id.renderButton(btn, {
-      theme: 'filled_black',
-      size: 'large',
-      shape: 'rectangular',
-      width: 280,
-      text: 'signin_with',
-      logo_alignment: 'left',
-    });
-    // Also show One Tap
-    google.accounts.id.prompt();
-    return true;
-  }
-  return false;
-}
-
-function _googleSignInFallback() {
-  if (window.google && google.accounts && google.accounts.id) {
-    google.accounts.id.prompt();
-  } else {
-    // Last resort — redirect to Google OAuth directly
-    const clientId = '397169137330-glrpkt9v4gqaduc042us94bf22k66arc.apps.googleusercontent.com';
-    const redirect = encodeURIComponent(window.location.href);
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&response_type=token&scope=email+profile&redirect_uri=${redirect}&hd=420craftbeverages.com`;
-  }
-}
-
-// Show fallback button if Google button hasn't rendered after 3 seconds
-setTimeout(() => {
-  const btn = document.getElementById('g-signin-btn');
-  const fallback = document.getElementById('g-signin-fallback');
-  if (fallback && btn && btn.children.length === 0) {
-    fallback.style.display = 'flex';
-  }
-}, 3000);
-
-// Try immediately, then on load, then poll
-if (!_initGoogleSignIn()) {
-  window.addEventListener('load', function() {
-    if (!_initGoogleSignIn()) {
-      const t = setInterval(() => { if (_initGoogleSignIn()) clearInterval(t); }, 200);
-      setTimeout(() => clearInterval(t), 10000); // stop after 10s
+window.addEventListener('load', function() {
+  const waitForGoogle = setInterval(() => {
+    if (window.google && google.accounts && google.accounts.id) {
+      clearInterval(waitForGoogle);
+      google.accounts.id.initialize({
+        client_id: '397169137330-glrpkt9v4gqaduc042us94bf22k66arc.apps.googleusercontent.com',
+        callback: handleGoogleCredential,
+        hosted_domain: ALLOWED_DOMAIN,
+        login_hint: '@' + ALLOWED_DOMAIN,
+        auto_select: false,
+        cancel_on_tap_outside: true,
+      });
+      google.accounts.id.renderButton(
+        document.getElementById('g-signin-btn'),
+        {
+          theme: 'filled_black',
+          size: 'large',
+          shape: 'rectangular',
+          width: 280,
+          text: 'signin_with',
+          logo_alignment: 'left',
+        }
+      );
     }
-  });
-}
+  }, 100);
+});
 </script>
 
 
