@@ -2841,6 +2841,7 @@ window.addEventListener('load', function() {
       <!-- Live header bar -->
       <div id="prl-header" style="background:rgba(10,14,8,.97);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:16px">
+          <button onclick="prodRunPark()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font-body);white-space:nowrap" title="Save & exit — run stays in progress">← Park Run</button>
           <div style="display:flex;align-items:center;gap:8px;padding-left:8px">
             <div class="dot-live"></div>
             <span style="font-family:var(--font-display);font-size:18px;letter-spacing:1px;color:var(--green)">PRODUCTION LIVE</span>
@@ -2910,7 +2911,7 @@ window.addEventListener('load', function() {
           </div>
           <div style="flex:1;padding:16px;overflow-y:auto">
             <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:10px">💬 PRODUCTION NOTES</div>
-            <textarea class="form-input" id="prl-notes" rows="5" placeholder="Anything notable during this run..." style="resize:none;width:100%" oninput="if(prodRunActive)prodRunActive.notes=this.value"></textarea>
+            <textarea class="form-input" id="prl-notes" rows="5" placeholder="Anything notable during this run..." style="resize:none;width:100%" oninput="if(prodRunActive){prodRunActive.notes=this.value;prodRunSaveActive();}"></textarea>
           </div>
         </div>
       </div>
@@ -11358,12 +11359,25 @@ function prodRunSaveAll(runs) {
     toSync.forEach(r => sheetsQueue('save_prod_run', r));
   }
 }
-function prodRunSaveActive() {
+let _prodRunSaveDebounce = null;
+function prodRunSaveActive(immediate = false) {
   if (!prodRunActive) return;
   const runs = prodRunLoad();
   const idx = runs.findIndex(r=>r.id===prodRunActive.id);
   if (idx>=0) runs[idx]=prodRunActive; else runs.push(prodRunActive);
-  prodRunSaveAll(runs);
+  // Always write localStorage immediately
+  localStorage.setItem('420craft_prod_runs', JSON.stringify(runs));
+  const inProg = runs.filter(r=>r.status==='in-progress').length;
+  const badge = document.getElementById('prod-run-badge');
+  if (badge) { badge.textContent=inProg; badge.style.display=inProg>0?'inline':'none'; }
+  // Debounce Supabase write to 800ms to avoid race conditions on rapid events
+  // Clock-in/out calls with immediate=true to push right away
+  if (_prodRunSaveDebounce) clearTimeout(_prodRunSaveDebounce);
+  if (immediate) {
+    _sbWriteAfterSave('420craft_prod_runs');
+  } else {
+    _prodRunSaveDebounce = setTimeout(() => _sbWriteAfterSave('420craft_prod_runs'), 800);
+  }
 }
 
 // ── LIST VIEW ─────────────────────────────
@@ -11442,7 +11456,7 @@ function renderProdRuns() {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${isLive?`<button onclick="prodRunResumeToLive('${r.id}')" style="background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.3);color:var(--amber);border-radius:6px;padding:7px 16px;font-size:12px;cursor:pointer;font-weight:700">🔄 Resume Live View</button>`:''}
         <button onclick="prodRunViewDetail('${r.id}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer">📋 View Detail</button>
-        <button onclick="prodRunDelete('${r.id}')" style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);color:var(--red);border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer">✕ Delete</button>
+        <button onclick="prodRunDelete('${r.id}')" style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.35);color:var(--red);border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600">🗑 Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -11645,6 +11659,30 @@ function prodRunGoLive() {
   });
 }
 
+function prodRunPark() {
+  if (!prodRunActive) return;
+  // Save any crew who are still clocked in — pause their time accumulation
+  (prodRunActive.crew||[]).forEach(c => {
+    if (!c.clockOutAt && _prlCrewTimers[c.name]) {
+      const mins = Math.round((Date.now() - _prlCrewTimers[c.name]) / 60000);
+      c.totalMins = (c.totalMins||0) + mins;
+      // Don't clock out — just snapshot elapsed time so far, keep isActive
+      _prlCrewTimers[c.name] = Date.now(); // reset so resume is clean
+    }
+  });
+  prodRunSaveActive();
+  // Stop the elapsed timer
+  if (_prlTimer) { clearInterval(_prlTimer); _prlTimer = null; }
+  // Clear active pointer so another run can be opened
+  prodRunActive = null;
+  // Hide live screen, go back to prod-run list
+  document.getElementById('prod-run-live').classList.add('hidden');
+  const navEl = document.querySelector('[onclick*="prod-run"]');
+  showPage('prod-run', navEl);
+  renderProdRuns();
+  showToast('🅿 Run parked — resume any time from the list');
+}
+
 function prodRunResumeToLive(id) {
   const runs = prodRunLoad();
   prodRunActive = runs.find(r=>r.id===id);
@@ -11702,7 +11740,7 @@ function prodRunDoClockIn() {
   prodRunActive.crew.push(entry);
   _prlCrewTimers[name] = Date.now();
   prodRunCloseClockInModal();
-  prodRunSaveActive();
+  prodRunSaveActive(true); // immediate — push to cloud so other devices see it
   _prodRunRenderCrew();
   _prodRunUpdateCosts();
   showToast('⏱ '+name+' clocked in');
@@ -11722,7 +11760,7 @@ function prodRunClockOut(name) {
   entry.position = position;
   entry.rate = isNaN(rate)?0:rate;
   entry.otHours = isNaN(otHrs)?0:otHrs;
-  prodRunSaveActive();
+  prodRunSaveActive(true); // immediate — push to cloud so other devices see it
   _prodRunRenderCrew();
   _prodRunUpdateCosts();
   showToast('🛑 '+name+' clocked out — '+(entry.totalMins)+' min');
@@ -11778,7 +11816,7 @@ function prodRunDoAddExpendable() {
   document.getElementById('prl-exp-qty').value='';
   document.getElementById('prl-exp-cost').value='';
   prodRunCloseExpModal();
-  prodRunSaveActive();
+  prodRunSaveActive(true); // immediate push so other devices see new item
   _prodRunRenderExpendables();
   _prodRunUpdateCosts();
   showToast('📦 '+name+' logged');
@@ -11786,7 +11824,7 @@ function prodRunDoAddExpendable() {
 
 function prodRunRemoveExpendable(idx) {
   prodRunActive.expendables.splice(idx,1);
-  prodRunSaveActive();
+  prodRunSaveActive(true); // immediate push
   _prodRunRenderExpendables();
   _prodRunUpdateCosts();
 }
@@ -12515,10 +12553,25 @@ function _prodRunAdjustOverlay() {
   return el;
 }
 function prodRunDelete(id) {
-  if (!confirm('Delete this production run? Cost data will be lost.')) return;
+  if (!confirm('Delete this production run? This cannot be undone.')) return;
+  // If deleting the currently active run, close the live screen
+  if (prodRunActive && prodRunActive.id === id) {
+    prodRunActive = null;
+    if (_prlTimer) { clearInterval(_prlTimer); _prlTimer = null; }
+    document.getElementById('prod-run-live').classList.add('hidden');
+  }
   prodRunSaveAll(prodRunLoad().filter(r=>r.id!==id));
   renderProdRuns();
   showToast('Run deleted');
+  // Also delete from Supabase
+  const sb = getSupabaseClient();
+  if (sb) {
+    sb.from('production_runs').delete().eq('id', id)
+      .then(({error}) => {
+        if (error) console.error('[SB Delete] production_runs failed:', error.message);
+        else console.log('[SB Delete] Run removed from cloud:', id);
+      });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -20483,6 +20536,52 @@ const _tableSync = {
       startedAt: r.started_at, completedAt: r.completed_at,
       leadOperator: r.lead_operator, notes: r.notes }),
     pages: ['prod-run','schedule','dashboard','inv-detail','acct-costing'],
+    postFetch: (runs) => {
+      if (!prodRunActive) return;
+      const remote = runs.find(r => r.id === prodRunActive.id);
+      if (!remote) return;
+
+      // Remote is source of truth for everything.
+      // Only thing we preserve locally: active crew timer start times
+      // so elapsed clocks keep ticking on this device.
+      const activeTimers = {}; // name → clockInAt for crew still clocked in HERE
+      (prodRunActive.crew||[]).forEach(c => {
+        if (!c.clockOutAt && _prlCrewTimers[c.name]) {
+          activeTimers[c.name] = c.clockInAt;
+        }
+      });
+
+      // Full replace with remote data
+      Object.assign(prodRunActive, remote);
+
+      // Restore/reconcile crew timers
+      (prodRunActive.crew||[]).forEach(c => {
+        if (!c.clockOutAt) {
+          if (activeTimers[c.name]) {
+            // Was clocked in on this device — keep timer running from original clockInAt
+            _prlCrewTimers[c.name] = new Date(c.clockInAt).getTime();
+          } else {
+            // Clocked in on another device — start tracking from clockInAt
+            _prlCrewTimers[c.name] = new Date(c.clockInAt).getTime();
+          }
+        } else {
+          // Clocked out — remove timer
+          delete _prlCrewTimers[c.name];
+        }
+      });
+
+      // Re-render entire live screen if visible
+      if (!document.getElementById('prod-run-live').classList.contains('hidden')) {
+        _prodRunRenderCrew();
+        _prodRunRenderExpendables();
+        _prodRunUpdateCosts();
+        // Sync notes textarea
+        const notesEl = document.getElementById('prl-notes');
+        if (notesEl && document.activeElement !== notesEl) {
+          notesEl.value = prodRunActive.notes || '';
+        }
+      }
+    },
   },
   production_schedule_blocks: {
     key: '420craft_schedule',
