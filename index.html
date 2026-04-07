@@ -1091,27 +1091,19 @@ function hideAuthGate(user) {
   // Add user badge to topbar
   setTimeout(() => addUserBadge(user), 500);
 
-  // Pull fresh data from Supabase then check for active run
+  // Check for any in-progress run and notify — don't redirect
   setTimeout(async () => {
     try {
-      // Force a fresh sync of production_runs from cloud
       if (typeof _remoteSync === 'function' && SUPABASE_CONFIG.configured) {
         await _remoteSync('production_runs', true);
       }
-      // Now check for any in-progress run
-      if (!prodRunActive) {
-        const runs = prodRunLoad();
-        const active = runs.find(r => r.status === 'in-progress');
-        if (active) {
-          prodRunActive = active;
-          const navEl = document.querySelector('[onclick*="prod-run"]');
-          showPage('prod-run', navEl);
-          prodRunGoLive();
-          showToast('🔄 Resuming: ' + (active.flavorName || active.sku || active.id));
-        }
+      const runs = prodRunLoad();
+      const active = runs.find(r => r.status === 'in-progress');
+      if (active) {
+        showToast('🔄 Active run: ' + (active.flavorName || active.sku || active.id) + ' — go to Prod Run to resume');
       }
-    } catch(e) { console.warn('Post-login resume failed:', e); }
-  }, 1200); // wait for auth gate animation + Supabase client ready
+    } catch(e) { console.warn('Post-login run check failed:', e); }
+  }, 1200);
 }
 
 function addUserBadge(user) {
@@ -11458,15 +11450,43 @@ function renderProdRuns() {
         ${costs.labor>0?`<span style="background:var(--bg3);border:1px solid var(--border2);padding:4px 12px;border-radius:6px;font-size:12px"><span style="color:var(--blue)">⏱ Labor</span> <strong style="color:var(--text);font-family:var(--font-mono)">$${costs.labor.toFixed(2)}</strong></span>`:''}
         ${costs.materials>0?`<span style="background:var(--bg3);border:1px solid var(--border2);padding:4px 12px;border-radius:6px;font-size:12px"><span style="color:var(--green)">📦 Materials</span> <strong style="color:var(--text);font-family:var(--font-mono)">$${costs.materials.toFixed(2)}</strong></span>`:''}
       </div>
-      ${isLive && (r.crew||[]).some(c=>!c.clockOutAt) ? `
-      <div style="background:rgba(245,166,35,0.06);border:1px solid rgba(245,166,35,0.2);border-radius:8px;padding:10px 14px;margin-bottom:12px">
-        <div style="font-size:9px;font-family:var(--font-mono);color:var(--amber);letter-spacing:2px;margin-bottom:8px">⏱ CREW STILL CLOCKED IN</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${(r.crew||[]).filter(c=>!c.clockOutAt).map(c=>`
-            <button onclick="prodRunQuickClockOut('${r.id}','${c.name}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px">
-              <span>${c.name}</span><span style="font-size:10px;opacity:0.7">Clock Out</span>
-            </button>
-          `).join('')}
+      ${isLive ? `
+      <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px 14px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:9px;font-family:var(--font-mono);color:var(--green);letter-spacing:2px">⏱ CREW</div>
+          <button onclick="prodRunQuickClockIn('${r.id}')" style="background:rgba(57,232,122,0.12);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer;font-weight:700">+ Clock In</button>
+        </div>
+        ${(r.crew||[]).length === 0 ? `<div style="font-size:12px;color:var(--text3);text-align:center;padding:6px 0">No crew clocked in</div>` : ''}
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${(()=>{
+            // Group sessions by name — show one row per person, summing all sessions
+            const names = [...new Set((r.crew||[]).map(c=>c.name))];
+            return names.map(name => {
+              const sessions = (r.crew||[]).filter(c=>c.name===name);
+              const activeSession = sessions.find(c=>!c.clockOutAt);
+              const completedMins = sessions.filter(c=>c.clockOutAt).reduce((a,c)=>a+(c.totalMins||0),0);
+              const liveMins = activeSession ? Math.round((Date.now()-new Date(activeSession.clockInAt).getTime())/60000) : 0;
+              const totalMins = completedMins + liveMins;
+              const hrs = Math.floor(totalMins/60); const rem = totalMins%60;
+              const timeStr = totalMins>0 ? (hrs>0?`${hrs}h ${rem}m`:`${rem}m`) : '0m';
+              const pos = sessions[sessions.length-1]?.position||'';
+              const sessionCount = sessions.length;
+              return `<div style="display:flex;align-items:center;justify-content:space-between;background:${activeSession?'rgba(57,232,122,0.05)':'var(--bg2)'};border:1px solid ${activeSession?'rgba(57,232,122,0.2)':'var(--border2)'};border-radius:6px;padding:7px 10px">
+                <div>
+                  <span style="font-weight:600;font-size:13px;color:var(--text)">${name}</span>
+                  ${pos?`<span style="font-size:11px;color:var(--text3);margin-left:6px">${pos}</span>`:''}
+                  ${sessionCount>1?`<span style="font-size:10px;color:var(--purple);margin-left:6px;font-family:var(--font-mono)">${sessionCount} sessions</span>`:''}
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-family:var(--font-mono);font-size:11px;color:${activeSession?'var(--green)':'var(--text3)'}">${activeSession?'🟢':''} ${timeStr}</span>
+                  ${activeSession
+                    ? `<button onclick="prodRunQuickClockOut('${r.id}','${name}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600">Clock Out</button>`
+                    : `<button onclick="prodRunQuickClockIn('${r.id}','${name}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600">↩ Clock In</button>`
+                  }
+                </div>
+              </div>`;
+            }).join('');
+          })()}
         </div>
       </div>` : ''}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -11699,6 +11719,51 @@ function prodRunPark() {
   showToast('🅿 Run parked — resume any time from the list');
 }
 
+function prodRunQuickClockIn(runId, prefillName) {
+  const runs = prodRunLoad();
+  const run = runs.find(r => r.id === runId);
+  if (!run) return;
+
+  const nameInput = prefillName || prompt('Crew member name:');
+  if (!nameInput || !nameInput.trim()) return;
+  const trimmed = nameInput.trim();
+
+  // Block if already actively clocked in this session
+  if ((run.crew||[]).find(c => c.name === trimmed && !c.clockOutAt)) {
+    showToast('⚠ ' + trimmed + ' is already clocked in'); return;
+  }
+
+  // Re-clock-in allowed — pull rate/position from most recent previous session
+  const prevSession = [...(run.crew||[])].reverse().find(c => c.name === trimmed);
+  const rosterMatch = operatorLoad().find(o => o.name.toLowerCase() === trimmed.toLowerCase());
+  const sessionNum = (run.crew||[]).filter(c => c.name === trimmed).length + 1;
+
+  if (!run.crew) run.crew = [];
+  run.crew.push({
+    name: trimmed,
+    position: prevSession?.position || rosterMatch?.position || '',
+    rate: prevSession?.rate || rosterMatch?.rate || 0,
+    clockInAt: new Date().toISOString(),
+    clockOutAt: null,
+    totalMins: 0,
+    session: sessionNum
+  });
+
+  const idx = runs.findIndex(r => r.id === runId);
+  runs[idx] = run;
+  prodRunSaveAll(runs);
+
+  const sb = getSupabaseClient();
+  if (sb) {
+    sb.from('production_runs').upsert({ id: run.id, crew: run.crew, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      .then(({error}) => { if (error) console.error('[SB QuickClockIn]', error.message); });
+  }
+
+  renderProdRuns();
+  const msg = sessionNum > 1 ? '⏱ ' + trimmed + ' clocked back in (session ' + sessionNum + ')' : '⏱ ' + trimmed + ' clocked in';
+  showToast(msg);
+}
+
 function prodRunQuickClockOut(runId, name) {
   const runs = prodRunLoad();
   const run = runs.find(r => r.id === runId);
@@ -11779,26 +11844,30 @@ function prodRunCloseClockInModal() {
 function prodRunDoClockIn() {
   const name = document.getElementById('prl-crew-name').value.trim();
   if (!name) return;
-  // Check not already clocked in
+  // Block if already actively clocked in this session
   if ((prodRunActive.crew||[]).find(c=>c.name===name&&!c.clockOutAt)) {
     showToast('⚠ '+name+' is already clocked in'); return;
   }
   if (!prodRunActive.crew) prodRunActive.crew=[];
-  // Auto-fill position and rate from operator roster
+  // Re-clock-in: pull rate/position from most recent previous session
+  const prevSession = [...prodRunActive.crew].reverse().find(c=>c.name===name);
   const rosterMatch = operatorLoad().find(o=>o.name.toLowerCase()===name.toLowerCase());
+  const sessionNum = prodRunActive.crew.filter(c=>c.name===name).length + 1;
   const entry = {
     name,
-    position: rosterMatch?.position || '',
-    rate: rosterMatch?.rate || 0,
-    clockInAt: new Date().toISOString(), clockOutAt: null, totalMins: 0
+    position: prevSession?.position || rosterMatch?.position || '',
+    rate: prevSession?.rate || rosterMatch?.rate || 0,
+    clockInAt: new Date().toISOString(), clockOutAt: null, totalMins: 0,
+    session: sessionNum
   };
   prodRunActive.crew.push(entry);
   _prlCrewTimers[name] = Date.now();
   prodRunCloseClockInModal();
-  prodRunSaveActive(true); // immediate — push to cloud so other devices see it
+  prodRunSaveActive(true);
   _prodRunRenderCrew();
   _prodRunUpdateCosts();
-  showToast('⏱ '+name+' clocked in');
+  const msg = sessionNum > 1 ? '⏱ '+name+' clocked back in (session '+sessionNum+')' : '⏱ '+name+' clocked in';
+  showToast(msg);
 }
 
 function prodRunClockOut(name) {
@@ -11826,22 +11895,31 @@ function _prodRunRenderCrew(soft=false) {
   if (!el || !prodRunActive) return;
   const crew = prodRunActive.crew||[];
   if (!crew.length) { el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">No crew clocked in yet</div>'; return; }
-  el.innerHTML = crew.map(c=>{
-    const isActive = !c.clockOutAt;
-    const liveMs   = isActive ? Date.now()-new Date(c.clockInAt).getTime() : 0;
-    const totalMs  = (c.totalMins||0)*60000 + liveMs;
+  // Group by name — one card per person, summing all sessions
+  const names = [...new Set(crew.map(c=>c.name))];
+  el.innerHTML = names.map(name=>{
+    const sessions = crew.filter(c=>c.name===name);
+    const activeSession = sessions.find(c=>!c.clockOutAt);
+    const completedMs = sessions.filter(c=>c.clockOutAt).reduce((a,c)=>a+(c.totalMins||0)*60000,0);
+    const liveMs = activeSession ? Date.now()-new Date(activeSession.clockInAt).getTime() : 0;
+    const totalMs = completedMs + liveMs;
     const hrs  = Math.floor(totalMs/3600000);
     const mins = Math.floor((totalMs%3600000)/60000);
-    const cost = c.rate>0 ? ((totalMs/3600000)*c.rate) : 0;
-    return `<div style="background:${isActive?'rgba(126,211,33,0.06)':'var(--bg3)'};border:1px solid ${isActive?'var(--border)':'var(--border2)'};border-radius:8px;padding:12px;margin-bottom:8px">
+    const rate = sessions[sessions.length-1]?.rate||0;
+    const cost = rate>0 ? (totalMs/3600000)*rate : 0;
+    const sessionCount = sessions.length;
+    return `<div style="background:${activeSession?'rgba(126,211,33,0.06)':'var(--bg3)'};border:1px solid ${activeSession?'var(--border)':'var(--border2)'};border-radius:8px;padding:12px;margin-bottom:8px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div style="font-weight:700;font-size:13px;color:var(--text)">${c.name}</div>
-        ${isActive
-          ?`<button onclick="prodRunClockOut('${c.name}')" style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.25);color:var(--red);border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer">Clock Out</button>`
-          :`<span style="font-size:10px;font-family:var(--font-mono);color:var(--text3)">DONE</span>`}
+        <div>
+          <span style="font-weight:700;font-size:13px;color:var(--text)">${name}</span>
+          ${sessionCount>1?`<span style="font-size:10px;color:var(--purple);margin-left:6px;font-family:var(--font-mono)">${sessionCount}x</span>`:''}
+        </div>
+        ${activeSession
+          ?`<button onclick="prodRunClockOut('${name}')" style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.25);color:var(--red);border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer">Clock Out</button>`
+          :`<button onclick="prodRunClockIn()" style="background:rgba(57,232,122,.1);border:1px solid rgba(57,232,122,.25);color:var(--green);border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer">↩ Clock In</button>`}
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px">
-        <span style="color:${isActive?'var(--green)':'var(--text3)'};font-family:var(--font-mono)">${isActive?'🟢':'⬛'} ${hrs}h ${mins}m</span>
+        <span style="color:${activeSession?'var(--green)':'var(--text3)'};font-family:var(--font-mono)">${activeSession?'🟢':'⬛'} ${hrs}h ${mins}m</span>
         ${cost>0?`<span style="color:var(--text3)">$${cost.toFixed(2)}</span>`:'<span style="color:var(--text3)">no rate set</span>'}
       </div>
     </div>`;
