@@ -2625,6 +2625,31 @@ window.addEventListener('load', function() {
               <input class="form-input" type="number" id="consumable-reorder-qty" placeholder="0" min="0" step="1">
             </div>
 
+            <!-- Lead time + criticality -->
+            <div style="grid-column:1/-1;border-top:1px solid var(--border2);padding-top:4px;margin-top:4px">
+              <div style="font-size:9px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px">ORDERING INTELLIGENCE</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Lead Time <span style="font-size:10px;color:var(--text3)">(days to arrive)</span></label>
+              <input class="form-input" type="number" id="consumable-lead-time" placeholder="e.g. 2" min="0" step="1">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Criticality</label>
+              <select class="form-input" id="consumable-criticality">
+                <option value="standard">Standard — can wait a few days</option>
+                <option value="high">High — needed for every run</option>
+                <option value="critical">Critical — cannot overnight (HPLC, solvents)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Units Per Batch <span style="font-size:10px;color:var(--text3)">(consumed per production run)</span></label>
+              <input class="form-input" type="number" id="consumable-per-batch" placeholder="0" min="0" step="0.01">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Monthly Budget Cap ($)</label>
+              <input class="form-input" type="number" id="consumable-budget-cap" placeholder="0.00" min="0" step="0.01">
+            </div>
+
             <!-- Barcode section -->
             <div class="form-group" style="grid-column:1/-1;border-top:1px solid var(--border2);padding-top:16px;margin-top:4px">
               <label class="form-label">Barcode / QR Code</label>
@@ -2926,6 +2951,80 @@ window.addEventListener('load', function() {
       </select>
     </div>
     <div id="prod-runs-list"></div>
+  </div>
+
+
+  <!-- ════════ PALLET MAP PAGE ════════ -->
+  <div class="page" id="page-pallet-map">
+    <div style="padding:24px;max-width:1200px;margin:0 auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <div style="font-family:var(--font-display);font-size:22px;letter-spacing:1px;color:var(--text)">PALLET MAP</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">52 spaces · click any space to assign or clear</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="palletMapClear()" class="btn btn-ghost" style="font-size:12px">🗑 Clear All</button>
+          <button onclick="palletMapExport()" class="btn btn-ghost" style="font-size:12px">📋 Export</button>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:6px"><div style="width:16px;height:16px;border-radius:4px;background:var(--bg3);border:1px solid var(--border2)"></div>Empty</div>
+        <div style="display:flex;align-items:center;gap:6px"><div style="width:16px;height:16px;border-radius:4px;background:rgba(126,211,33,0.2);border:1px solid var(--green)"></div>Occupied</div>
+        <div style="display:flex;align-items:center;gap:6px"><div style="width:16px;height:16px;border-radius:4px;background:rgba(255,77,109,0.2);border:1px solid var(--red)"></div>Reserved / Outgoing</div>
+        <div style="display:flex;align-items:center;gap:6px"><div style="width:16px;height:16px;border-radius:4px;background:rgba(255,184,48,0.2);border:1px solid var(--amber)"></div>Mixed / Partial</div>
+      </div>
+
+      <!-- Stats bar -->
+      <div id="pallet-stats" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px"></div>
+
+      <!-- Grid -->
+      <div id="pallet-grid" style="display:grid;grid-template-columns:repeat(13,1fr);gap:6px;margin-bottom:24px"></div>
+
+      <!-- Assignment modal -->
+      <div id="pallet-assign-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px">
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:100%;max-width:480px;padding:28px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+            <div style="font-family:var(--font-display);font-size:16px;color:var(--green)" id="pallet-modal-title">PALLET SPACE</div>
+            <button onclick="document.getElementById('pallet-assign-modal').classList.add('hidden')" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
+          </div>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">SKU</label>
+              <select class="form-input" id="pallet-modal-sku">
+                <option value="">— Empty —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Batch Code</label>
+              <input class="form-input" id="pallet-modal-batch" placeholder="Batch code">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cases</label>
+              <input class="form-input" type="number" id="pallet-modal-cases" placeholder="0" min="0">
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Status</label>
+              <select class="form-input" id="pallet-modal-status">
+                <option value="occupied">Occupied — in stock</option>
+                <option value="reserved">Reserved — going out soon</option>
+                <option value="partial">Partial — mixed or partial pallet</option>
+                <option value="empty">Empty — clear this space</option>
+              </select>
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Notes</label>
+              <input class="form-input" id="pallet-modal-notes" placeholder="e.g. AppGirls order, going out Thursday">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:20px">
+            <button onclick="palletModalSave()" class="btn btn-primary" style="flex:1">✓ Save Space</button>
+            <button onclick="palletModalClear()" class="btn btn-ghost" style="width:auto">🗑 Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ════════ PRODUCTION SCHEDULE PAGE ════════ -->
@@ -5411,6 +5510,223 @@ function _renderHistoryPage() {
 // REORDER QUEUE
 // ══════════════════════════════════════════
 function renderReorder() {
+  const items      = consumableLoad();
+  const upcoming   = _getUpcomingProductionRuns(); // batches planned in next 30 days
+  const container  = document.getElementById('reorder-content');
+  if (!container) return;
+
+  // ── Calculate smart reorder status for each item ──────────
+  const now = new Date();
+  const alerts = items.map(item => {
+    const stock     = parseFloat(item.stockOnHand || 0);
+    const reorder   = parseFloat(item.reorderPoint || 0);
+    const qty       = parseFloat(item.reorderQty || 0);
+    const leadDays  = parseInt(item.leadTime || 1);
+    const perBatch  = parseFloat(item.perBatch || 0);
+    const crit      = item.criticality || 'standard';
+    const unitCost  = parseFloat(item.trueCostPerUnit || item.unitCost || 0);
+
+    // How many production runs in next leadDays?
+    const runsInLeadWindow = upcoming.filter(r => {
+      const diff = (new Date(r.date) - now) / 86400000;
+      return diff >= 0 && diff <= leadDays;
+    }).length;
+
+    // How much of this item will be consumed before reorder arrives?
+    const consumedBeforeArrival = perBatch * runsInLeadWindow;
+    const projectedStock = stock - consumedBeforeArrival;
+    const orderCost = qty * unitCost;
+
+    // Status logic
+    let status, urgency, reason;
+    if (crit === 'critical' && stock <= reorder * 2) {
+      status = 'ORDER NOW'; urgency = 5;
+      reason = '⚠ Critical item — cannot rush ship. Order well ahead.';
+    } else if (projectedStock <= 0) {
+      status = 'ORDER NOW'; urgency = 4;
+      reason = `Will run out in ${leadDays} day window (${runsInLeadWindow} runs planned)`;
+    } else if (stock <= reorder) {
+      status = 'ORDER NOW'; urgency = 3;
+      reason = `Below reorder point (${stock} on hand, reorder at ${reorder})`;
+    } else if (stock <= reorder * 1.5) {
+      status = 'ORDER SOON'; urgency = 2;
+      reason = `Approaching reorder point — order within ${Math.ceil(leadDays/2)} days`;
+    } else {
+      status = 'OK'; urgency = 0;
+      reason = `${stock} on hand, reorder at ${reorder}`;
+    }
+
+    return { ...item, stock, reorder, qty, leadDays, crit, projectedStock,
+             consumedBeforeArrival, runsInLeadWindow, unitCost, orderCost,
+             status, urgency, reason };
+  }).sort((a,b) => b.urgency - a.urgency);
+
+  const critical   = alerts.filter(a => a.urgency >= 3);
+  const watchlist  = alerts.filter(a => a.urgency === 2);
+  const ok         = alerts.filter(a => a.urgency === 0);
+
+  // ── Total order cost if you ordered everything needed ────
+  const totalOrderCost = critical.reduce((s,a) => s + a.orderCost, 0);
+
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+      <div>
+        <div style="font-family:var(--font-display);font-size:20px;color:var(--text)">REORDER INTELLIGENCE</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">Based on lead times, criticality, and upcoming production runs</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        ${critical.length > 0 ? `<div style="background:rgba(255,77,109,0.12);border:1px solid rgba(255,77,109,0.3);border-radius:8px;padding:8px 16px;text-align:center">
+          <div style="font-size:11px;color:var(--red);font-family:var(--font-mono)">NEEDS ORDER NOW</div>
+          <div style="font-family:var(--font-display);font-size:22px;color:var(--red)">${critical.length} items</div>
+          <div style="font-size:11px;color:var(--text3)">~$${totalOrderCost.toFixed(0)} total</div>
+        </div>` : ''}
+        <button onclick="reorderGeneratePO()" style="background:var(--green);color:#0a0e08;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer">📋 Generate PO List</button>
+      </div>
+    </div>
+
+    ${critical.length > 0 ? `
+    <div style="margin-bottom:20px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--red);letter-spacing:2px;margin-bottom:10px">🚨 ORDER IMMEDIATELY (${critical.length})</div>
+      ${critical.map(a => _renderReorderCard(a)).join('')}
+    </div>` : ''}
+
+    ${watchlist.length > 0 ? `
+    <div style="margin-bottom:20px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--amber);letter-spacing:2px;margin-bottom:10px">⚠ WATCH LIST — ORDER SOON (${watchlist.length})</div>
+      ${watchlist.map(a => _renderReorderCard(a)).join('')}
+    </div>` : ''}
+
+    ${ok.length > 0 ? `
+    <div>
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--green);letter-spacing:2px;margin-bottom:10px">✅ FULLY STOCKED (${ok.length})</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+        ${ok.map(a => `<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600;color:var(--text);font-size:13px">${a.name}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${a.stock} ${a.unit||'units'} on hand</div>
+          </div>
+          <span style="color:var(--green);font-size:18px">✓</span>
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${critical.length === 0 && watchlist.length === 0 ? `
+    <div style="text-align:center;padding:60px;color:var(--green)">
+      <div style="font-size:48px;margin-bottom:12px">✅</div>
+      <div style="font-size:18px;font-weight:700">All consumables fully stocked</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:6px">Nothing needs ordering right now</div>
+    </div>` : ''}
+  `;
+}
+
+function _renderReorderCard(a) {
+  const critColor = a.urgency >= 4 ? 'var(--red)' : a.urgency >= 3 ? 'var(--orange,#f5a623)' : 'var(--amber)';
+  const critLabel = a.crit === 'critical' ? '🔬 CRITICAL — NO OVERNIGHT' : a.crit === 'high' ? '⚡ HIGH PRIORITY' : '📦 STANDARD';
+  return `<div style="background:var(--card);border:1px solid ${critColor};border-left:4px solid ${critColor};border-radius:10px;padding:16px;margin-bottom:10px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+          <span style="font-weight:700;font-size:15px;color:var(--text)">${a.name}</span>
+          <span style="background:rgba(255,77,109,0.1);border:1px solid rgba(255,77,109,0.25);color:${critColor};padding:2px 8px;border-radius:4px;font-size:10px;font-family:var(--font-mono)">${a.status}</span>
+          <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${critLabel}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:6px">${a.reason}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px">
+          <span><span style="color:var(--text3)">On Hand:</span> <strong style="color:var(--text);font-family:var(--font-mono)">${a.stock} ${a.unit||'units'}</strong></span>
+          <span><span style="color:var(--text3)">Lead Time:</span> <strong style="color:${a.crit==='critical'?'var(--red)':'var(--text)'};font-family:var(--font-mono)">${a.leadDays} days</strong></span>
+          ${a.vendor ? `<span><span style="color:var(--text3)">Vendor:</span> <strong style="color:var(--text)">${a.vendor}</strong></span>` : ''}
+        </div>
+      </div>
+      <div style="text-align:right;min-width:120px">
+        <div style="font-family:var(--font-display);font-size:22px;color:${critColor}">$${(a.orderCost).toFixed(2)}</div>
+        <div style="font-size:11px;color:var(--text3)">Order ${a.qty} ${a.unit||'units'}</div>
+        <div style="font-size:11px;color:var(--text3)">@ $${a.unitCost.toFixed(3)}/unit</div>
+        <button onclick="reorderMarkOrdered('${a.id}')" style="margin-top:8px;background:var(--green);color:#0a0e08;border:none;border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-body)">✓ Mark Ordered</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _getUpcomingProductionRuns() {
+  // Get scheduled production blocks in next 30 days
+  try {
+    const blocks = JSON.parse(localStorage.getItem('420craft_schedule')||'[]');
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + 30*24*60*60*1000);
+    return blocks.filter(b => {
+      const d = new Date(b.startTime || b.date || '');
+      return d >= now && d <= cutoff && b.status !== 'completed';
+    }).map(b => ({ date: b.startTime || b.date || '', sku: b.skuCode || b.sku_code || '' }));
+  } catch(e) { return []; }
+}
+
+function reorderMarkOrdered(id) {
+  const items = consumableLoad();
+  const idx = items.findIndex(c=>c.id===id);
+  if (idx>=0) {
+    items[idx].lastOrderDate = new Date().toISOString().slice(0,10);
+    items[idx].orderPending = true;
+    consumableSaveAll(items);
+    showToast('✓ Marked as ordered — update stock when it arrives');
+    renderReorder();
+  }
+}
+
+function reorderGeneratePO() {
+  const items = consumableLoad();
+  const now = new Date();
+  const upcoming = _getUpcomingProductionRuns();
+  const needsOrder = items.filter(item => {
+    const stock = parseFloat(item.stockOnHand||0);
+    const reorder = parseFloat(item.reorderPoint||0);
+    return stock <= reorder || (item.criticality==='critical' && stock <= reorder*2);
+  });
+
+  if (!needsOrder.length) { showToast('Nothing needs ordering right now'); return; }
+
+  // Build PO text
+  const lines = ['420 CRAFT BEVERAGES — PURCHASE ORDER LIST', '=' .repeat(50),
+    'Generated: ' + now.toLocaleDateString() + ' ' + now.toLocaleTimeString(), ''];
+
+  // Group by vendor
+  const byVendor = {};
+  needsOrder.forEach(item => {
+    const v = item.vendor || 'Unknown Vendor';
+    if (!byVendor[v]) byVendor[v] = [];
+    byVendor[v].push(item);
+  });
+
+  let totalCost = 0;
+  Object.entries(byVendor).forEach(([vendor, vItems]) => {
+    lines.push('VENDOR: ' + vendor);
+    if (vItems[0]?.vendorEmail) lines.push('Email: ' + vItems[0].vendorEmail);
+    lines.push('-'.repeat(40));
+    vItems.forEach(item => {
+      const qty = item.reorderQty || 1;
+      const cost = qty * (item.trueCostPerUnit||item.unitCost||0);
+      totalCost += cost;
+      const urgency = item.criticality === 'critical' ? ' *** CRITICAL — ORDER IMMEDIATELY ***' : '';
+      lines.push(`  ${item.name}: ${qty} ${item.unit||'units'} @ $${(item.trueCostPerUnit||item.unitCost||0).toFixed(3)} = $${cost.toFixed(2)}${urgency}`);
+      if (item.leadTime) lines.push(`    Lead time: ${item.leadTime} days`);
+    });
+    lines.push('');
+  });
+
+  lines.push('='.repeat(50));
+  lines.push('TOTAL ESTIMATED COST: $' + totalCost.toFixed(2));
+
+  // Show in a modal or copy to clipboard
+  const text = lines.join('\n');
+  navigator.clipboard?.writeText(text).then(() => {
+    showToast('📋 PO list copied to clipboard!');
+  }).catch(() => {
+    // Fallback: show in alert
+    alert(text);
+  });
+}
+
+// PLACEHOLDER for old renderReorder that may have been there
+function _oldRenderReorder() {
   const brandF_ro = getGlobalBrand();
   const lowSkus = skuData.filter(s => {
     if (brandF_ro && getBrandLine(s.SKU||s.Full_SKU||'') !== brandF_ro) return false;
@@ -10754,6 +11070,15 @@ function _consumableSetModalFields(c) {
   document.getElementById('consumable-stock').value          = c.stockOnHand||'';
   document.getElementById('consumable-reorder-pt').value     = c.reorderPoint||'';
   document.getElementById('consumable-reorder-qty').value    = c.reorderQty||'';
+  // New intelligence fields
+  const ltEl2 = document.getElementById('consumable-lead-time');
+  const crEl2 = document.getElementById('consumable-criticality');
+  const pbEl2 = document.getElementById('consumable-per-batch');
+  const bcEl2 = document.getElementById('consumable-budget-cap');
+  if (ltEl2) ltEl2.value = c.leadTime || 1;
+  if (crEl2) crEl2.value = c.criticality || 'standard';
+  if (pbEl2) pbEl2.value = c.perBatch || 0;
+  if (bcEl2) bcEl2.value = c.budgetCap || 0;
   _consumableUpdateTotalCost();
 }
 
@@ -10811,11 +11136,17 @@ function consumableSave() {
     alertEl.classList.remove('hidden'); return;
   }
 
+  const leadTime    = parseInt(document.getElementById('consumable-lead-time')?.value)||1;
+  const criticality = document.getElementById('consumable-criticality')?.value || 'standard';
+  const perBatch    = parseFloat(document.getElementById('consumable-per-batch')?.value)||0;
+  const budgetCap   = parseFloat(document.getElementById('consumable-budget-cap')?.value)||0;
+
   const record = { name, unitCost, unit, category,
     vendor, vendorEmail, vendorPhone, vendorAcct,
     vendor2, vendor2Email, vendor2Phone, vendor2Acct,
     lastPurchaseDate, lastUnitCost, lastShipping, lastOrderQty, trueCostPerUnit,
     stockOnHand, reorderPoint, reorderQty,
+    leadTime, criticality, perBatch, budgetCap,
     barcode: document.getElementById('consumable-barcode')?.value.trim() || '' };
 
   const items = consumableLoad();
@@ -20456,6 +20787,160 @@ document.addEventListener('DOMContentLoaded', () => { if (!_sbClient) _initSupab
 setTimeout(() => { if (!_sbClient) _initSupabaseWithRetry(); }, 1000);
 setTimeout(() => { if (!_sbClient) _initSupabaseWithRetry(); }, 3000);
 
+
+// ═══════════════════════════════════════════════════════════════
+// PALLET MAP — 52-space warehouse floor tracker
+// Matt manages this from his laptop or iPad
+// ═══════════════════════════════════════════════════════════════
+
+let _palletEditSpace = null;
+const PALLET_TOTAL = 52;
+
+function _palletLoad() {
+  try { return JSON.parse(localStorage.getItem('420craft_pallet_map') || '[]'); }
+  catch(e) { return []; }
+}
+
+function _palletSave(spaces) {
+  localStorage.setItem('420craft_pallet_map', JSON.stringify(spaces));
+  // Sync to Supabase as a single JSON blob in settings
+  if (SUPABASE_CONFIG.remoteFirst) {
+    const sb = getSupabaseClient();
+    if (sb) sb.from('settings').upsert({ key: 'pallet_map', value: JSON.stringify(spaces) }, { onConflict: 'key' }).catch(()=>{});
+  }
+}
+
+function renderPalletMap() {
+  const spaces = _palletLoad();
+  const grid   = document.getElementById('pallet-grid');
+  const stats  = document.getElementById('pallet-stats');
+  if (!grid) return;
+
+  // Stats
+  const occupied  = spaces.filter(s => s.status === 'occupied').length;
+  const reserved  = spaces.filter(s => s.status === 'reserved').length;
+  const partial   = spaces.filter(s => s.status === 'partial').length;
+  const empty     = PALLET_TOTAL - occupied - reserved - partial;
+  const totalCases = spaces.reduce((s,sp) => s + parseInt(sp.cases||0), 0);
+
+  stats.innerHTML = [
+    ['📦 Occupied', occupied, 'var(--green)'],
+    ['🔴 Reserved', reserved, 'var(--red)'],
+    ['🟡 Partial',  partial,  'var(--amber)'],
+    ['⬜ Empty',    empty,    'var(--text3)'],
+    ['📊 Total Cases', totalCases, 'var(--text)'],
+  ].map(([label, val, color]) =>
+    `<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:10px 16px;text-align:center">
+      <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${label}</div>
+      <div style="font-size:20px;font-weight:700;color:${color};font-family:var(--font-display)">${val}</div>
+    </div>`
+  ).join('');
+
+  // Grid — 52 spaces (4 rows of 13)
+  let html = '';
+  for (let i = 1; i <= PALLET_TOTAL; i++) {
+    const sp = spaces.find(s => s.space === i);
+    const status = sp?.status || 'empty';
+    const colors = {
+      occupied: { bg:'rgba(126,211,33,0.12)', border:'var(--green)', text:'var(--green)' },
+      reserved: { bg:'rgba(255,77,109,0.12)', border:'var(--red)',   text:'var(--red)' },
+      partial:  { bg:'rgba(255,184,48,0.12)', border:'var(--amber)', text:'var(--amber)' },
+      empty:    { bg:'var(--bg3)',            border:'var(--border2)',text:'var(--text3)' },
+    };
+    const c = colors[status] || colors.empty;
+    const shortSku = sp?.sku ? sp.sku.replace(' 25 MG','').replace(' 50 MG','').replace(' 10 MG','').replace(' 5 MG','').substring(0,12) : '';
+    html += `<div onclick="palletSpaceClick(${i})"
+      style="background:${c.bg};border:2px solid ${c.border};border-radius:8px;padding:8px 4px;cursor:pointer;text-align:center;min-height:70px;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:all .15s;user-select:none"
+      title="${sp ? (sp.sku||'') + ' · ' + (sp.cases||0) + ' cases' : 'Empty'}">
+      <div style="font-size:9px;font-family:var(--font-mono);color:${c.text};font-weight:700">P${String(i).padStart(2,'0')}</div>
+      ${sp && status !== 'empty' ? `
+        <div style="font-size:9px;color:var(--text2);margin-top:2px;line-height:1.2;word-break:break-word">${shortSku}</div>
+        <div style="font-size:9px;font-family:var(--font-mono);color:${c.text};margin-top:1px">${sp.cases||0}cs</div>
+        ${sp.notes ? `<div style="font-size:8px;color:var(--text3);margin-top:1px;overflow:hidden;max-width:100%">${sp.notes.substring(0,15)}</div>` : ''}
+      ` : '<div style="font-size:18px;color:var(--border2)">+</div>'}
+    </div>`;
+  }
+  grid.innerHTML = html;
+
+  // Populate SKU dropdown in modal
+  const skuSel = document.getElementById('pallet-modal-sku');
+  if (skuSel) {
+    const skus = (typeof skuData !== 'undefined' ? skuData : [])
+      .filter(s => (s.OnHand||0) > 0)
+      .sort((a,b) => (a.Full_SKU||'').localeCompare(b.Full_SKU||''));
+    skuSel.innerHTML = '<option value="">— Empty —</option>' +
+      skus.map(s => `<option value="${s.Full_SKU||s.SKU}">${s.Full_SKU||s.SKU} (${s.OnHand||0} cases)</option>`).join('');
+  }
+}
+
+function palletSpaceClick(spaceNum) {
+  _palletEditSpace = spaceNum;
+  const spaces = _palletLoad();
+  const sp     = spaces.find(s => s.space === spaceNum);
+  document.getElementById('pallet-modal-title').textContent = `PALLET SPACE P${String(spaceNum).padStart(2,'0')}`;
+  document.getElementById('pallet-modal-sku').value    = sp?.sku    || '';
+  document.getElementById('pallet-modal-batch').value  = sp?.batch  || '';
+  document.getElementById('pallet-modal-cases').value  = sp?.cases  || '';
+  document.getElementById('pallet-modal-status').value = sp?.status || 'occupied';
+  document.getElementById('pallet-modal-notes').value  = sp?.notes  || '';
+  document.getElementById('pallet-assign-modal').classList.remove('hidden');
+}
+
+function palletModalSave() {
+  const spaces = _palletLoad();
+  const idx    = spaces.findIndex(s => s.space === _palletEditSpace);
+  const status = document.getElementById('pallet-modal-status').value;
+
+  if (status === 'empty') {
+    if (idx >= 0) spaces.splice(idx, 1);
+  } else {
+    const record = {
+      space:  _palletEditSpace,
+      sku:    document.getElementById('pallet-modal-sku').value,
+      batch:  document.getElementById('pallet-modal-batch').value.trim().toUpperCase(),
+      cases:  parseInt(document.getElementById('pallet-modal-cases').value)||0,
+      status,
+      notes:  document.getElementById('pallet-modal-notes').value.trim(),
+      updated: new Date().toISOString(),
+    };
+    if (idx >= 0) spaces[idx] = record;
+    else spaces.push(record);
+  }
+  _palletSave(spaces);
+  document.getElementById('pallet-assign-modal').classList.add('hidden');
+  renderPalletMap();
+  showToast(`✓ Space P${String(_palletEditSpace).padStart(2,'0')} updated`);
+}
+
+function palletModalClear() {
+  const spaces = _palletLoad().filter(s => s.space !== _palletEditSpace);
+  _palletSave(spaces);
+  document.getElementById('pallet-assign-modal').classList.add('hidden');
+  renderPalletMap();
+  showToast(`Space P${String(_palletEditSpace).padStart(2,'0')} cleared`);
+}
+
+function palletMapClear() {
+  if (!confirm('Clear ALL 52 pallet spaces? This cannot be undone.')) return;
+  _palletSave([]);
+  renderPalletMap();
+  showToast('Pallet map cleared');
+}
+
+function palletMapExport() {
+  const spaces = _palletLoad();
+  const lines  = ['PALLET MAP — 420 CRAFT BEVERAGES', '='.repeat(50), `As of ${new Date().toLocaleString()}`, ''];
+  for (let i = 1; i <= PALLET_TOTAL; i++) {
+    const sp = spaces.find(s => s.space === i);
+    if (sp && sp.status !== 'empty') {
+      lines.push(`P${String(i).padStart(2,'0')}: ${sp.sku||'Unknown'} · Batch ${sp.batch||'?'} · ${sp.cases||0} cases · ${sp.status.toUpperCase()}${sp.notes?' · '+sp.notes:''}`);
+    } else {
+      lines.push(`P${String(i).padStart(2,'0')}: EMPTY`);
+    }
+  }
+  navigator.clipboard?.writeText(lines.join('\n')).then(() => showToast('📋 Pallet map copied to clipboard'));
+}
+
 // ── LIVE CONNECTION INDICATOR ─────────────────────────────────
 function _updateLiveIndicator(status) {
   const el = document.getElementById('sb-live-indicator');
@@ -20967,6 +21452,8 @@ const _diagShowPage = showPage;
 showPage = function(id, el) {
   _diagShowPage(id, el);
   if (id === 'admin-diagnostics') renderAdminDiagnostics();
+  if (id === 'pallet-map') renderPalletMap();
+  if (id === 'reorder') renderReorder();
 };
 
 // ── ADMIN DIAGNOSTICS PAGE ────────────────────────────────────
