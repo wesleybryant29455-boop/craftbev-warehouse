@@ -20918,15 +20918,7 @@ function _palletRenderCanvas(spaces) {
     </div>`;
   }).join('');
 
-  // Attach drag events if in edit mode
-  if (_palletEditMode) {
-    canvas.onmousemove = palletDragMove;
-    canvas.onmouseup   = palletDragEnd;
-    canvas.onmouseleave = palletDragEnd;
-  } else {
-    canvas.onmousemove = null;
-    canvas.onmouseup   = null;
-  }
+  // Drag events are on document (attached in palletDragStart) — no canvas-level handlers needed
 }
 
 function _palletPopulateSkuDropdown() {
@@ -20939,48 +20931,57 @@ function _palletPopulateSkuDropdown() {
     skus.map(s => `<option value="${s.Full_SKU||s.SKU}">${s.Full_SKU||s.SKU} (${s.OnHand||0} cases on hand)</option>`).join('');
 }
 
-// ── Drag to reposition ─────────────────────────────────────────
+// ── Drag to reposition — uses document-level events for reliability ──
 function palletDragStart(e, id) {
   if (!_palletEditMode) return;
   e.preventDefault();
+  e.stopPropagation();
   _palletDragId = id;
   const el = document.getElementById('ps-' + id);
-  const canvas = document.getElementById('pallet-canvas');
-  const cr = canvas.getBoundingClientRect();
+  if (!el) return;
+  // Offset = where within the element the user clicked
   const er = el.getBoundingClientRect();
   _palletDragOffX = e.clientX - er.left;
   _palletDragOffY = e.clientY - er.top;
   el.style.zIndex = '100';
   el.style.boxShadow = '0 8px 32px rgba(0,0,0,0.5)';
   el.style.cursor = 'grabbing';
+  el.style.pointerEvents = 'none'; // prevents el from capturing events during drag
+
+  // Attach to document so drag works even if mouse leaves canvas
+  document.addEventListener('mousemove', _palletOnDragMove);
+  document.addEventListener('mouseup',   _palletOnDragEnd);
 }
 
-function palletDragMove(e) {
+function _palletOnDragMove(e) {
   if (!_palletDragId) return;
   const canvas = document.getElementById('pallet-canvas');
+  const el     = document.getElementById('ps-' + _palletDragId);
+  if (!el || !canvas) return;
   const cr = canvas.getBoundingClientRect();
-  const el = document.getElementById('ps-' + _palletDragId);
-  if (!el) return;
-  // Snap to 10px grid for cleaner alignment
+  // Raw position relative to canvas, accounting for scroll
   const rawX = e.clientX - cr.left + canvas.scrollLeft - _palletDragOffX;
   const rawY = e.clientY - cr.top  + canvas.scrollTop  - _palletDragOffY;
+  // Snap to 10px grid, clamp to canvas bounds
   const x = Math.max(0, Math.round(rawX / 10) * 10);
   const y = Math.max(0, Math.round(rawY / 10) * 10);
   el.style.left = x + 'px';
   el.style.top  = y + 'px';
 }
 
-function palletDragEnd(e) {
+function _palletOnDragEnd(e) {
   if (!_palletDragId) return;
-  const canvas = document.getElementById('pallet-canvas');
-  const cr = canvas.getBoundingClientRect();
+  document.removeEventListener('mousemove', _palletOnDragMove);
+  document.removeEventListener('mouseup',   _palletOnDragEnd);
+
   const el = document.getElementById('ps-' + _palletDragId);
   if (el) {
     el.style.zIndex = '1';
     el.style.boxShadow = '';
     el.style.cursor = 'grab';
-    const x = parseInt(el.style.left);
-    const y = parseInt(el.style.top);
+    el.style.pointerEvents = '';
+    const x = parseInt(el.style.left) || 0;
+    const y = parseInt(el.style.top)  || 0;
     // Persist new position
     const spaces = _palletLoad();
     const sp = spaces.find(s => s.id === _palletDragId);
@@ -20988,13 +20989,20 @@ function palletDragEnd(e) {
     _palletSave(spaces);
     _palletRenderStats(spaces);
     // Expand canvas if needed
-    const maxX = Math.max(800, ...spaces.map(s => s.x + PALLET_W + 40));
-    const maxY = Math.max(500, ...spaces.map(s => s.y + PALLET_H + 40));
-    canvas.style.minWidth  = maxX + 'px';
-    canvas.style.minHeight = maxY + 'px';
+    const canvas = document.getElementById('pallet-canvas');
+    if (canvas) {
+      const maxX = Math.max(800, ...spaces.map(s => (s.x||0) + PALLET_W + 40));
+      const maxY = Math.max(500, ...spaces.map(s => (s.y||0) + PALLET_H + 40));
+      canvas.style.minWidth  = maxX + 'px';
+      canvas.style.minHeight = maxY + 'px';
+    }
   }
   _palletDragId = null;
 }
+
+// Legacy — kept for compatibility but events now on document
+function palletDragMove(e) { _palletOnDragMove(e); }
+function palletDragEnd(e)  { _palletOnDragEnd(e); }
 
 // ── Edit mode toggle ───────────────────────────────────────────
 function palletToggleEdit() {
