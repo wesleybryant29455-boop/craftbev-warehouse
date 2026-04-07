@@ -5305,16 +5305,41 @@ function logMovement() {
     }
     batchData[bIdx].LastMovement = ts || new Date().toISOString().slice(0,10);
   }
+  // Save to localStorage cache immediately
   saveData();
-  // Immediately push this movement to Sheets
-  sheetsPost('log_movement', movements[movements.length-1]);
+  const movementToLog = movements[movements.length-1];
 
-  alertEl.className = 'alert alert-success';
-  alertEl.textContent = `✓ Logged: ${type} ${qty}x ${sku} ${mg}`;
+  // Show pending state
+  alertEl.style.cssText = 'background:rgba(255,184,48,0.1);border-color:rgba(255,184,48,0.3);color:var(--amber)';
+  alertEl.className = 'alert';
+  alertEl.textContent = '⏳ Saving to database...';
   alertEl.classList.remove('hidden');
-  showToast(`✓ ${type} logged: ${qty} × ${sku} ${mg}`);
-  clearForm(true);
-  setTimeout(() => alertEl.classList.add('hidden'), 4000);
+
+  // Await confirmed Supabase write
+  _sbWriteMovementConfirmed(movementToLog, idx, type, qty).then(confirmed => {
+    if (confirmed) {
+      alertEl.style.cssText = '';
+      alertEl.className = 'alert alert-success';
+      alertEl.textContent = '✓ Logged & saved to database: ' + type + ' ' + qty + 'x ' + sku + ' ' + mg;
+      showToast('✓ ' + type + ' logged: ' + qty + ' x ' + sku + ' ' + mg);
+      sheetsPost('log_movement', movementToLog);
+      clearForm(true);
+      setTimeout(() => alertEl.classList.add('hidden'), 4000);
+    } else {
+      // Rollback
+      movements.pop();
+      if (idx >= 0) {
+        const isAdd = type === 'New Batch' || type === 'Inbound' || type === 'Return';
+        if (isAdd) { skuData[idx].Inbound -= qty; skuData[idx].OnHand -= qty; }
+        else       { skuData[idx].Outbound -= qty; skuData[idx].OnHand += qty; }
+      }
+      saveData();
+      alertEl.style.cssText = '';
+      alertEl.className = 'alert alert-error';
+      alertEl.textContent = '⚠ Database save failed — movement NOT recorded. Check your connection and try again.';
+      showToast('⚠ Save failed — movement not recorded');
+    }
+  });
 }
 function clearForm(keepAlert=false) {
   ['log-sku','log-mg','log-batch','log-operator','log-notes'].forEach(id => document.getElementById(id).value = '');
@@ -20741,7 +20766,10 @@ async function _sbWriteAfterSave(lsKey) {
     }
     console.log(`[SB Write] ${cfg.table}: ${rows.length} records synced`);
   } catch(e) {
-    console.warn(`[SB Write] ${cfg.table} failed (data safe in localStorage):`, e.message);
+    console.error('[SB Write] ' + cfg.table + ' failed — remote behind local. Error:', e.message);
+    if (['movements','batches','shipments'].includes(cfg.table)) {
+      showToast('⚠ ' + cfg.table + ' sync failed — will retry on next save');
+    }
   }
 }
 
