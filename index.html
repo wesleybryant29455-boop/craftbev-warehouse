@@ -2793,7 +2793,10 @@ window.addEventListener('load', function() {
           <div class="section-title">🏗️ PRODUCTION RUNS</div>
           <div class="section-desc">Click-through workflow — start a run, track crew time and expendables live, close it out and log the batch</div>
         </div>
-        <button class="btn btn-primary" onclick="prodRunStartNew()" style="font-size:13px">🏭 Start Production Run</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-ghost" onclick="diagForcePullProdRuns()" style="font-size:12px;border-color:rgba(56,189,248,0.3);color:var(--blue)">⬇ Sync from Cloud</button>
+          <button class="btn btn-primary" onclick="prodRunStartNew()" style="font-size:13px">🏭 Start Production Run</button>
+        </div>
       </div>
     </div>
 
@@ -21888,6 +21891,17 @@ async function renderAdminDiagnostics() {
       </div>
     </div>
 
+    <!-- PROD RUN LIVE SYNC DEBUG -->
+    <div style="background:var(--card);border:1px solid rgba(57,232,122,0.3);border-radius:12px;padding:16px 20px;margin-bottom:16px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--green);letter-spacing:2px;margin-bottom:14px">🏭 PRODUCTION RUN SYNC DEBUG</div>
+      <div id="diag-prodrun-result" style="font-family:var(--font-mono);font-size:11px;background:var(--bg3);border-radius:8px;padding:12px;min-height:60px;max-height:300px;overflow-y:auto;margin-bottom:12px;color:var(--text3)">Click button to test...</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="diagTestProdRunSync()" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer;font-weight:600">🔍 Test Read from Supabase</button>
+        <button onclick="diagForcePushProdRuns()" style="background:rgba(255,184,48,0.1);border:1px solid rgba(255,184,48,0.3);color:var(--amber);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer;font-weight:600">⬆ Force Push Local → Cloud</button>
+        <button onclick="diagForcePullProdRuns()" style="background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.3);color:var(--blue);border-radius:8px;padding:10px 20px;font-size:12px;cursor:pointer;font-weight:600">⬇ Force Pull Cloud → Local</button>
+      </div>
+    </div>
+
     <!-- Data Counts Comparison -->
     <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:16px 20px;margin-bottom:16px">
       <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:14px">📊 DATA INVENTORY — LOCAL vs REMOTE</div>
@@ -21966,6 +21980,100 @@ function diagEnableRemoteFirst() {
   localStorage.setItem('420craft_supabase_config', JSON.stringify(cfg));
   showToast(SUPABASE_CONFIG.remoteFirst ? '🚀 Remote-First mode ON — Supabase is now source of truth' : '📦 Local-First mode — localStorage is source of truth');
   renderAdminDiagnostics();
+}
+
+async function diagTestProdRunSync() {
+  const el = document.getElementById('diag-prodrun-result');
+  if (!el) return;
+  el.innerHTML = 'Testing...';
+  const sb = getSupabaseClient();
+  if (!sb) { el.innerHTML = '❌ No Supabase client — check config'; return; }
+  try {
+    const { data, error } = await sb.from('production_runs').select('*').order('started_at', { ascending: false }).limit(10);
+    if (error) {
+      el.innerHTML = `❌ READ ERROR: ${error.message}\n\nCode: ${error.code}\nHint: ${error.hint||'none'}\n\nThis is likely an RLS policy blocking reads.\nRun this SQL in Supabase:\n\nCREATE POLICY "anon read" ON production_runs FOR SELECT USING (true);\nCREATE POLICY "anon write" ON production_runs FOR ALL USING (true);`;
+    } else {
+      const inProgress = (data||[]).filter(r => r.status === 'in-progress');
+      el.innerHTML = `✅ READ OK — ${(data||[]).length} total runs in Supabase\n🔄 In-progress: ${inProgress.length}\n\n${inProgress.map(r => `• ${r.id}\n  SKU: ${r.sku_code||'?'} | Flavor: ${r.flavor_name||'?'}\n  Started: ${r.started_at||'?'}\n  Crew: ${JSON.stringify(r.crew||[]).slice(0,80)}`).join('\n\n') || '(none in progress)'}`;
+    }
+  } catch(e) {
+    el.innerHTML = `❌ EXCEPTION: ${e.message}`;
+  }
+}
+
+async function diagForcePushProdRuns() {
+  const el = document.getElementById('diag-prodrun-result');
+  if (el) el.innerHTML = 'Pushing...';
+  const sb = getSupabaseClient();
+  if (!sb) { if(el) el.innerHTML = '❌ No Supabase client'; return; }
+  const runs = prodRunLoad();
+  if (!runs.length) { if(el) el.innerHTML = '⚠ No local runs to push'; return; }
+  const toWrite = runs
+    .filter(r => r.id && r.id.length > 3)
+    .map(r => ({
+      id: r.id,
+      batch_code: r.batchCode||r.batch_code||null,
+      sku_code: r.sku||r.sku_code||'',
+      flavor_name: r.flavorName||r.flavor_name||null,
+      status: r.status||'in-progress',
+      crew: r.crew||[],
+      expendables: r.expendables||[],
+      cases_produced: parseInt(r.totalCases||r.cases_produced||0),
+      cost_summary: r.costSummary||r.cost_summary||null,
+      started_at: r.startedAt||r.started_at||null,
+      completed_at: r.completedAt||r.completed_at||null,
+      lead_operator: r.leadOperator||r.lead_operator||null,
+      notes: r.notes||null,
+      updated_at: new Date().toISOString(),
+    }));
+  try {
+    const { error } = await sb.from('production_runs').upsert(toWrite, { onConflict: 'id' });
+    if (error) {
+      if(el) el.innerHTML = `❌ PUSH FAILED: ${error.message}\nCode: ${error.code}\n\nIf this is a permissions error, run in Supabase SQL editor:\nCREATE POLICY "anon write" ON production_runs FOR ALL USING (true);`;
+      showToast('❌ Push failed: ' + error.message);
+    } else {
+      if(el) el.innerHTML = `✅ Pushed ${toWrite.length} runs to Supabase\n\nIDs written:\n${toWrite.map(r=>'• '+r.id+' ('+r.status+')').join('\n')}`;
+      showToast(`✅ ${toWrite.length} runs pushed to cloud`);
+    }
+  } catch(e) {
+    if(el) el.innerHTML = `❌ EXCEPTION: ${e.message}`;
+  }
+}
+
+async function diagForcePullProdRuns() {
+  const el = document.getElementById('diag-prodrun-result');
+  if (el) el.innerHTML = 'Pulling...';
+  const sb = getSupabaseClient();
+  if (!sb) { if(el) el.innerHTML = '❌ No Supabase client'; return; }
+  try {
+    const { data, error } = await sb.from('production_runs').select('*');
+    if (error) {
+      if(el) el.innerHTML = `❌ PULL FAILED: ${error.message}`;
+      return;
+    }
+    const mapped = (data||[]).map(r => ({
+      ...r, id: r.id, batchCode: r.batch_code, sku: r.sku_code,
+      flavorName: r.flavor_name, status: r.status,
+      crew: r.crew||[], expendables: r.expendables||[],
+      totalCases: r.cases_produced, costSummary: r.cost_summary,
+      startedAt: r.started_at, completedAt: r.completed_at,
+      leadOperator: r.lead_operator, notes: r.notes,
+    }));
+    localStorage.setItem('420craft_prod_runs', JSON.stringify(mapped));
+    const active = mapped.find(r => r.status === 'in-progress');
+    if(el) el.innerHTML = `✅ Pulled ${mapped.length} runs from Supabase\nIn-progress: ${mapped.filter(r=>r.status==='in-progress').length}\n\n${active ? '🔄 Active run found: '+active.id+'\n   Flavor: '+(active.flavorName||'?')+'\n\nClick "Resume Active Run" button to go live.' : '(no in-progress run found in Supabase)'}`;
+    if (active && !prodRunActive) {
+      prodRunActive = active;
+      const navEl = document.querySelector('[onclick*="prod-run"]');
+      showPage('prod-run', navEl);
+      prodRunGoLive();
+      showToast('🔄 Resumed: ' + (active.flavorName || active.sku || active.id));
+    } else {
+      showToast(`✅ Pulled ${mapped.length} runs from cloud`);
+    }
+  } catch(e) {
+    if(el) el.innerHTML = `❌ EXCEPTION: ${e.message}`;
+  }
 }
 
 async function diagRunMigration() {
