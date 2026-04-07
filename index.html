@@ -1085,21 +1085,28 @@ function hideAuthGate(user) {
   }
   // Add user badge to topbar
   setTimeout(() => addUserBadge(user), 500);
-  // Auto-resume any active production run
-  setTimeout(() => {
+
+  // Pull fresh data from Supabase then check for active run
+  setTimeout(async () => {
     try {
-      const runs = prodRunLoad();
-      const active = runs.find(r => r.status === 'in-progress');
-      if (active) {
-        prodRunActive = active;
-        // Navigate to prod-run page first
-        const navEl = document.querySelector('[onclick*="prod-run"]');
-        showPage('prod-run', navEl);
-        prodRunGoLive();
-        showToast('🔄 Resuming active production run: ' + (active.flavorName || active.sku || active.id));
+      // Force a fresh sync of production_runs from cloud
+      if (typeof _remoteSync === 'function' && SUPABASE_CONFIG.configured) {
+        await _remoteSync('production_runs', true);
       }
-    } catch(e) { console.warn('Auto-resume check failed:', e); }
-  }, 800);
+      // Now check for any in-progress run
+      if (!prodRunActive) {
+        const runs = prodRunLoad();
+        const active = runs.find(r => r.status === 'in-progress');
+        if (active) {
+          prodRunActive = active;
+          const navEl = document.querySelector('[onclick*="prod-run"]');
+          showPage('prod-run', navEl);
+          prodRunGoLive();
+          showToast('🔄 Resuming: ' + (active.flavorName || active.sku || active.id));
+        }
+      }
+    } catch(e) { console.warn('Post-login resume failed:', e); }
+  }, 1200); // wait for auth gate animation + Supabase client ready
 }
 
 function addUserBadge(user) {
@@ -20918,20 +20925,6 @@ function _initSupabaseWithRetry() {
       // Sync all tables in background, re-renders current page when done
       _remoteSyncAll().then(() => {
         console.log('[Supabase] ✅ Remote data synced');
-        // Auto-resume any in-progress run that came down from cloud
-        try {
-          if (!prodRunActive) {
-            const runs = prodRunLoad();
-            const active = runs.find(r => r.status === 'in-progress');
-            if (active && document.getElementById('auth-gate')?.style?.opacity === '0' || !document.getElementById('auth-gate')) {
-              prodRunActive = active;
-              const navEl = document.querySelector('[onclick*="prod-run"]');
-              showPage('prod-run', navEl);
-              prodRunGoLive();
-              showToast('🔄 Active run resumed: ' + (active.flavorName || active.sku || active.id));
-            }
-          }
-        } catch(e) { console.warn('Post-sync resume failed:', e); }
       }).catch(e => console.warn('[Supabase] Initial sync error:', e.message));
     }
   } else if (_sbInitAttempts < _sbMaxAttempts) {
@@ -21641,36 +21634,36 @@ async function _sbWriteAfterSave(lsKey) {
     if (!rows || !rows.length) return;
 
     if (cfg.appendOnly || cfg.insertOnly) {
-      // Append-only tables (audit_logs, movements) — only insert new rows
-      // For movements: find by created_at threshold
-      // For audit_logs: always append, never update
-      const cutoff = new Date(Date.now() - 10000).toISOString(); // last 10 seconds
+      const cutoff = new Date(Date.now() - 10000).toISOString();
       const newRows = rows.filter(r => (r.created_at||r.Timestamp||'') > cutoff);
       if (newRows.length) {
         const toInsert = newRows.map(cfg.toRow).filter(r => r.batch_code);
         if (toInsert.length) await sb.from(cfg.table).insert(toInsert);
       }
     } else {
-      // Apply table-specific filter if defined (e.g. remove DEMO/test data)
       const rawRows = cfg.filter ? cfg.filter(rows) : rows;
       const toWrite = rawRows.map(cfg.toRow).filter(r => {
-        // Filter out rows with empty required fields
         const firstVal = Object.values(r)[0];
         return firstVal !== '' && firstVal !== null && firstVal !== undefined;
       });
       if (!toWrite.length) return;
+      let result;
       if (cfg.conflict) {
-        await sb.from(cfg.table).upsert(toWrite, { onConflict: cfg.conflict, ignoreDuplicates: false });
+        result = await sb.from(cfg.table).upsert(toWrite, { onConflict: cfg.conflict, ignoreDuplicates: false });
       } else {
-        await sb.from(cfg.table).upsert(toWrite);
+        result = await sb.from(cfg.table).upsert(toWrite);
+      }
+      if (result.error) {
+        console.error(`[SB Write] ${cfg.table} error:`, result.error.message);
+        if (lsKey === '420craft_prod_runs') showToast('⚠ Run sync failed: ' + result.error.message);
+      } else {
+        console.log(`[SB Write] ${cfg.table}: ${toWrite.length} records synced ✅`);
+        if (lsKey === '420craft_prod_runs') console.log('[SB Write] Prod run written to cloud:', toWrite.map(r=>r.id));
       }
     }
-    console.log(`[SB Write] ${cfg.table}: ${rows.length} records synced`);
   } catch(e) {
-    console.error('[SB Write] ' + cfg.table + ' failed — remote behind local. Error:', e.message);
-    if (['movements','batches','shipments'].includes(cfg.table)) {
-      showToast('⚠ ' + cfg.table + ' sync failed — will retry on next save');
-    }
+    console.error('[SB Write] ' + cfg.table + ' failed:', e.message);
+    if (lsKey === '420craft_prod_runs') showToast('⚠ Run sync error: ' + e.message);
   }
 }
 
