@@ -1214,6 +1214,7 @@ window.addEventListener('load', function() {
       <div class="nav-item" onclick="showPage('inv-audit',this)"><span class="icon">🔎</span> Inventory Audit</div>
       <div class="nav-item" onclick="showPage('batch-calc',this)"><span class="icon">🧮</span> Batch Calculator</div>
       <div class="nav-item" onclick="showPage('reorder',this)"><span class="icon">🔔</span> Reorder Queue</div>
+      <div class="nav-item" onclick="showPage('pallet-map',this)"><span class="icon">📦</span> Pallet Map</div>
       <div class="nav-item" onclick="showPage('brand-velocity',this)"><span class="icon">⚡</span> Brand Velocity</div>
       <div class="nav-item" onclick="showPage('movement-history',this)"><span class="icon">📋</span> Movement History</div>
       <div class="nav-item" onclick="showPage('sku-manager',this)"><span class="icon">🏷️</span> SKU Manager</div>
@@ -1739,11 +1740,9 @@ window.addEventListener('load', function() {
 
   <!-- ════════ REORDER PAGE ════════ -->
   <div class="page" id="page-reorder">
-    <div class="section-header">
-      <div class="section-title">REORDER QUEUE</div>
-      <div class="section-desc">SKUs with low or critical stock levels</div>
+    <div style="padding:24px;max-width:1100px;margin:0 auto" id="reorder-content">
+      <div style="text-align:center;padding:60px;color:var(--text3)">🔍 Loading reorder intelligence...</div>
     </div>
-    <div class="grid-3" id="reorder-grid" style="margin-bottom:0"></div>
   </div>
 
 
