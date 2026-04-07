@@ -419,6 +419,11 @@
   .topbar-brand-label { font-size:10px; font-family:var(--font-mono); color:var(--text3); letter-spacing:2px; white-space:nowrap; }
   #prod-run-live { left: 220px; }
   body.mobile-view #prod-run-live { left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 1500 !important; }
+  body.mobile-view #prl-header { flex-direction: column !important; padding: 8px 10px !important; gap: 6px !important; align-items: stretch !important; }
+  body.mobile-view #prl-header > div:last-child { width: 100% !important; justify-content: space-between !important; order: -1 !important; }
+  body.mobile-view #prl-header > div:first-child { width: 100% !important; flex-wrap: wrap !important; gap: 6px !important; }
+  body.mobile-view #prl-run-id { display: none !important; }
+  body.mobile-view #prl-elapsed { font-size: 18px !important; }
   #mobile-menu-btn { display:none; }
   #mobile-brand-bar { display:none; }
   html, body { overflow-x: hidden; }
@@ -17304,14 +17309,24 @@ function ntBuildWeeklyDigest() {
 
     /* Header compact */
     #prl-header {
-      flex-wrap: wrap !important;
+      flex-direction: column !important;
       padding: 8px 10px !important;
       gap: 6px !important;
+      align-items: stretch !important;
     }
+    /* Action row: Park Run | timer | Complete Run — full width across top */
     #prl-header > div:last-child {
       width: 100% !important;
       justify-content: space-between !important;
+      order: -1 !important;
     }
+    /* Info row: dot + label + flavor — hide run ID to save space */
+    #prl-header > div:first-child {
+      width: 100% !important;
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+    }
+    #prl-run-id { display: none !important; }
     #prl-elapsed { font-size: 18px !important; }
 
     /* Tab bar */
