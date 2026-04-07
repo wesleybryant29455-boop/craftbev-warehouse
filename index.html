@@ -1085,6 +1085,21 @@ function hideAuthGate(user) {
   }
   // Add user badge to topbar
   setTimeout(() => addUserBadge(user), 500);
+  // Auto-resume any active production run
+  setTimeout(() => {
+    try {
+      const runs = prodRunLoad();
+      const active = runs.find(r => r.status === 'in-progress');
+      if (active) {
+        prodRunActive = active;
+        // Navigate to prod-run page first
+        const navEl = document.querySelector('[onclick*="prod-run"]');
+        showPage('prod-run', navEl);
+        prodRunGoLive();
+        showToast('🔄 Resuming active production run: ' + (active.flavorName || active.sku || active.id));
+      }
+    } catch(e) { console.warn('Auto-resume check failed:', e); }
+  }, 800);
 }
 
 function addUserBadge(user) {
