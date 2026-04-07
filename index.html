@@ -705,6 +705,110 @@
 
   /* Page nav active glow */
   .nav-more-toggle:hover { background: var(--green-glow); color: var(--text2); }
+
+  /* ── PRODUCTION RUN MOBILE FIXES ───────────────────────── */
+
+  /* Wizard overlay — full screen, proper scroll on iOS */
+  body.mobile-view #prod-run-wizard {
+    padding: 8px !important;
+    align-items: flex-start !important;
+  }
+  body.mobile-view #prod-run-wizard > div {
+    max-height: calc(100vh - 16px) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    border-radius: 12px !important;
+  }
+  body.mobile-view #prod-run-wizard > div > div:nth-child(1) {
+    padding: 14px 16px !important;
+  }
+  body.mobile-view #prod-run-wizard > div > div:nth-child(2) {
+    padding: 16px !important;
+  }
+  body.mobile-view #prod-run-wizard > div > div:nth-child(3) {
+    padding: 12px 16px !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  /* Live run overlay — full width, no sidebar offset */
+  body.mobile-view #prod-run-live {
+    left: 0 !important;
+    top: 0 !important;
+  }
+
+  /* Live run header — stack on mobile */
+  body.mobile-view #prl-header {
+    padding: 10px 12px !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  body.mobile-view #prl-header > div:first-child {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+  body.mobile-view #prl-header > div:last-child {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+  body.mobile-view #prl-elapsed {
+    font-size: 20px !important;
+  }
+
+  /* Live run body — stack 3 cols into 1 */
+  body.mobile-view #prl-live-body {
+    grid-template-columns: 1fr !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+  body.mobile-view #prl-live-body > div {
+    min-height: 200px !important;
+    border-right: none !important;
+    border-left: none !important;
+    border-bottom: 1px solid var(--border2) !important;
+  }
+
+  /* Expendable add form — 1 col on mobile */
+  body.mobile-view #prl-exp-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Clock-in form — full width buttons */
+  body.mobile-view #prl-clockin-form .btn {
+    min-height: 44px !important;
+  }
+
+  /* Complete Run button — full width on mobile */
+  body.mobile-view #prod-run-live [onclick="prodRunCompletePrompt()"] {
+    width: 100% !important;
+    padding: 12px !important;
+    font-size: 14px !important;
+  }
+
+
+  /* Wizard step content grids collapse on mobile */
+  body.mobile-view #prw-body [style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+  body.mobile-view #prw-body {
+    padding: 14px !important;
+  }
+  /* Wizard flavor cards readable on mobile */
+  body.mobile-view #prw-body [style*="padding:14px;cursor:pointer"] {
+    padding: 12px !important;
+  }
+  /* Wizard footer buttons full width on mobile */
+  body.mobile-view #prod-run-wizard [id="prw-next-btn"] {
+    width: 100% !important;
+    padding: 14px !important;
+    font-size: 14px !important;
+    min-height: 44px !important;
+  }
+  body.mobile-view #prod-run-wizard [id="prw-back-btn"] {
+    min-height: 44px !important;
+  }
+
   /* ── MOBILE AUDIT FIXES ───────────────────────────────────── */
   body.mobile-view .form-grid { grid-template-columns: 1fr !important; gap: 8px !important; }
   body.mobile-view #sh-kpi-row { grid-template-columns: 1fr 1fr !important; }
@@ -1907,7 +2011,7 @@ window.addEventListener('load', function() {
     </div>
 
     <!-- ══ STAGE 2: WORK MODAL ══ -->
-    <div id="sh-work-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;backdrop-filter:blur(6px)" onclick="if(event.target===this)shCloseWork()">
+    <div id="sh-work-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;-webkit-overflow-scrolling:touch;backdrop-filter:blur(6px)" onclick="if(event.target===this)shCloseWork()">
       <div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:760px;padding:28px;max-height:90vh;overflow-y:auto" onclick="event.stopPropagation()">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="display:flex;align-items:center;gap:10px">
@@ -1987,7 +2091,7 @@ window.addEventListener('load', function() {
     </div>
 
     <!-- ══ STAGE 3: SHIP MODAL ══ -->
-    <div id="sh-ship-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;backdrop-filter:blur(6px)" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div id="sh-ship-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;-webkit-overflow-scrolling:touch;backdrop-filter:blur(6px)" onclick="if(event.target===this)this.classList.add('hidden')">
       <div style="background:var(--card);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:700px;padding:28px" onclick="event.stopPropagation()">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="display:flex;align-items:center;gap:10px">
@@ -2680,7 +2784,7 @@ window.addEventListener('load', function() {
     </div>
 
     <!-- ── WIZARD OVERLAY ─────────────────────────────────────────── -->
-    <div id="prod-run-wizard" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;backdrop-filter:blur(6px)">
+    <div id="prod-run-wizard" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;-webkit-overflow-scrolling:touch;backdrop-filter:blur(6px)">
       <div style="background:var(--card);border:1px solid var(--border);border-radius:18px;width:100%;max-width:720px;box-shadow:0 40px 120px rgba(0,0,0,.8);overflow:hidden">
 
         <!-- Wizard header -->
@@ -2718,7 +2822,7 @@ window.addEventListener('load', function() {
     <div id="prod-run-live" class="hidden" style="position:fixed;inset:0;left:220px;background:var(--bg);z-index:900;display:flex;flex-direction:column;overflow:hidden">
 
       <!-- Live header bar -->
-      <div style="background:rgba(10,14,8,.97);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <div id="prl-header" style="background:rgba(10,14,8,.97);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:16px">
           <div style="display:flex;align-items:center;gap:8px;padding-left:8px">
             <div class="dot-live"></div>
@@ -2737,7 +2841,7 @@ window.addEventListener('load', function() {
       </div>
 
       <!-- Live body — 3 columns -->
-      <div style="flex:1;display:grid;grid-template-columns:260px 1fr 300px;overflow:hidden;min-width:0">
+      <div id="prl-live-body" style="flex:1;display:grid;grid-template-columns:260px 1fr 300px;overflow:hidden;min-width:0">
 
         <!-- LEFT: Crew clock -->
         <div style="border-right:1px solid var(--border2);display:flex;flex-direction:column;overflow:hidden">
@@ -2783,7 +2887,7 @@ window.addEventListener('load', function() {
           </div>
           <!-- Add expendable form -->
           <div id="prl-exp-form" style="display:none;padding:14px;border-top:1px solid var(--border2);background:var(--bg3)">
-            <div style="display:grid;grid-template-columns:1fr 70px 90px;gap:8px;margin-bottom:8px">
+            <div id="prl-exp-grid" style="display:grid;grid-template-columns:1fr 70px 90px;gap:8px;margin-bottom:8px">
               <input class="form-input" id="prl-exp-name" placeholder="Item name" style="font-size:13px">
               <input class="form-input" type="number" id="prl-exp-qty" placeholder="Qty" min="0" style="font-size:13px;font-family:var(--font-mono)">
               <div style="position:relative">
