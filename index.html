@@ -1090,6 +1090,10 @@ function hideAuthGate(user) {
   }
   // Add user badge to topbar
   setTimeout(() => addUserBadge(user), 500);
+  setTimeout(async () => {
+    await _fetchRemotePermissions();
+    _applyNavPermissions();
+  }, 800);
 
   // Check for any in-progress run and notify — don't redirect
   setTimeout(async () => {
@@ -1130,6 +1134,297 @@ function addUserBadge(user) {
     }
   };
   topbarRight.prepend(badge);
+}
+
+// ══════════════════════════════════════════════════════════════
+// USER PERMISSIONS SYSTEM
+// Super-admin: wbryant@420craftbeverages.com
+// Per-user, per-page access stored in Supabase + localStorage
+// ══════════════════════════════════════════════════════════════
+
+const SUPER_ADMIN_EMAIL = 'wbryant@420craftbeverages.com';
+const PERMS_KEY = '420craft_user_permissions';
+
+// All nav pages with labels
+const ALL_NAV_PAGES = [
+  { id:'dashboard',           label:'📊 Dashboard',            section:'Operations' },
+  { id:'order-queue',         label:'🛒 Order Queue',           section:'Operations' },
+  { id:'inventory',           label:'📦 Inventory',             section:'Operations' },
+  { id:'log-movement',        label:'✏️ Log Movement',          section:'Operations' },
+  { id:'shipping',            label:'🚚 Shipping',              section:'Operations' },
+  { id:'prod-run',            label:'🏭 Production Run',        section:'Operations' },
+  { id:'schedule',            label:'📅 Production Schedule',   section:'Operations' },
+  { id:'inv-detail',          label:'🔬 Inventory Detail',      section:'Operations' },
+  { id:'inv-audit',           label:'🔎 Inventory Audit',       section:'Operations' },
+  { id:'batch-calc',          label:'🧮 Batch Calculator',      section:'Operations' },
+  { id:'reorder',             label:'🔔 Reorder Queue',         section:'Operations' },
+  { id:'pallet-map',          label:'📦 Pallet Map',            section:'Operations' },
+  { id:'brand-velocity',      label:'⚡ Brand Velocity',        section:'Operations' },
+  { id:'movement-history',    label:'📋 Movement History',      section:'Operations' },
+  { id:'sku-manager',         label:'🏷️ SKU Manager',           section:'Operations' },
+  { id:'flavor-mgr',          label:'🧪 In-House Flavors',      section:'Operations' },
+  { id:'consumables',         label:'⚙️ Consumables',           section:'Operations' },
+  { id:'operators',           label:'👷 Operators',             section:'Operations' },
+  { id:'brand-launch',        label:'🏢 Brand Portal',          section:'Operations' },
+  { id:'acct-home',           label:'🏦 Accounting Home',       section:'Accounting' },
+  { id:'acct-ar',             label:'💵 Accounts Receivable',   section:'Accounting' },
+  { id:'acct-ap',             label:'🧾 AP & Purchase Orders',  section:'Accounting' },
+  { id:'acct-settlements',    label:'🤝 Settlements',           section:'Accounting' },
+  { id:'acct-close',          label:'🔒 Close & Audit',         section:'Accounting' },
+  { id:'acct-deals',          label:'📝 Deals & Contracts',     section:'Accounting' },
+  { id:'acct-costing',        label:'🧮 Batch Costing',         section:'Accounting' },
+  { id:'acct-vendors',        label:'🏪 Vendors',               section:'Accounting' },
+  { id:'acct-inventory-val',  label:'📊 Inventory Valuation',   section:'Accounting' },
+  { id:'acct-reports',        label:'📈 Reports',               section:'Accounting' },
+  { id:'acct-shipment-costing',label:'🚚 Shipment Costing',     section:'Accounting' },
+  { id:'acct-invoice-types',  label:'📝 Invoice Types',         section:'Accounting' },
+  { id:'acct-price-books',    label:'💲 Price Books',           section:'Accounting' },
+  { id:'acct-tax-rules',      label:'🏛️ Tax Rules',             section:'Accounting' },
+  { id:'acct-ar-reminders',   label:'📧 AR Reminders',          section:'Accounting' },
+  { id:'acct-ap-accounts',    label:'🏦 Payment Accounts',      section:'Accounting' },
+  { id:'acct-integrations',   label:'🔗 Integrations',          section:'Accounting' },
+  { id:'acct-qbo',            label:'💼 QuickBooks',            section:'Accounting' },
+  { id:'acct-exceptions',     label:'⚠️ Exceptions',            section:'Accounting' },
+  { id:'acct-employees',      label:'👤 Employees',             section:'Admin' },
+  { id:'settings',            label:'⚙️ Settings',              section:'Admin' },
+  { id:'backup',              label:'💾 Backup & Restore',      section:'Admin' },
+  { id:'acct-roles',          label:'🛡️ Roles & Permissions',   section:'Admin' },
+  { id:'notifications',       label:'📧 Notifications',         section:'Admin' },
+  { id:'admin-diagnostics',   label:'🩺 Diagnostics',           section:'Admin' },
+  { id:'pay-visible',         label:'💰 See Pay Rates',         section:'Sensitive', special:true },
+];
+
+function isSuperAdmin() {
+  try {
+    const auth = JSON.parse(sessionStorage.getItem(AUTH_KEY) || '{}');
+    return (auth.email||'').toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+  } catch { return false; }
+}
+
+function permsLoad() {
+  try { return JSON.parse(localStorage.getItem(PERMS_KEY) || '{}'); } catch { return {}; }
+}
+function permsSave(perms) {
+  localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
+  // Sync to Supabase
+  const sb = getSupabaseClient();
+  if (sb) {
+    Object.entries(perms).forEach(([email, pages]) => {
+      sb.from('user_permissions').upsert({ email: email.toLowerCase(), pages: pages, updated_at: new Date().toISOString() }, { onConflict: 'email' })
+        .then(({error}) => { if (error) console.warn('[Perms] Save failed:', error.message); });
+    });
+  }
+}
+
+function getUserPages(email) {
+  if (!email) return [];
+  if (email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) return ALL_NAV_PAGES.map(p => p.id); // super-admin gets everything
+  const perms = permsLoad();
+  return perms[email.toLowerCase()] || [];
+}
+
+function currentUserEmail() {
+  try { return (JSON.parse(sessionStorage.getItem(AUTH_KEY) || '{}').email || '').toLowerCase(); } catch { return ''; }
+}
+
+function canAccessPage(pageId) {
+  if (isSuperAdmin()) return true;
+  const allowed = getUserPages(currentUserEmail());
+  return allowed.includes(pageId);
+}
+
+function canViewPay() {
+  if (isSuperAdmin()) return true;
+  return getUserPages(currentUserEmail()).includes('pay-visible');
+}
+
+function _applyNavPermissions() {
+  const email = currentUserEmail();
+  const superAdmin = isSuperAdmin();
+
+  // Show User Permissions nav only to super-admin
+  const permNav = document.getElementById('nav-user-permissions');
+  if (permNav) permNav.style.display = superAdmin ? '' : 'none';
+
+  if (superAdmin) return; // super-admin sees everything
+
+  // Load this user's allowed pages
+  const allowed = new Set(getUserPages(email));
+
+  // Hide nav items for pages not in allowed list
+  document.querySelectorAll('.nav-item[onclick*="showPage"]').forEach(el => {
+    const match = el.getAttribute('onclick').match(/showPage\('([^']+)'/);
+    if (match) {
+      const pageId = match[1];
+      if (!allowed.has(pageId)) el.style.display = 'none';
+    }
+  });
+
+  // Hide section headers if all items in that section are hidden
+  document.querySelectorAll('.nav-section').forEach(section => {
+    let next = section.nextElementSibling;
+    let allHidden = true;
+    while (next && !next.classList.contains('nav-section')) {
+      if (next.style.display !== 'none') { allHidden = false; break; }
+      next = next.nextElementSibling;
+    }
+    if (allHidden) section.style.display = 'none';
+  });
+
+  // Block direct page navigation
+  const _origShowPage = showPage;
+  showPage = function(id, el) {
+    if (!canAccessPage(id)) {
+      showToast('🔒 You don\'t have access to this section.');
+      return;
+    }
+    _origShowPage(id, el);
+  };
+}
+
+// ── Fetch permissions from Supabase on load ───────────────────
+async function _fetchRemotePermissions() {
+  const sb = getSupabaseClient();
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from('user_permissions').select('*');
+    if (error || !data) return;
+    const perms = {};
+    data.forEach(row => { if (row.email) perms[row.email.toLowerCase()] = row.pages || []; });
+    localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
+  } catch(e) { console.warn('[Perms] Remote fetch failed:', e.message); }
+}
+
+// ── Render the permissions admin panel ───────────────────────
+function renderUserPermissions() {
+  if (!isSuperAdmin()) {
+    document.getElementById('user-permissions-content').innerHTML =
+      `<div style="text-align:center;padding:60px;color:var(--red)">🔒 Super-admin access only.</div>`;
+    return;
+  }
+
+  const el = document.getElementById('user-permissions-content');
+  const perms = permsLoad();
+  const sections = [...new Set(ALL_NAV_PAGES.map(p => p.section))];
+
+  el.innerHTML = `
+  <div class="section-header">
+    <div class="section-title">🔐 USER PERMISSIONS</div>
+    <div class="section-desc">Control exactly what each user can see. Only you can access this panel.</div>
+  </div>
+
+  <div class="section" style="margin-bottom:20px">
+    <div style="font-size:11px;font-family:var(--font-mono);color:var(--amber);letter-spacing:2px;margin-bottom:12px">ADD USER</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <input class="form-input" id="perm-new-email" placeholder="user@420craftbeverages.com" style="flex:1;min-width:200px">
+      <button class="btn btn-primary" onclick="permAddUser()">+ Add User</button>
+    </div>
+  </div>
+
+  <div id="perm-users-list">
+    ${Object.keys(perms).length === 0
+      ? `<div style="text-align:center;padding:40px;color:var(--text3)">No users configured yet. Add a user above.</div>`
+      : Object.entries(perms).map(([email, pages]) => _renderPermUserCard(email, pages, sections)).join('')
+    }
+  </div>`;
+}
+
+function _renderPermUserCard(email, allowedPages, sections) {
+  const allowed = new Set(allowedPages);
+  return `
+  <div class="section" style="margin-bottom:16px" id="perm-card-${btoa(email).replace(/=/g,'')}">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-weight:700;font-size:14px;color:var(--text)">${email}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${allowedPages.length} pages accessible</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="permGrantAll('${email}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Grant All</button>
+        <button onclick="permRevokeAll('${email}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">✕ Revoke All</button>
+        <button onclick="permRemoveUser('${email}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text3);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">🗑 Remove</button>
+      </div>
+    </div>
+    ${sections.map(section => `
+      <div style="margin-bottom:12px">
+        <div style="font-size:9px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+          ${section.toUpperCase()}
+          <button onclick="permToggleSection('${email}','${section}',true)" style="background:none;border:none;color:var(--green);font-size:10px;cursor:pointer;padding:0">All On</button>
+          <button onclick="permToggleSection('${email}','${section}',false)" style="background:none;border:none;color:var(--red);font-size:10px;cursor:pointer;padding:0">All Off</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${ALL_NAV_PAGES.filter(p => p.section === section).map(page => `
+            <label style="display:flex;align-items:center;gap:6px;background:${allowed.has(page.id)?'rgba(57,232,122,0.08)':'var(--bg3)'};border:1px solid ${allowed.has(page.id)?'rgba(57,232,122,0.25)':'var(--border2)'};border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;user-select:none">
+              <input type="checkbox" ${allowed.has(page.id)?'checked':''} onchange="permTogglePage('${email}','${page.id}',this.checked)" style="accent-color:var(--green);width:14px;height:14px">
+              ${page.label}
+            </label>
+          `).join('')}
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
+}
+
+function permAddUser() {
+  const email = (document.getElementById('perm-new-email')?.value||'').trim().toLowerCase();
+  if (!email || !email.includes('@')) { showToast('⚠ Enter a valid email'); return; }
+  if (email === SUPER_ADMIN_EMAIL.toLowerCase()) { showToast('⚠ Super-admin always has full access'); return; }
+  const perms = permsLoad();
+  if (perms[email]) { showToast('⚠ User already exists'); return; }
+  // Default: give dashboard and prod-run access
+  perms[email] = ['dashboard','prod-run'];
+  permsSave(perms);
+  document.getElementById('perm-new-email').value = '';
+  renderUserPermissions();
+  showToast('✓ User added — configure their access below');
+}
+
+function permTogglePage(email, pageId, on) {
+  const perms = permsLoad();
+  if (!perms[email]) perms[email] = [];
+  if (on) { if (!perms[email].includes(pageId)) perms[email].push(pageId); }
+  else { perms[email] = perms[email].filter(p => p !== pageId); }
+  permsSave(perms);
+  renderUserPermissions();
+}
+
+function permToggleSection(email, section, on) {
+  const perms = permsLoad();
+  if (!perms[email]) perms[email] = [];
+  const sectionPages = ALL_NAV_PAGES.filter(p => p.section === section).map(p => p.id);
+  if (on) {
+    sectionPages.forEach(id => { if (!perms[email].includes(id)) perms[email].push(id); });
+  } else {
+    perms[email] = perms[email].filter(id => !sectionPages.includes(id));
+  }
+  permsSave(perms);
+  renderUserPermissions();
+}
+
+function permGrantAll(email) {
+  const perms = permsLoad();
+  perms[email] = ALL_NAV_PAGES.map(p => p.id);
+  permsSave(perms);
+  renderUserPermissions();
+  showToast('✓ Full access granted to ' + email);
+}
+
+function permRevokeAll(email) {
+  const perms = permsLoad();
+  perms[email] = [];
+  permsSave(perms);
+  renderUserPermissions();
+  showToast('Access revoked for ' + email);
+}
+
+function permRemoveUser(email) {
+  if (!confirm('Remove ' + email + ' from permissions?')) return;
+  const perms = permsLoad();
+  delete perms[email];
+  permsSave(perms);
+  const sb = getSupabaseClient();
+  if (sb) sb.from('user_permissions').delete().eq('email', email).then(()=>{});
+  renderUserPermissions();
+  showToast('User removed');
 }
 
 // Initialize Google Sign-In when GSI library loads
@@ -1252,6 +1547,7 @@ window.addEventListener('load', function() {
     </div>
     <div id="admin-more" style="display:none">
       <div class="nav-item" onclick="showPage('acct-roles',this)"><span class="icon">🛡️</span> Roles & Permissions</div>
+      <div class="nav-item" id="nav-user-permissions" style="display:none" onclick="showPage('user-permissions',this)"><span class="icon">🔐</span> User Permissions</div>
       <div class="nav-item" onclick="showPage('notifications',this)"><span class="icon">📧</span> Notifications</div>
       <div class="nav-item" onclick="showPage('admin-diagnostics',this)"><span class="icon">🩺</span> Diagnostics</div>
       <div class="nav-item" onclick="exportCSV()"><span class="icon">⬇️</span> Export CSV</div>
@@ -2268,6 +2564,7 @@ window.addEventListener('load', function() {
   <div class="page" id="page-acct-shipment-costing"><div id="acct-shipment-costing-content"></div></div>
   <div class="page" id="page-acct-integrations"><div id="acct-integrations-content"></div></div>
   <div class="page" id="page-admin-diagnostics"><div id="admin-diagnostics-content"></div></div>
+  <div class="page" id="page-user-permissions"><div id="user-permissions-content"></div></div>
   <div class="page" id="page-acct-invoice-types"><div id="acct-invoice-types-content"></div></div>
   <div class="page" id="page-acct-qbo"><div id="acct-qbo-content"></div></div>
   <div class="page" id="page-acct-ar-reminders"><div id="acct-ar-reminders-content"></div></div>
@@ -4948,6 +5245,7 @@ const pageTitles = {
   'acct-employees':'EMPLOYEE PROFILES','acct-roles':'ROLES & PERMISSIONS',
   'acct-price-books':'PRICE BOOKS','acct-tax-rules':'TAX & FEE RULES',
   'admin-diagnostics':'SYSTEM DIAGNOSTICS',
+  'user-permissions':'USER PERMISSIONS',
 };
 function showPage(id, el) {
   // Auto-close sidebar on mobile whenever a page is shown
@@ -10402,6 +10700,7 @@ function operatorSaveAll(ops) {
 function renderOperators() {
   const search  = (document.getElementById('operator-search')?.value||'').toLowerCase();
   const statusF = document.getElementById('operator-status-filter')?.value||'';
+  const showPay = canViewPay();
   const ops = operatorLoad().filter(o => {
     if (statusF && o.status !== statusF) return false;
     if (search && !(o.name||'').toLowerCase().includes(search) && !(o.position||'').toLowerCase().includes(search)) return false;
@@ -10416,17 +10715,17 @@ function renderOperators() {
 
   el.innerHTML = `<table>
     <thead><tr>
-      <th>Name</th><th>Position</th><th>Hourly Rate</th><th>Status</th><th style="text-align:right">Actions</th>
+      <th>Name</th><th>Position</th>${showPay?'<th>Hourly Rate</th>':''}<th>Status</th><th style="text-align:right">Actions</th>
     </tr></thead>
     <tbody>
       ${ops.map(o=>`<tr>
         <td style="font-weight:600;color:var(--text)">${o.name}</td>
         <td style="color:var(--text2)">${o.position||'—'}</td>
-        <td style="font-family:var(--font-mono);color:var(--green);font-weight:700">$${o.rate||0}/hr</td>
+        ${showPay?`<td style="font-family:var(--font-mono);color:var(--green);font-weight:700">$${o.rate||0}/hr</td>`:''}
         <td><span style="background:${o.status==='active'?'rgba(126,211,33,.1)':'var(--bg3)'};border:1px solid ${o.status==='active'?'rgba(126,211,33,.25)':'var(--border2)'};color:${o.status==='active'?'var(--green)':'var(--text3)'};padding:2px 9px;border-radius:4px;font-size:11px;font-family:var(--font-mono)">${o.status==='active'?'ACTIVE':'INACTIVE'}</span></td>
         <td style="text-align:right">
-          <button onclick="operatorOpenEdit('${o.id}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;padding:4px 12px;font-size:11px;cursor:pointer;margin-right:6px">✏ Edit</button>
-          <button onclick="operatorDelete('${o.id}')" style="background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.2);color:var(--red);border-radius:5px;padding:4px 12px;font-size:11px;cursor:pointer">✕ Delete</button>
+          ${showPay?`<button onclick="operatorOpenEdit('${o.id}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;padding:4px 12px;font-size:11px;cursor:pointer;margin-right:6px">✏ Edit</button>`:''}
+          ${showPay?`<button onclick="operatorDelete('${o.id}')" style="background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.2);color:var(--red);border-radius:5px;padding:4px 12px;font-size:11px;cursor:pointer">✕ Delete</button>`:''}
         </td>
       </tr>`).join('')}
     </tbody>
@@ -11733,19 +12032,27 @@ function prodRunQuickClockIn(runId, prefillName) {
     showToast('⚠ ' + trimmed + ' is already clocked in'); return;
   }
 
-  // Re-clock-in allowed — pull rate/position from most recent previous session
   const prevSession = [...(run.crew||[])].reverse().find(c => c.name === trimmed);
   const rosterMatch = operatorLoad().find(o => o.name.toLowerCase() === trimmed.toLowerCase());
+  const knownRate = prevSession?.rate || rosterMatch?.rate || 0;
+  const knownPos  = prevSession?.position || rosterMatch?.position || '';
   const sessionNum = (run.crew||[]).filter(c => c.name === trimmed).length + 1;
+
+  // Prompt for rate if not already known
+  let rate = knownRate;
+  let position = knownPos;
+  if (!rate) {
+    const rateInput = prompt(`Hourly rate for ${trimmed}? ($/hr)`, '0');
+    if (rateInput === null) return;
+    rate = parseFloat(rateInput)||0;
+    position = prompt(`Position / role for ${trimmed}?`, knownPos)||knownPos;
+  }
 
   if (!run.crew) run.crew = [];
   run.crew.push({
-    name: trimmed,
-    position: prevSession?.position || rosterMatch?.position || '',
-    rate: prevSession?.rate || rosterMatch?.rate || 0,
+    name: trimmed, position, rate,
     clockInAt: new Date().toISOString(),
-    clockOutAt: null,
-    totalMins: 0,
+    clockOutAt: null, totalMins: 0,
     session: sessionNum
   });
 
@@ -11828,7 +12135,7 @@ function _prodRunUpdateCrewDatalist() {
   const dl = document.getElementById('prl-crew-datalist');
   if (!dl) return;
   const ops = operatorLoad().filter(o=>o.status==='active');
-  dl.innerHTML = ops.map(o=>`<option value="${o.name}" label="${o.position} · $${o.rate}/hr">`).join('');
+  dl.innerHTML = ops.map(o=>`<option value="${o.name}" label="${o.position}${canViewPay() ? ' · $'+o.rate+'/hr' : ''}">`).join('');
 }
 
 function prodRunClockIn() {
@@ -11849,14 +12156,23 @@ function prodRunDoClockIn() {
     showToast('⚠ '+name+' is already clocked in'); return;
   }
   if (!prodRunActive.crew) prodRunActive.crew=[];
-  // Re-clock-in: pull rate/position from most recent previous session
+  // Pull rate/position from previous session or roster
   const prevSession = [...prodRunActive.crew].reverse().find(c=>c.name===name);
   const rosterMatch = operatorLoad().find(o=>o.name.toLowerCase()===name.toLowerCase());
+  const knownRate = prevSession?.rate || rosterMatch?.rate || 0;
+  const knownPos  = prevSession?.position || rosterMatch?.position || '';
   const sessionNum = prodRunActive.crew.filter(c=>c.name===name).length + 1;
+  // If rate not known, prompt now at clock-in so costs are live from the start
+  let rate = knownRate;
+  let position = knownPos;
+  if (!rate) {
+    const rateInput = prompt(`Hourly rate for ${name}? ($/hr)`, '0');
+    if (rateInput === null) return; // cancelled
+    rate = parseFloat(rateInput)||0;
+    position = prompt(`Position / role for ${name}?`, knownPos)||knownPos;
+  }
   const entry = {
-    name,
-    position: prevSession?.position || rosterMatch?.position || '',
-    rate: prevSession?.rate || rosterMatch?.rate || 0,
+    name, position, rate,
     clockInAt: new Date().toISOString(), clockOutAt: null, totalMins: 0,
     session: sessionNum
   };
@@ -11920,7 +12236,7 @@ function _prodRunRenderCrew(soft=false) {
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px">
         <span style="color:${activeSession?'var(--green)':'var(--text3)'};font-family:var(--font-mono)">${activeSession?'🟢':'⬛'} ${hrs}h ${mins}m</span>
-        ${cost>0?`<span style="color:var(--text3)">$${cost.toFixed(2)}</span>`:'<span style="color:var(--text3)">no rate set</span>'}
+        ${canViewPay() && cost>0?`<span style="color:var(--text3)">$${cost.toFixed(2)}</span>`:canViewPay()?'<span style="color:var(--text3)">no rate set</span>':''}
       </div>
     </div>`;
   }).join('');
@@ -12300,7 +12616,7 @@ function _prodRunRenderDetailBody(run) {
         ${(run.crew||[]).map(c=>`
           <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border2);font-size:12px">
             <span style="color:var(--text2)">${c.name}${c.position?' <span style="color:var(--text3);font-size:10px">· '+c.position+'</span>':''}</span>
-            <span style="font-family:var(--font-mono)">${Math.floor((c.totalMins||0)/60)}h ${(c.totalMins||0)%60}m${c.rate>0?' · $'+(((c.totalMins||0)/60)*c.rate).toFixed(2):''}</span>
+            <span style="font-family:var(--font-mono)">${Math.floor((c.totalMins||0)/60)}h ${(c.totalMins||0)%60}m${canViewPay() && c.rate>0?' · $'+(((c.totalMins||0)/60)*c.rate).toFixed(2):''}</span>
           </div>`).join('')||'<div style="color:var(--text3);font-size:12px">No crew logged</div>'}
       </div>
       <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:14px">
@@ -20331,11 +20647,22 @@ function rolesLoad() {
 }
 
 function currentUserRole() {
-  // Get from auth or default to owner for now
   try {
-    const auth = JSON.parse(localStorage.getItem('420craft_auth_user')||'{}');
-    return auth.role || 'owner';
-  } catch { return 'owner'; }
+    const auth = JSON.parse(sessionStorage.getItem('420craft_auth_user') || localStorage.getItem('420craft_auth_user') || '{}');
+    // If role already resolved and cached, use it
+    if (auth.role) return auth.role;
+    // Look up by email in employee profiles
+    const email = auth.email || '';
+    if (email) {
+      const employees = employeesLoad();
+      const emp = employees.find(e => (e.email||'').toLowerCase() === email.toLowerCase());
+      if (emp && emp.roleCode) return emp.roleCode;
+    }
+    // If no employee profile found and this is the first user (owner setup), default owner
+    // Otherwise default to most restrictive role
+    const employees = employeesLoad();
+    return employees.length === 0 ? 'owner' : 'prod_lead';
+  } catch { return 'prod_lead'; }
 }
 
 function canViewPay() {
@@ -20736,7 +21063,7 @@ const _tableSync = {
   operators: {
     key: '420craft_operators',
     transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
-      position: r.position, status: r.status }),
+      position: r.position, status: r.status, rate: parseFloat(r.rate||0) }),
     pages: ['operators','prod-run','schedule'],
   },
   consumables: {
@@ -21644,6 +21971,7 @@ const _SB_WRITE_MAP = {
       name: o.name||'',
       position: o.position||'',
       status: o.status||'active',
+      rate: parseFloat(o.rate||0),
       shift_eligible: true,
     }),
     conflict: 'legacy_id',
@@ -22021,6 +22349,7 @@ const _diagShowPage = showPage;
 showPage = function(id, el) {
   _diagShowPage(id, el);
   if (id === 'admin-diagnostics') renderAdminDiagnostics();
+  if (id === 'user-permissions') renderUserPermissions();
   if (id === 'pallet-map') renderPalletMap();
   if (id === 'reorder') renderReorder();
 };
