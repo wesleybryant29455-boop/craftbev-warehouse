@@ -11980,6 +11980,21 @@ function prodRunWizardNext() {
     prodRunActive.endDate    = endDate;
     prodRunActive.status     = 'completed';
     prodRunActive.costSummary= _prodCalcCosts(prodRunActive);
+    // Post to backend Edge Function for authoritative recording
+    _callEdgeFunction(EDGE_FUNCTIONS.completeProductionRun, {
+      run_id:        prodRunActive.id,
+      batch_code:    prodRunActive.batchCode || prodRunActive.batch_code || '',
+      sku_code:      prodRunActive.sku || prodRunActive.sku_code || '',
+      mg_strength:   prodRunActive.mg || '',
+      cases_produced: parseInt(prodRunActive.totalCases || 0),
+      crew:          prodRunActive.crew || [],
+      expendables:   prodRunActive.expendables || [],
+      coa_link:      prodRunActive.coaLink || '',
+      acting_user:   prodRunActive.leadOperator || '',
+    }).then(r => {
+      if (r.ok) console.log('[EdgeFunction] Production run posted:', r.batch_code);
+      else console.error('[EdgeFunction] Production run post failed:', r.error);
+    });
     prodRunSaveActive();
     // ── Auto-create immutable cost snapshot ────────────────────────
     try { if (typeof acctOnProdRunComplete === 'function') acctOnProdRunComplete(prodRunActive); } catch(e) {}
@@ -20545,6 +20560,44 @@ const SUPABASE_CONFIG = {
   get configured() { return !!(this.url && this.anonKey); }
 };
 
+// ═══════════════════════════════════════════════════════════════
+// EDGE FUNCTIONS — server-side business logic
+// These are the authoritative backend endpoints
+// Browser calls these — backend validates and posts
+// ═══════════════════════════════════════════════════════════════
+const EF_BASE = 'https://vuiorapiugmfmgwdolzq.supabase.co/functions/v1';
+const EDGE_FUNCTIONS = {
+  postMovement:           EF_BASE + '/post-movement',
+  completeProductionRun:  EF_BASE + '/complete-production-run',
+  mrpEngine:              EF_BASE + '/mrp-engine',
+  coaRequest:             EF_BASE + '/coa-request',
+};
+
+// Call an edge function — returns { ok, ...data } or { ok:false, error }
+async function _callEdgeFunction(url, body) {
+  try {
+    const sb = getSupabaseClient();
+    const session = sb?.auth?.session?.() || null;
+    const headers = { 'Content-Type': 'application/json' };
+    // Include anon key for auth
+    headers['Authorization'] = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1aW9yYXBpdWdtZm1nd2RvbHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODEwNjQsImV4cCI6MjA5MTA1NzA2NH0.eHHsGvc1__KyJBhUiImPUghVhdie08V42FP';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok && !data.ok) {
+      console.error('[EdgeFunction] ' + url + ' failed:', data.error);
+    }
+    return data;
+  } catch(e) {
+    console.error('[EdgeFunction] Network error:', e.message);
+    return { ok: false, error: 'Network error: ' + e.message };
+  }
+}
+
+
 // Load config — Remote First is ON by default when URL+key are saved
 (function _loadSupabaseConfig() {
   try {
@@ -21439,44 +21492,31 @@ async function _sbWriteConfirmed(table, rows, conflictCol) {
 
 // Confirmed write for logMovement — awaited before showing success to user
 async function _sbWriteMovementConfirmed(movement, skuIdx, moveType, qty) {
-  if (!SUPABASE_CONFIG.remoteFirst) return true;
-  const sb = getSupabaseClient();
-  if (!sb) return false;
-  try {
-    const typeMap = {
-      'New Batch':'inbound_receipt','Inbound':'inbound_receipt','Return':'inbound_receipt',
-      'Outbound':'outbound_shipment','Write-Off':'write_off',
-      'Pull to Sample':'pull_to_sample','Send Sample':'send_sample',
-    };
-    const row = {
-      batch_code:       movement.Batch_Code || movement.batch_code || '',
-      sku_code:         movement.Full_SKU || ((movement.SKU||'') + ' ' + (movement.MG_Strength||'')),
-      movement_type:    typeMap[movement.Movement_Type || moveType] || 'outbound_shipment',
-      direction:        movement.Direction === 'Inbound' ? 'inbound' : 'outbound',
-      quantity:         parseInt(movement.Quantity || qty || 0),
-      operator:         movement.Operator || '',
-      notes:            movement.Notes || '',
-      write_off_reason: movement.WriteOffReason || null,
-      created_at:       movement.Timestamp || new Date().toISOString(),
-    };
-    const { error: insErr } = await sb.from('movements').insert(row);
-    if (insErr) { console.error('[ConfirmedWrite] movements:', insErr.message); return false; }
+  // Call the backend Edge Function — server is the authority
+  const result = await _callEdgeFunction(EDGE_FUNCTIONS.postMovement, {
+    batch_code:       movement.Batch_Code || movement.batch_code || '',
+    sku_code:         movement.Full_SKU || ((movement.SKU||'') + ' ' + (movement.MG_Strength||'')),
+    movement_type:    movement.Movement_Type || moveType || 'Outbound',
+    quantity:         parseInt(movement.Quantity || qty || 0),
+    operator:         movement.Operator || '',
+    notes:            movement.Notes || '',
+    write_off_reason: movement.WriteOffReason || null,
+    destination:      movement.Destination || null,
+    timestamp:        movement.Timestamp || new Date().toISOString(),
+    acting_user:      movement.Operator || '',
+  });
 
-    // Update batch inventory counts in Supabase atomically
-    const bc = row.batch_code;
-    if (bc && bc !== 'UNKNOWN') {
-      const isIn = row.direction === 'inbound';
-      const { data: bRow } = await sb.from('batches').select('cases_on_hand,cases_produced,cases_shipped').eq('batch_code', bc).single();
-      if (bRow) {
-        await sb.from('batches').update({
-          cases_on_hand:  isIn ? (bRow.cases_on_hand||0)+row.quantity : Math.max(0,(bRow.cases_on_hand||0)-row.quantity),
-          cases_produced: isIn ? (bRow.cases_produced||0)+row.quantity : bRow.cases_produced,
-          cases_shipped:  !isIn ? (bRow.cases_shipped||0)+row.quantity : bRow.cases_shipped,
-        }).eq('batch_code', bc);
-      }
+  if (!result.ok) {
+    console.error('[EdgeFunction] post-movement failed:', result.error);
+    // Surface permission errors specifically
+    if (result.error && result.error.includes('does not have permission')) {
+      showToast('⛔ ' + result.error);
     }
-    return true;
-  } catch(e) { console.error('[ConfirmedWrite] error:', e.message); return false; }
+    return false;
+  }
+
+  console.log('[EdgeFunction] Movement confirmed:', result.movement_id);
+  return true;
 }
 async function _sbWriteAfterSave(lsKey) {
   if (!SUPABASE_CONFIG.remoteFirst) return;
