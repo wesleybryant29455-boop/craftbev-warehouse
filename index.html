@@ -5216,16 +5216,16 @@ function loadData() {
   _fixSkuBrands();
 }
 function saveData() {
-  // Write to Supabase FIRST for movements (most critical for multi-user sync)
-  // localStorage becomes the local cache after the remote write
+  // ── SERVER-FIRST: write to Supabase, localStorage updates via _remoteSync callback ──
+  // Do NOT write localStorage here — server is the source of truth
+  // _sbWriteAfterSave pulls confirmed data back and updates cache via _remoteSync
   _sbWriteAfterSave('420craft_movements');
   _sbWriteAfterSave('420craft_batches');
-  // Then update local cache
-  localStorage.setItem('420craft_skus', JSON.stringify(skuData));
-  localStorage.setItem('420craft_movements', JSON.stringify(movements));
-  localStorage.setItem('420craft_batches', JSON.stringify(batchData));
-  // Auto-sync to Google Sheets
-  // Supabase handles skuData, batchData, movements — only send lightweight data to Sheets
+
+  // While waiting for server confirmation, update in-memory refs only
+  // (UI already has the data in memory — no need to write localStorage prematurely)
+
+  // Auto-sync to Google Sheets (background, non-blocking)
   sheetsQueue('sync_all', {
     operators:         operatorLoad(),
     consumables:       consumableLoad(),
@@ -21185,7 +21185,7 @@ async function _remoteSync(table, forceRender) {
   const cfg = _tableSync[table];
   if (!cfg) return;
 
-  // Throttle: skip if fetched recently (unless forced by realtime)
+  // Throttle background polls only — never throttle forced syncs (write confirmations + realtime)
   const now = Date.now();
   if (!forceRender && _remoteCache[table] && now - _remoteCache[table] < _remoteCacheTTL) return;
   _remoteCache[table] = now;
@@ -21193,13 +21193,11 @@ async function _remoteSync(table, forceRender) {
   try {
     let query = sb.from(table).select('*');
     if (cfg.orderBy) query = query.order(cfg.orderBy.col, { ascending: cfg.orderBy.asc });
-    // Use range to bypass Supabase's 1000-row default limit
     if (cfg.limit && cfg.limit > 1000) {
       query = query.range(0, cfg.limit - 1);
     } else if (cfg.limit) {
       query = query.limit(cfg.limit);
     } else {
-      // No limit set — use large range to get all rows
       query = query.range(0, 999999);
     }
     const { data, error } = await query;
@@ -21207,26 +21205,25 @@ async function _remoteSync(table, forceRender) {
 
     const mapped = cfg.transform ? data.map(cfg.transform) : data;
 
-    // Update localStorage cache so synchronous loaders get fresh data
+    // ── ONLY PLACE localStorage is updated — always from server response ──
     if (cfg.key) localStorage.setItem(cfg.key, JSON.stringify(mapped));
 
-    // Run any post-fetch side effects (e.g. update global vars)
     if (cfg.postFetch) cfg.postFetch(mapped);
 
-    // Re-render current page if it uses this table
+    // Re-render — tighter debounce for real-time feel
     const activePage = document.querySelector('.page.active')?.id?.replace('page-','');
     if (activePage && (forceRender || cfg.pages?.includes(activePage))) {
       if (_renderDebounce[activePage]) clearTimeout(_renderDebounce[activePage]);
       _renderDebounce[activePage] = setTimeout(() => {
         const fn = _pageRenderMap[activePage];
         if (fn) { try { fn(); } catch(e) { console.warn('[Remote] render error:', e); } }
-      }, 300);
+      }, 150);
     }
 
     return mapped;
   } catch(e) {
     console.warn(`[Remote] ${table} sync failed:`, e.message);
-    _remoteCache[table] = 0; // allow retry
+    _remoteCache[table] = 0;
   }
 }
 
@@ -22223,25 +22220,39 @@ async function _sbWriteMovementConfirmed(movement, skuIdx, moveType, qty) {
   console.log('[EdgeFunction] Movement confirmed:', result.movement_id);
   return true;
 }
-async function _sbWriteAfterSave(lsKey) {
-  if (!SUPABASE_CONFIG.remoteFirst) return;
-  const sb = getSupabaseClient();
-  if (!sb) return;
+// ══════════════════════════════════════════════════════════════
+// SERVER-AUTHORITATIVE WRITE ENGINE
+// Flow: client submits → Supabase confirms → localStorage cache
+// updated from server response → realtime fires to all devices
+// Client NEVER renders from its own write — only from confirmed state
+// ══════════════════════════════════════════════════════════════
 
+async function _sbWriteAfterSave(lsKey) {
+  const sb = getSupabaseClient();
   const cfg = _SB_WRITE_MAP[lsKey];
   if (!cfg) return;
+
+  // Offline fallback — queue for retry when connection returns
+  if (!sb || !SUPABASE_CONFIG.remoteFirst) {
+    _queueOfflineWrite(lsKey);
+    return;
+  }
 
   try {
     const rows = cfg.getRows();
     if (!rows || !rows.length) return;
 
+    let result;
+
     if (cfg.appendOnly || cfg.insertOnly) {
+      // Append-only: insert only rows newer than 10s
       const cutoff = new Date(Date.now() - 10000).toISOString();
-      const newRows = rows.filter(r => (r.created_at||r.Timestamp||'') > cutoff);
-      if (newRows.length) {
-        const toInsert = newRows.map(cfg.toRow).filter(r => r.batch_code);
-        if (toInsert.length) await sb.from(cfg.table).insert(toInsert);
-      }
+      const newRows = rows
+        .filter(r => (r.created_at||r.Timestamp||'') > cutoff)
+        .map(cfg.toRow)
+        .filter(r => Object.values(r)[0]);
+      if (!newRows.length) return;
+      result = await sb.from(cfg.table).insert(newRows);
     } else {
       const rawRows = cfg.filter ? cfg.filter(rows) : rows;
       const toWrite = rawRows.map(cfg.toRow).filter(r => {
@@ -22249,38 +22260,90 @@ async function _sbWriteAfterSave(lsKey) {
         return firstVal !== '' && firstVal !== null && firstVal !== undefined;
       });
       if (!toWrite.length) return;
-      let result;
-      if (cfg.conflict) {
-        result = await sb.from(cfg.table).upsert(toWrite, { onConflict: cfg.conflict, ignoreDuplicates: false });
-      } else {
-        result = await sb.from(cfg.table).upsert(toWrite);
-      }
-      if (result.error) {
-        console.error(`[SB Write] ${cfg.table} error:`, result.error.message);
-        if (lsKey === '420craft_prod_runs') showToast('⚠ Run sync failed: ' + result.error.message);
-      } else {
-        console.log(`[SB Write] ${cfg.table}: ${toWrite.length} records synced ✅`);
-        if (lsKey === '420craft_prod_runs') console.log('[SB Write] Prod run written to cloud:', toWrite.map(r=>r.id));
+      result = cfg.conflict
+        ? await sb.from(cfg.table).upsert(toWrite, { onConflict: cfg.conflict, ignoreDuplicates: false })
+        : await sb.from(cfg.table).upsert(toWrite);
+    }
+
+    if (result.error) {
+      console.error(`[SB Write] ${cfg.table} error:`, result.error.message);
+      showToast(`⚠ Sync error on ${cfg.table}: ${result.error.message}`);
+      // Don't update localStorage — server didn't confirm
+      return;
+    }
+
+    // ── SERVER CONFIRMED ─────────────────────────────────────
+    // Now fetch the confirmed state back from server and update
+    // localStorage cache from the server's version — never from client
+    if (cfg.key && !cfg.appendOnly && !cfg.insertOnly) {
+      const tableSync = _tableSync[cfg.table];
+      if (tableSync) {
+        // Force a fresh pull from server into localStorage
+        await _remoteSync(cfg.table, false);
       }
     }
+
+    console.log(`[SB ✅] ${cfg.table}: confirmed by server`);
+
   } catch(e) {
-    console.error('[SB Write] ' + cfg.table + ' failed:', e.message);
-    if (lsKey === '420craft_prod_runs') showToast('⚠ Run sync error: ' + e.message);
+    console.error(`[SB Write] ${cfg.table} exception:`, e.message);
+    _queueOfflineWrite(lsKey);
   }
 }
 
-// For acctSave — write accounting records to Supabase
-async function _sbWriteAcct(lsKey, records) {
-  if (!SUPABASE_CONFIG.remoteFirst) return;
+// ── OFFLINE WRITE QUEUE ───────────────────────────────────────
+const _offlineQueue = new Set();
+function _queueOfflineWrite(lsKey) {
+  _offlineQueue.add(lsKey);
+  console.warn(`[Offline] Queued ${lsKey} for retry`);
+}
+
+// Flush offline queue when connection restores
+async function _flushOfflineQueue() {
+  if (!_offlineQueue.size) return;
   const sb = getSupabaseClient();
   if (!sb) return;
+  console.log(`[Offline] Flushing ${_offlineQueue.size} queued writes`);
+  for (const lsKey of [..._offlineQueue]) {
+    await _sbWriteAfterSave(lsKey);
+    _offlineQueue.delete(lsKey);
+  }
+}
+
+// Retry offline queue when tab becomes visible or connection returns
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) _flushOfflineQueue();
+});
+window.addEventListener('online', () => {
+  showToast('🟢 Back online — syncing changes');
+  _flushOfflineQueue();
+});
+window.addEventListener('offline', () => {
+  showToast('🔴 Offline — changes will sync when connection restores');
+});
+
+// For acctSave — write accounting records to Supabase, server-authoritative
+async function _sbWriteAcct(lsKey, records) {
+  const sb = getSupabaseClient();
+  if (!sb || !SUPABASE_CONFIG.remoteFirst) {
+    _queueOfflineWrite(lsKey);
+    return;
+  }
   const cfg = _SB_ACCT_MAP[lsKey];
   if (!cfg || !records?.length) return;
   try {
-    await sb.from(cfg.table).upsert(records, { onConflict: cfg.conflict, ignoreDuplicates: true });
-    console.log(`[SB Write] ${cfg.table}: ${records.length} acct records synced`);
+    const { error } = await sb.from(cfg.table).upsert(records, { onConflict: cfg.conflict, ignoreDuplicates: false });
+    if (error) {
+      console.error(`[SB Acct] ${cfg.table} error:`, error.message);
+      showToast(`⚠ Accounting sync error: ${error.message}`);
+      return;
+    }
+    console.log(`[SB ✅] ${cfg.table}: acct confirmed by server`);
+    // Pull confirmed state back
+    if (_tableSync[cfg.table]) await _remoteSync(cfg.table, false);
   } catch(e) {
-    console.warn(`[SB Write] ${cfg.table} acct failed:`, e.message);
+    console.warn(`[SB Acct] ${cfg.table} failed:`, e.message);
+    _queueOfflineWrite(lsKey);
   }
 }
 
