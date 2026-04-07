@@ -465,7 +465,6 @@
   body.mobile-view h2 { font-size: 15px !important; }
   body.mobile-view .pagination { flex-wrap: wrap !important; gap: 4px !important; }
   body.mobile-view .page-btn { padding: 4px 8px !important; font-size: 11px !important; }
-  body.mobile-view #prod-run-live { left: 0 !important; top: 0 !important; }
   body.mobile-view #sh-work-modal > div { padding: 16px; border-radius: 0; max-height: 100vh; }
   body.mobile-view .sh-phase-btn { padding: 8px 4px !important; }
   body.mobile-view #sh-work-total-clock { font-size: 20px !important; }
@@ -706,114 +705,10 @@
   /* Page nav active glow */
   .nav-more-toggle:hover { background: var(--green-glow); color: var(--text2); }
 
-  /* ── PRODUCTION RUN MOBILE FIXES ───────────────────────── */
-
-  /* Wizard overlay — full screen, proper scroll on iOS */
-  body.mobile-view #prod-run-wizard {
-    padding: 8px !important;
-    align-items: flex-start !important;
-  }
-  body.mobile-view #prod-run-wizard > div {
-    max-height: calc(100vh - 16px) !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch !important;
-    border-radius: 12px !important;
-  }
-  body.mobile-view #prod-run-wizard > div > div:nth-child(1) {
-    padding: 14px 16px !important;
-  }
-  body.mobile-view #prod-run-wizard > div > div:nth-child(2) {
-    padding: 16px !important;
-  }
-  body.mobile-view #prod-run-wizard > div > div:nth-child(3) {
-    padding: 12px 16px !important;
-    flex-wrap: wrap !important;
-    gap: 8px !important;
-  }
-
-  /* Live run overlay — full width, no sidebar offset */
-  body.mobile-view #prod-run-live {
-    left: 0 !important;
-    top: 0 !important;
-  }
-
-  /* Live run header — stack on mobile */
-  body.mobile-view #prl-header {
-    padding: 10px 12px !important;
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    gap: 8px !important;
-  }
-  body.mobile-view #prl-header > div:first-child {
-    flex-wrap: wrap !important;
-    gap: 8px !important;
-  }
-  body.mobile-view #prl-header > div:last-child {
-    width: 100% !important;
-    justify-content: space-between !important;
-  }
-  body.mobile-view #prl-elapsed {
-    font-size: 20px !important;
-  }
-
-  /* Live run body — stack 3 cols into 1 */
-  body.mobile-view #prl-live-body {
-    grid-template-columns: 1fr !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
-  }
-  body.mobile-view #prl-live-body > div {
-    min-height: 200px !important;
-    border-right: none !important;
-    border-left: none !important;
-    border-bottom: 1px solid var(--border2) !important;
-  }
-
-  /* Expendable add form — 1 col on mobile */
-  body.mobile-view #prl-exp-grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* Clock-in form — full width buttons */
-  body.mobile-view #prl-clockin-form .btn {
-    min-height: 44px !important;
-  }
-
-  /* Complete Run button — full width on mobile */
-  body.mobile-view #prod-run-live [onclick="prodRunCompletePrompt()"] {
-    width: 100% !important;
-    padding: 12px !important;
-    font-size: 14px !important;
-  }
-
-
-  /* Wizard step content grids collapse on mobile */
-  body.mobile-view #prw-body [style*="grid-template-columns:1fr 1fr"] {
-    grid-template-columns: 1fr !important;
-  }
-  body.mobile-view #prw-body {
-    padding: 14px !important;
-  }
-  /* Wizard flavor cards readable on mobile */
-  body.mobile-view #prw-body [style*="padding:14px;cursor:pointer"] {
-    padding: 12px !important;
-  }
-  /* Wizard footer buttons full width on mobile */
-  body.mobile-view #prod-run-wizard [id="prw-next-btn"] {
-    width: 100% !important;
-    padding: 14px !important;
-    font-size: 14px !important;
-    min-height: 44px !important;
-  }
-  body.mobile-view #prod-run-wizard [id="prw-back-btn"] {
-    min-height: 44px !important;
-  }
-
   /* ── MOBILE AUDIT FIXES ───────────────────────────────────── */
   body.mobile-view .form-grid { grid-template-columns: 1fr !important; gap: 8px !important; }
   body.mobile-view #sh-kpi-row { grid-template-columns: 1fr 1fr !important; }
   body.mobile-view #bv-kpi-row { grid-template-columns: 1fr 1fr !important; }
-  body.mobile-view #prod-run-live > div:nth-child(2) { grid-template-columns: 1fr !important; }
   body.mobile-view #yield-config-grid { grid-template-columns: 1fr !important; }
   body.mobile-view #flavor-mgr-grid { grid-template-columns: 1fr !important; }
   body.mobile-view #bp-brand-grid { grid-template-columns: 1fr !important; }
@@ -17234,334 +17129,105 @@ function ntBuildWeeklyDigest() {
 .body{padding:24px}
 .footer{background:#f4f4f4;padding:14px 24px;text-align:center;font-size:11px;color:#999}
 
-  /* ══════════════════════════════════════════════════════════════
-     UNIVERSAL MOBILE MODAL FIXES
-     Every fixed overlay gets proper mobile treatment
-     ══════════════════════════════════════════════════════════════ */
-
-  /* Base rule: ALL fixed modals on mobile */
-  @media (max-width: 600px) {
-    /* Every modal overlay — full screen, scrollable */
-    #audit-modal, #flavor-modal, #sh-create-modal, #sh-ship-modal,
-    #sh-detail-modal, #sh-addr-book-modal, #operator-modal,
-    #receive-modal, #batch-modal, #sm-add-modal, #oq-modal,
-    #bp-new-modal, #bp-flavor-modal, #bp-log-modal, #bp-sku-modal,
-    #prl-scanner-modal, #pallet-assign-modal, #sched-settings-modal,
-    #sched-day-modal, #sched-postpone-modal, #sku-modal-backdrop,
-    #del-modal-backdrop, #coa-modal-backdrop, #auth-gate {
-      padding: 8px !important;
-      align-items: flex-start !important;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch !important;
-    }
-
-    /* Every modal inner card — full width, max height, scrollable */
-    #audit-modal > div, #flavor-modal > div, #sh-create-modal > div,
-    #sh-ship-modal > div, #sh-detail-modal > div,
-    #sh-addr-book-modal > div, #operator-modal > div,
-    #receive-modal > div, #batch-modal > div, #sm-add-modal > div,
-    #oq-modal > div, #bp-new-modal > div, #bp-flavor-modal > div,
-    #bp-log-modal > div, #bp-sku-modal > div,
-    #prl-scanner-modal > div, #pallet-assign-modal > div,
-    #sched-settings-modal > div, #sched-day-modal > div,
-    #sched-postpone-modal > div, #sku-modal-backdrop > div,
-    #coa-modal-backdrop > div {
-      width: 100% !important;
-      max-width: 100% !important;
-      max-height: calc(100vh - 16px) !important;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch !important;
-      border-radius: 12px !important;
-      margin: 0 !important;
-    }
-
-    /* All form grids in modals collapse to 1 column */
-    #audit-modal .form-grid,
-    #audit-modal [style*="grid-template-columns"],
-    #flavor-modal [style*="grid-template-columns"],
-    #sh-create-modal [style*="grid-template-columns"],
-    #sh-ship-modal [style*="grid-template-columns"],
-    #sh-detail-modal [style*="grid-template-columns"],
-    #operator-modal [style*="grid-template-columns"],
-    #receive-modal [style*="grid-template-columns"],
-    #batch-modal [style*="grid-template-columns"],
-    #oq-modal [style*="grid-template-columns"],
-    #bp-new-modal [style*="grid-template-columns"],
-    #pallet-assign-modal [style*="grid-template-columns"] {
-      grid-template-columns: 1fr !important;
-    }
-
-    /* All modal buttons — full width, min 44px touch target */
-    #audit-modal button, #flavor-modal button,
-    #sh-create-modal button, #sh-ship-modal button,
-    #sh-detail-modal button, #operator-modal button,
-    #receive-modal button, #batch-modal button,
-    #oq-modal button, #bp-new-modal button,
-    #pallet-assign-modal button {
-      min-height: 44px !important;
-    }
-
-    /* ── PRODUCTION RUN LIVE OVERLAY ── */
-    #prod-run-live {
-      left: 0 !important;
-      top: 0 !important;
-      right: 0 !important;
-      bottom: 0 !important;
-      width: 100vw !important;
-      height: 100vh !important;
-      max-height: 100vh !important;
-      display: flex !important;
-      flex-direction: column !important;
-      overflow: hidden !important;
-      position: fixed !important;
-    }
-
-    /* Live header — compact on mobile */
-    #prl-header {
-      padding: 8px 12px !important;
-      flex-wrap: wrap !important;
-      gap: 6px !important;
-      flex-shrink: 0 !important;
-    }
-    #prl-header > div:first-child {
-      flex-wrap: wrap !important;
-      gap: 6px !important;
-      width: 100% !important;
-    }
-    #prl-header > div:last-child {
-      width: 100% !important;
-      display: flex !important;
-      justify-content: space-between !important;
-      align-items: center !important;
-    }
-    #prl-elapsed { font-size: 18px !important; }
-
-    /* Live body — fills remaining space between header and tab bar */
-    #prl-live-body {
-      display: flex !important;
-      flex-direction: column !important;
-      overflow: hidden !important;
-      flex: 1 !important;
-      min-height: 0 !important;
-      height: 0 !important;
-    }
-
-    /* Each panel in live body — hide all by default on mobile */
-    #prl-live-body > div {
-      display: none !important;
-      flex: 1 !important;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch !important;
-      border: none !important;
-      min-height: 0 !important;
-    }
-    /* Show only the active tab panel */
-    #prl-live-body > div.prl-tab-active {
-      display: flex !important;
-      flex-direction: column !important;
-      flex: 1 !important;
-    }
-    /* Show first panel if explicitly inactive class not set yet */
-    #prl-live-body > div:first-child:not(.prl-tab-inactive) {
-      display: flex !important;
-      flex-direction: column !important;
-      flex: 1 !important;
-    }
-    /* Hide panels explicitly marked inactive */
-    #prl-live-body > div.prl-tab-inactive {
-      display: none !important;
-    }
-
-    /* Tab bar — fixed at bottom, always visible */
-    #prl-mobile-tabs {
-      display: flex !important;
-      background: var(--bg2) !important;
-      border-top: 2px solid var(--border) !important;
-      flex-shrink: 0 !important;
-      min-height: 56px !important;
-    }
-    #prl-mobile-tabs button {
-      flex: 1 !important;
-      min-height: 56px !important;
-      font-size: 12px !important;
-      padding: 8px 4px !important;
-    }
-
-    /* Wizard — full screen */
-    #prod-run-wizard {
-      padding: 6px !important;
-    }
-    #prod-run-wizard > div {
-      max-height: calc(100vh - 12px) !important;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch !important;
-    }
-
-    /* Complete Run button — full width on mobile */
-    #prod-run-live [onclick="prodRunCompletePrompt()"] {
-      width: 100% !important;
-      min-height: 48px !important;
-      font-size: 15px !important;
-    }
-
-    /* Expendable add form — 1 col */
-    #prl-exp-grid {
-      grid-template-columns: 1fr !important;
-    }
-
-    /* Clock in form buttons */
-    #prl-clockin-form button {
-      min-height: 44px !important;
-    }
-  }
-
-  /* Tab bar hidden on desktop */
-  #prl-mobile-tabs { display: none; }
-
-
-  /* ════════════════════════════════════════════════════════════════
-     PRODUCTION RUN LIVE OVERLAY — PURE CSS MEDIA QUERY
-     No JS class dependency — works on all phones immediately
-     ════════════════════════════════════════════════════════════════ */
-  @media screen and (max-width: 768px) {
-
-    /* Lock live overlay to exact phone screen */
-    #prod-run-live {
-      left: 0 !important;
-      top: 0 !important;
-      right: 0 !important;
-      bottom: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
-      position: fixed !important;
-      display: flex !important;
-      flex-direction: column !important;
-      overflow: hidden !important;
-    }
-
-    /* Header — compact, wraps cleanly */
-    #prl-header {
-      padding: 8px 12px !important;
-      flex-wrap: wrap !important;
-      gap: 6px !important;
-      flex-shrink: 0 !important;
-    }
-    #prl-header > div:first-child {
-      flex-wrap: wrap !important;
-      gap: 6px !important;
-    }
-    #prl-header > div:last-child {
-      width: 100% !important;
-      display: flex !important;
-      justify-content: space-between !important;
-      align-items: center !important;
-    }
-    #prl-elapsed { font-size: 18px !important; }
-
-    /* Complete run button — full width */
-    #prod-run-live button[onclick="prodRunCompletePrompt()"] {
-      flex: 1 !important;
-      min-height: 44px !important;
-    }
-
-    /* Live body — single column, fills remaining height */
-    #prl-live-body {
-      grid-template-columns: 1fr !important;
-      flex: 1 !important;
-      min-height: 0 !important;
-      overflow: hidden !important;
-      display: flex !important;
-      flex-direction: column !important;
-    }
-
-    /* All three panels hidden by default */
-    #prl-live-body > div {
-      display: none !important;
-      flex: 1 !important;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch !important;
-      border: none !important;
-      border-right: none !important;
-      border-left: none !important;
-    }
-
-    /* Active tab panel visible */
-    #prl-live-body > div.prl-tab-active {
-      display: flex !important;
-      flex-direction: column !important;
-    }
-
-    /* First panel shows if no tab selected yet */
-    #prl-live-body > div:first-child:not(.prl-tab-inactive) {
-      display: flex !important;
-      flex-direction: column !important;
-    }
-
-    /* Inactive panels hidden */
-    #prl-live-body > div.prl-tab-inactive {
-      display: none !important;
-    }
-
-    /* Tab bar visible on mobile */
-    #prl-mobile-tabs {
-      display: flex !important;
-      flex-shrink: 0 !important;
-      background: var(--bg2) !important;
-      border-top: 2px solid var(--border) !important;
-    }
-    #prl-mobile-tabs button {
-      flex: 1 !important;
-      min-height: 54px !important;
-      font-size: 12px !important;
-      font-weight: 700 !important;
-      border: none !important;
-      cursor: pointer !important;
-      font-family: var(--font-mono) !important;
-      padding: 8px 4px !important;
-    }
-
-    /* Expendable form — 1 column */
-    #prl-exp-grid {
-      grid-template-columns: 1fr !important;
-    }
-
-    /* Clock-in form buttons — full touch target */
-    #prl-clockin-form button {
-      min-height: 44px !important;
-    }
-
-    /* Wizard — full screen */
-    #prod-run-wizard {
-      padding: 6px !important;
-      align-items: flex-start !important;
-    }
-    #prod-run-wizard > div {
-      width: 100% !important;
-      max-width: 100% !important;
-      max-height: calc(100vh - 12px) !important;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch !important;
-      border-radius: 12px !important;
-    }
-    #prod-run-wizard #prw-body {
-      padding: 14px !important;
-    }
-    #prod-run-wizard [id="prw-next-btn"] {
-      width: 100% !important;
-      min-height: 48px !important;
-      font-size: 14px !important;
-    }
-    #prod-run-wizard [style*="grid-template-columns:1fr 1fr"] {
-      grid-template-columns: 1fr !important;
-    }
-
-  }
-
-  /* Tab bar hidden on desktop */
-  @media screen and (min-width: 769px) {
-    #prl-mobile-tabs { display: none !important; }
+  
     #prl-live-body > div { display: flex !important; }
     #prl-live-body > div.prl-tab-inactive { display: flex !important; }
+  }
+
+
+  /* ══════════════════════════════════════════════════════════
+     PRODUCTION RUN LIVE — MOBILE (max-width 768px)
+     Clean single media query, no conflicts
+     ══════════════════════════════════════════════════════════ */
+  @media (max-width: 768px) {
+
+    /* Full screen overlay */
+    #prod-run-live {
+      left: 0 !important;
+      top: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      position: fixed !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+    }
+
+    /* Header compact */
+    #prl-header {
+      flex-wrap: wrap !important;
+      padding: 8px 10px !important;
+      gap: 6px !important;
+    }
+    #prl-header > div:last-child {
+      width: 100% !important;
+      justify-content: space-between !important;
+    }
+    #prl-elapsed { font-size: 18px !important; }
+
+    /* Tab bar */
+    #prl-mobile-tabs {
+      display: flex !important;
+      flex-shrink: 0 !important;
+      border-top: 2px solid var(--border) !important;
+      background: var(--bg2) !important;
+    }
+    #prl-mobile-tabs button {
+      flex: 1 !important;
+      min-height: 52px !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      border: none !important;
+      padding: 6px 2px !important;
+      cursor: pointer !important;
+      font-family: var(--font-mono) !important;
+    }
+
+    /* Live body fills remaining height */
+    #prl-live-body {
+      flex: 1 !important;
+      min-height: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      grid-template-columns: unset !important;
+    }
+
+    /* All panels hidden */
+    #prl-live-body > div {
+      display: none !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      border: none !important;
+    }
+
+    /* Active panel visible and fills space */
+    #prl-live-body > div.prl-tab-active {
+      display: flex !important;
+      flex-direction: column !important;
+      flex: 1 !important;
+    }
+
+    /* Expendables form 1 col */
+    #prl-exp-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Complete run button */
+    #prod-run-live [onclick="prodRunCompletePrompt()"] {
+      flex: 1 !important;
+      min-height: 44px !important;
+    }
+  }
+
+  /* Desktop — restore 3 cols, hide tab bar */
+  @media (min-width: 769px) {
+    #prl-mobile-tabs { display: none !important; }
+    #prl-live-body {
+      display: grid !important;
+      grid-template-columns: 260px 1fr 300px !important;
+    }
+    #prl-live-body > div { display: flex !important; }
   }
 
 </style></head><body>
