@@ -20467,9 +20467,11 @@ const _tableSync = {
   production_runs: {
     key: '420craft_prod_runs',
     transform: r => ({ ...r, id: r.id, batchCode: r.batch_code, sku: r.sku_code,
-      status: r.status, crew: r.crew||[], totalCases: r.cases_produced,
-      costSummary: r.cost_summary, startedAt: r.started_at,
-      completedAt: r.completed_at, leadOperator: r.lead_operator }),
+      flavorName: r.flavor_name, status: r.status,
+      crew: r.crew||[], expendables: r.expendables||[],
+      totalCases: r.cases_produced, costSummary: r.cost_summary,
+      startedAt: r.started_at, completedAt: r.completed_at,
+      leadOperator: r.lead_operator, notes: r.notes }),
     pages: ['prod-run','schedule','dashboard','inv-detail','acct-costing'],
   },
   production_schedule_blocks: {
@@ -20916,6 +20918,20 @@ function _initSupabaseWithRetry() {
       // Sync all tables in background, re-renders current page when done
       _remoteSyncAll().then(() => {
         console.log('[Supabase] ✅ Remote data synced');
+        // Auto-resume any in-progress run that came down from cloud
+        try {
+          if (!prodRunActive) {
+            const runs = prodRunLoad();
+            const active = runs.find(r => r.status === 'in-progress');
+            if (active && document.getElementById('auth-gate')?.style?.opacity === '0' || !document.getElementById('auth-gate')) {
+              prodRunActive = active;
+              const navEl = document.querySelector('[onclick*="prod-run"]');
+              showPage('prod-run', navEl);
+              prodRunGoLive();
+              showToast('🔄 Active run resumed: ' + (active.flavorName || active.sku || active.id));
+            }
+          }
+        } catch(e) { console.warn('Post-sync resume failed:', e); }
       }).catch(e => console.warn('[Supabase] Initial sync error:', e.message));
     }
   } else if (_sbInitAttempts < _sbMaxAttempts) {
@@ -21420,22 +21436,26 @@ const _SB_WRITE_MAP = {
       try { return JSON.parse(localStorage.getItem('420craft_prod_runs')||'[]'); } catch { return []; }
     },
     toRow: r => ({
-      batch_code: r.batchCode||r.batch_code||'',
+      id: r.id||null,
+      batch_code: r.batchCode||r.batch_code||null,
       sku_code: r.sku||r.sku_code||'',
-      status: r.status||'draft',
+      flavor_name: r.flavorName||r.flavor_name||null,
+      status: r.status||'in-progress',
       crew: r.crew||[],
+      expendables: r.expendables||[],
       cases_produced: parseInt(r.totalCases||r.cases_produced||0),
       cost_summary: r.costSummary||r.cost_summary||null,
       started_at: r.startedAt||r.started_at||null,
       completed_at: r.completedAt||r.completed_at||null,
       lead_operator: r.leadOperator||r.lead_operator||null,
       notes: r.notes||null,
+      updated_at: new Date().toISOString(),
     }),
-    conflict: 'batch_code', // use batch_code so saves update not duplicate
-    // Filter out DEMO/seed data — never write test runs to Supabase
+    conflict: 'id',
+    // Only filter out truly empty/demo rows — in-progress runs MUST sync
     filter: rows => rows.filter(r => {
-      const bc = (r.batchCode||r.batch_code||'').toUpperCase();
-      return bc && bc !== 'DEMO' && bc !== 'TEST' && bc !== '' && bc.length > 3;
+      const id = (r.id||'').toString();
+      return id && id.length > 3 && !id.toUpperCase().includes('DEMO') && !id.toUpperCase().includes('TEST');
     }),
   },
   '420craft_schedule': {
