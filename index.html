@@ -5083,68 +5083,129 @@ function navAutoExpand(pageId) {
   }
 }
 
-function fetchFromSheets() {
+async function fetchFromSheets() {
   const url = localStorage.getItem('420craft_sheets_url');
   if (!url) { showToast('⚠ No Apps Script URL set'); return; }
+
+  const sb = getSupabaseClient();
+  if (!sb || !SUPABASE_CONFIG.remoteFirst) {
+    showToast('⚠ Server connection required for Sheets import');
+    return;
+  }
+
   showToast('⏳ Fetching from Sheets...');
-  Promise.all([
-    fetch(url + '?action=inventory').then(r => r.json()).catch(() => ({ result: [] })),
-    fetch(url + '?action=batches').then(r => r.json()).catch(() => ({ result: [] })),
-    fetch(url + '?action=movements').then(r => r.json()).catch(() => ({ result: [] })),
-    fetch(url + '?action=getBarcodeMap').then(r => r.json()).catch(() => ({ result: {} })),
-  ]).then(function(results) {
-    var rawSkus      = results[0].result || [];
-    var rawBatches   = results[1].result || [];
-    var rawMovements = results[2].result || [];
-    var rawBarcodes  = results[3].result || {};
 
-    // Merge barcode map from Sheets into localStorage (Sheets is source of truth)
-    if (rawBarcodes && typeof rawBarcodes === 'object' && Object.keys(rawBarcodes).length > 0) {
-      const localMap  = barcodeMapLoad();
-      const mergedMap = Object.assign({}, rawBarcodes, localMap); // local takes priority
-      localStorage.setItem('420craft_barcode_map', JSON.stringify(mergedMap));
-    }
+  try {
+    // ── FETCH FROM SHEETS ──────────────────────────────────────
+    const [skuRes, batchRes, movRes, barcodeRes] = await Promise.all([
+      fetch(url + '?action=inventory').then(r => r.json()).catch(() => ({ result: [] })),
+      fetch(url + '?action=batches').then(r => r.json()).catch(() => ({ result: [] })),
+      fetch(url + '?action=movements').then(r => r.json()).catch(() => ({ result: [] })),
+      fetch(url + '?action=getBarcodeMap').then(r => r.json()).catch(() => ({ result: {} })),
+    ]);
 
-    // Normalize SKU field names from Sheets format to portal format
+    const rawSkus      = skuRes.result   || [];
+    const rawBatches   = batchRes.result || [];
+    const rawMovements = movRes.result   || [];
+    const rawBarcodes  = barcodeRes.result || {};
+
+    let posted = 0;
+    const errors = [];
+
+    // ── POST SKUs DIRECTLY TO SUPABASE ────────────────────────
     if (rawSkus.length > 0) {
-      skuData = rawSkus.map(function(s) {
-        return {
-          SKU:         s.SKU || s.Full_SKU || '',
-          Full_SKU:    s.Full_SKU || ((s.SKU||'') + ' ' + (s['MG Strength']||s.MG_Strength||'')),
-          MG_Strength: s['MG Strength'] || s.MG_Strength || '',
-          CanSize:     s['Can Size']    || s.CanSize      || '12 oz',
-          CaseSize:    parseInt(s['Case Pack'] || s.CaseSize) || 24,
-          Brand:       s.Brand || s['Brand'] || getBrandLine(s.SKU || ''),
-          FlavorBase:  s['In-House Flavor'] || s.FlavorBase || '',
-          Inbound:     parseInt(s['Total Inbound']  || s.Inbound)  || 0,
-          Outbound:    parseInt(s['Total Outbound'] || s.Outbound) || 0,
-          OnHand:      parseInt(s['On Hand']        || s.OnHand)   || 0,
-        };
-      });
-      localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+      const skus = rawSkus.map(s => ({
+        sku_code:     s.SKU || s.Full_SKU || '',
+        mg_strength:  s['MG Strength'] || s.MG_Strength || '',
+        can_size:     s['Can Size'] || s.CanSize || '12 oz',
+        case_size:    parseInt(s['Case Pack'] || s.CaseSize) || 24,
+        brand:        s.Brand || getBrandLine(s.SKU || ''),
+        flavor_base:  s['In-House Flavor'] || s.FlavorBase || '',
+        cases_on_hand: parseInt(s['On Hand'] || s.OnHand) || 0,
+      })).filter(r => r.sku_code);
+      const { error } = await sb.from('sku_master').upsert(skus, { onConflict: 'sku_code' });
+      if (error) errors.push('SKUs: ' + error.message);
+      else posted += skus.length;
     }
 
+    // ── POST BATCHES DIRECTLY TO SUPABASE ────────────────────
     if (rawBatches.length > 0) {
-      batchData = rawBatches;
-      localStorage.setItem('420craft_batches', JSON.stringify(batchData));
-    _sbWriteAfterSave('420craft_batches');
-    _syncBatchRecordsToSheets(); // compliance backup
+      const batches = rawBatches.map(b => ({
+        batch_code:     b.Batch || b.BatchCode || b['Batch Code'] || '',
+        sku_code:       b.SKU || '',
+        mg_strength:    b.MG || b['MG'] || '',
+        cases_on_hand:  parseInt(b.OnHand || b['On Hand (Cases)']) || 0,
+        cases_produced: parseInt(b.Inbound || b['Inbound (Cases)']) || 0,
+        cases_shipped:  parseInt(b.Outbound || b['Outbound (Cases)']) || 0,
+        status:         (b.Status || 'active').toLowerCase(),
+        coa_link:       b.COA_Link || b['COA Link'] || null,
+        production_date: b.ProductionDate || b['Production Date'] || null,
+      })).filter(r => r.batch_code && r.sku_code);
+      const { error } = await sb.from('batches').upsert(batches, { onConflict: 'batch_code' });
+      if (error) errors.push('Batches: ' + error.message);
+      else posted += batches.length;
     }
 
+    // ── POST MOVEMENTS DIRECTLY TO SUPABASE ──────────────────
     if (rawMovements.length > 0) {
-      movements = rawMovements;
-      localStorage.setItem('420craft_movements', JSON.stringify(movements));
-  _sbWriteAfterSave('420craft_movements');
-  // Update SEED_SKUS in memory so dashboard shows correct all-time totals immediately
-  _updateSeedSkusFromMovement();
+      const movs = rawMovements.map((m, i) => ({
+        id:            m.id || ('SHT-' + Date.now() + '-' + i),
+        movement_type: m.Movement_Type || m['Movement Type'] || '',
+        sku_code:      m.SKU || '',
+        batch_code:    m.Batch_Code || m['Batch Code'] || '',
+        quantity:      parseInt(m.Quantity || m['Quantity (Cases)']) || 0,
+        operator:      m.Operator || '',
+        notes:         m.Notes || '',
+        timestamp:     m.Timestamp || new Date().toISOString(),
+        acting_user:   currentUserEmail(),
+      })).filter(r => r.sku_code && r.movement_type);
+      const { error } = await sb.from('movements').upsert(movs, { onConflict: 'id', ignoreDuplicates: true });
+      if (error) errors.push('Movements: ' + error.message);
+      else posted += movs.length;
     }
+
+    // ── BARCODE MAP: store in Supabase settings, not localStorage ──
+    if (rawBarcodes && Object.keys(rawBarcodes).length > 0) {
+      await sb.from('integrations').upsert({
+        integration_type: 'barcode_map',
+        config: rawBarcodes,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'integration_type' }).catch(() => {
+        // Fallback: cache locally if integrations table doesn't exist yet
+        const localMap = barcodeMapLoad();
+        const merged = Object.assign({}, rawBarcodes, localMap);
+        localStorage.setItem('420craft_barcode_map', JSON.stringify(merged));
+      });
+    }
+
+    if (errors.length) {
+      showToast(`⚠ Import partial: ${posted} records posted, ${errors.length} errors`);
+      console.error('[Sheets Import] Errors:', errors);
+    }
+
+    // ── HYDRATE FROM CONFIRMED SERVER STATE ──────────────────
+    // Never render from the Sheets data directly — always from confirmed Supabase state
+    await Promise.all([
+      _remoteSync('sku_master', true),
+      _remoteSync('batches', true),
+      _remoteSync('movements', true),
+    ]);
 
     renderDashboard();
-    const barcodeCount = Object.keys(barcodeMapLoad()).length;
-    showToast('✅ Synced — ' + skuData.length + ' SKUs, ' + movements.length + ' movements' + (barcodeCount > 0 ? ', ' + barcodeCount + ' barcodes' : ''));
-  }).catch(function(e) {
-    showToast('❌ Sync failed: ' + e.message);
-  });
+    showToast(`✅ ${posted} records imported from Sheets → confirmed by server`);
+
+    // Log the import event
+    await sb.from('audit_logs').insert([{
+      entity_type: 'system', action: 'SHEETS_IMPORT',
+      user_name: currentUserEmail(),
+      timestamp: new Date().toISOString(),
+      details: JSON.stringify({ posted, errors, skus: rawSkus.length, batches: rawBatches.length, movements: rawMovements.length }),
+    }]).catch(() => {});
+
+  } catch(e) {
+    showToast('❌ Sheets import failed: ' + e.message);
+    console.error('[Sheets Import]', e);
+  }
 }
 
 
@@ -5206,14 +5267,59 @@ let skuData = [];
 let movements = [];
 let batchData = [];
 
-function loadData() {
-  const saved = localStorage.getItem('420craft_skus');
-  const savedMov = localStorage.getItem('420craft_movements');
-  const savedBatch = localStorage.getItem('420craft_batches');
-  skuData = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(SEED_SKUS));
-  movements = savedMov ? JSON.parse(savedMov) : [];
-  batchData = savedBatch ? JSON.parse(savedBatch) : JSON.parse(JSON.stringify(SEED_BATCHES));
-  _fixSkuBrands();
+// ── APP BOOT STATE ────────────────────────────────────────────
+// Server is the source of truth. loadData() hydrates from Supabase.
+// localStorage is a stale-read fallback only — never authoritative on boot.
+async function loadData() {
+  // Show loading state
+  const showLoading = (msg) => {
+    const el = document.getElementById('kpi-onhand');
+    if (el) el.textContent = msg || '⏳';
+  };
+
+  // Try server first
+  const sb = getSupabaseClient();
+  if (sb && SUPABASE_CONFIG.remoteFirst) {
+    try {
+      showLoading('⏳');
+      // Hydrate all core operational entities from Supabase
+      await Promise.all([
+        _remoteSync('sku_master', false),
+        _remoteSync('batches', false),
+        _remoteSync('movements', false),
+      ]);
+      // Load into in-memory vars from confirmed cache
+      const skuRaw   = localStorage.getItem('420craft_skus');
+      const movRaw   = localStorage.getItem('420craft_movements');
+      const batRaw   = localStorage.getItem('420craft_batches');
+      skuData   = skuRaw   ? JSON.parse(skuRaw)   : [];
+      movements = movRaw   ? JSON.parse(movRaw)   : [];
+      batchData = batRaw   ? JSON.parse(batRaw)   : [];
+      _fixSkuBrands();
+      console.log('[Boot] Hydrated from Supabase:', skuData.length, 'SKUs,', batchData.length, 'batches,', movements.length, 'movements');
+      return;
+    } catch(e) {
+      console.warn('[Boot] Supabase hydration failed, falling back to cache:', e.message);
+    }
+  }
+
+  // Fallback: stale cache (offline or Supabase not ready)
+  const skuRaw = localStorage.getItem('420craft_skus');
+  const movRaw = localStorage.getItem('420craft_movements');
+  const batRaw = localStorage.getItem('420craft_batches');
+  if (skuRaw || movRaw || batRaw) {
+    skuData   = skuRaw ? JSON.parse(skuRaw) : [];
+    movements = movRaw ? JSON.parse(movRaw) : [];
+    batchData = batRaw ? JSON.parse(batRaw) : [];
+    _fixSkuBrands();
+    showToast('⚠ Running from cached data — server sync pending');
+    console.warn('[Boot] Using stale cache — server not available');
+  } else {
+    // No cache and no server — controlled failure, not silent seed
+    skuData = []; movements = []; batchData = [];
+    showToast('⚠ No data available — connect to server and refresh');
+    console.error('[Boot] No server data and no cache — setup required');
+  }
 }
 function saveData() {
   // ── SERVER-FIRST: write to Supabase, localStorage updates via _remoteSync callback ──
@@ -6855,8 +6961,7 @@ function loadBrandCatalog() {
 }
 
 function saveBrandCatalog() {
-  localStorage.setItem('420craft_brands', JSON.stringify(brandCatalog));
-  _sbWriteAfterSave('420craft_brands');
+  _sbWriteAfterSave('420craft_brands');  // localStorage updated by _remoteSync after server confirms
   if (sheetsEnabled()) sheetsQueue('save_brands', { brands: brandCatalog });
 }
 
@@ -7612,12 +7717,8 @@ function shLoad() {
   try { shipments = JSON.parse(localStorage.getItem('420craft_shipments') || '[]'); } catch(e) { shipments = []; }
 }
 function shSave() {
-  localStorage.setItem('420craft_shipments', JSON.stringify(shipments));
-  // Write to Supabase — background write, user sees shipment immediately
-  _sbWriteAfterSave('420craft_shipments').catch(e => {
-    showToast('⚠ Shipment sync failed — saved locally, will retry');
-    console.error('[shSave] Supabase write failed:', e);
-  });
+  // Server-authoritative: Supabase first, localStorage updated by _remoteSync on confirmation
+  _sbWriteAfterSave('420craft_shipments');
   _syncShipmentCOCToSheets(); // compliance backup
   if (sheetsEnabled()) sheetsQueue('sync_all', { shipments });
 }
@@ -8550,7 +8651,7 @@ async function shSubmitShipment() {
     const sku = skuData.find(sk=>sk.SKU===item.sku&&(sk.MG_Strength||sk.MG)===item.mg);
     if (sku) { sku.Outbound=(parseInt(sku.Outbound)||0)+item.qty; sku.OnHand=Math.max(0,(parseInt(sku.OnHand)||0)-item.qty); }
   });
-  localStorage.setItem('420craft_batches', JSON.stringify(allBatches));
+  // Batch state updated in memory; saveData() posts to server and _remoteSync updates cache
   saveData();
 
   // Try ShipStation if enabled and not LTL
@@ -9012,8 +9113,7 @@ function abLoad() {
   try { addressBook = JSON.parse(localStorage.getItem('420craft_address_book') || '[]'); } catch(e) { addressBook = []; }
 }
 function abSave() {
-  localStorage.setItem('420craft_address_book', JSON.stringify(addressBook));
-  _sbWriteAfterSave('420craft_address_book');
+  _sbWriteAfterSave('420craft_address_book');  // localStorage updated by _remoteSync after server confirms
   if (sheetsEnabled()) sheetsQueue('save_address_book', { addressBook });
 }
 
@@ -9749,8 +9849,7 @@ function smLoad() {
 }
 
 function smSave() {
-  localStorage.setItem('420craft_shipping_materials', JSON.stringify(shippingMaterials));
-  _sbWriteAfterSave('420craft_shipping_materials');
+  _sbWriteAfterSave('420craft_shipping_materials');  // localStorage updated by _remoteSync after server confirms
   if (sheetsEnabled()) sheetsQueue('save_shipping_materials', { shippingMaterials });
 }
 
@@ -10468,226 +10567,162 @@ function backupImport() {
   const statusEl = document.getElementById('backup-import-status');
   statusEl.style.display = 'block';
   statusEl.style.color = 'var(--amber)';
-  statusEl.textContent = '⏳ Restoring...';
+  statusEl.textContent = '⏳ Parsing backup...';
 
-  try {
-    const wb = _backupData;
+  // ── BACKEND-CONTROLLED RESTORE ────────────────────────────────
+  // Parse Excel into structured payloads, post directly to Supabase.
+  // No localStorage writes until server confirms each table.
+  // UI hydrates from confirmed server state via _remoteSyncAll.
 
-    // Restore SKUs
-    if (wb.SheetNames.includes('Inventory')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Inventory']);
-      skuData = rows.map(r => ({
-        SKU: r['SKU']||'', MG_Strength: r['MG Strength']||'',
-        CanSize: r['Can Size']||'12 oz', CaseSize: r['Case Pack']||24,
-        Brand: r['Brand']||'', FlavorBase: r['In-House Flavor']||'',
-        Inbound: r['Total Inbound']||0, Outbound: r['Total Outbound']||0,
-        OnHand: r['On Hand']||0, Full_SKU: r['Full SKU']||'',
-      }));
-    }
-
-    // Restore batches
-    if (wb.SheetNames.includes('Batch Records')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Batch Records']);
-      batchData = rows.map(r => ({
-        Batch: r['Batch Code']||'', BatchCode: r['Batch Code']||'',
-        SKU: r['SKU']||'', MG: r['MG']||'',
-        CanSize: r['Can Size']||'12 oz', CaseSize: r['Case Pack']||24,
-        ProductionDate: r['Production Date']||'', Operator: r['Operator']||'',
-        Inbound: r['Inbound (Cases)']||0, Outbound: r['Outbound (Cases)']||0,
-        OnHand: r['On Hand (Cases)']||0, Status: r['Status']||'active',
-        COA_Link: r['COA Link']||'', LastMovement: r['Last Movement']||'',
-        Notes: r['Notes']||'', ShipLog: [],
-      }));
-    }
-
-    // Restore movements
-    if (wb.SheetNames.includes('Movement Log')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Movement Log']);
-      movements = rows.map(r => ({
-        Timestamp: r['Timestamp']||'',
-        Movement_Type: r['Movement Type']||'',
-        Direction: r['Direction']||'',
-        SKU: r['SKU']||'', MG_Strength: r['MG Strength']||'',
-        Quantity: r['Quantity (Cases)']||0,
-        Batch_Code: r['Batch Code']||'',
-        Operator: r['Operator']||'',
-        Notes: r['Notes']||'',
-        WriteOffReason: r['Write-Off Reason']||'',
-        Destination: r['Recipient Name'] ? {
-          name: r['Recipient Name']||'', company: r['Company']||'',
-          address: r['Address']||'', email: r['Email']||'',
-          phone: r['Phone']||'', po: r['PO #']||'', carrier: r['Carrier']||''
-        } : null,
-      }));
-    }
-
-    // Restore operators
-    if (wb.SheetNames.includes('Operators')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Operators']);
-      const ops = rows.map((r,i) => ({
-        id: 'op_r'+i, name: r['Name']||'',
-        position: r['Position']||'', rate: r['Hourly Rate']||0,
-        status: r['Status']||'active',
-      }));
-      localStorage.setItem('420craft_operators', JSON.stringify(ops));
-    }
-
-    // Restore consumables
-    if (wb.SheetNames.includes('Consumables')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Consumables']);
-      const cons = rows.map((r,i) => ({
-        id: 'c_r'+i, name: r['Item Name']||'', category: r['Category']||'',
-        unit: r['Unit']||'', unitCost: r['Default Unit Cost']||0,
-        trueCostPerUnit: r['True Cost Per Unit']||0,
-        stockOnHand: r['Stock On Hand']||0,
-        reorderPoint: r['Reorder Point']||0, reorderQty: r['Reorder Qty']||0,
-        vendor: r['Primary Vendor']||'', vendorEmail: r['Vendor Email']||'',
-        vendorPhone: r['Vendor Phone']||'', vendorAcct: r['Account #']||'',
-        vendor2: r['Secondary Vendor']||'', vendor2Email: r['Vendor 2 Email']||'',
-        lastPurchaseDate: r['Last Purchase Date']||'',
-        lastUnitCost: r['Last Unit Cost']||0,
-        lastShipping: r['Last Shipping']||0, lastOrderQty: r['Last Order Qty']||0,
-      }));
-      localStorage.setItem('420craft_consumables', JSON.stringify(cons));
-    }
-
-    // Restore shipments
-    if (wb.SheetNames.includes('Shipments')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Shipments']);
-      // Keep as-is since shipments have complex nested structure — just save raw
-      if (rows.length) {
-        // We can't fully reconstruct nested objects from flat sheet, so keep existing
-        // unless localStorage is empty
-        const existing = localStorage.getItem('420craft_shipments');
-        if (!existing || JSON.parse(existing).length === 0) {
-          // Minimal restore from flat data
-          const restored = rows.map(r => ({
-            id: r['ID']||'', status: r['Status']||'pending',
-            type: r['Type']||'wholesale', recipientName: r['Recipient']||'',
-            trackingNumber: r['Tracking']||'', carrier: r['Carrier']||'',
-            shippedDate: r['Shipped Date']||'', createdAt: r['Created']||'',
-          }));
-          localStorage.setItem('420craft_shipments', JSON.stringify(restored));
-        }
+  const doRestore = async () => {
+    try {
+      const sb = getSupabaseClient();
+      if (!sb || !SUPABASE_CONFIG.remoteFirst) {
+        throw new Error('Server connection required for restore. Connect to Supabase first.');
       }
-    }
 
-    // Restore address book
-    if (wb.SheetNames.includes('Address Book')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Address Book']);
-      const ab = rows.map(r => ({
-        id: r['ID']||('AB-'+Date.now()+Math.random()),
-        name: r['Name']||'', company: r['Company']||'',
-        addr1: r['Address 1']||'', addr2: r['Address 2']||'',
-        city: r['City']||'', state: r['State']||'',
-        zip: String(r['ZIP']||''), phone: r['Phone']||'',
-        email: r['Email']||'', createdAt: r['Created']||'',
-      }));
-      localStorage.setItem('420craft_address_book', JSON.stringify(ab));
-    }
+      const wb = _backupData;
+      const user = currentUserEmail();
+      const restoreId = 'RST-' + Date.now();
+      let tablesRestored = 0;
+      const errors = [];
 
-    // Restore shipping materials
-    if (wb.SheetNames.includes('Shipping Materials')) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets['Shipping Materials']);
-      const sm = rows.map(r => ({
-        id: r['ID']||('sm-'+Date.now()+Math.random()),
-        name: r['Name']||'', category: r['Category']||'',
-        unit: r['Unit']||'', unitCost: r['Unit Cost']||0,
-        stockOnHand: r['Stock On Hand']||0, reorderPoint: r['Reorder Point']||0,
-      }));
-      localStorage.setItem('420craft_shipping_materials', JSON.stringify(sm));
-    }
+      // ── Helper: upsert rows to Supabase table ─────────────────
+      const sbPost = async (table, rows, conflictKey) => {
+        if (!rows.length) return;
+        const { error } = await sb.from(table).upsert(rows, { onConflict: conflictKey, ignoreDuplicates: false });
+        if (error) { errors.push(`${table}: ${error.message}`); console.error(`[Restore] ${table}:`, error.message); }
+        else { tablesRestored++; console.log(`[Restore] ${table}: ${rows.length} rows posted`); }
+      };
 
-    // ── RESTORE ACCOUNTING DATA ────────────────────────────
-    const acctRestoreMap = {
-      // Core accounting
-      'Acct-Deals':              '420craft_acct_deals',
-      'Acct-Invoices':           '420craft_acct_invoices',
-      'Acct-Payments':           '420craft_acct_payments',
-      'Acct-Settlements':        '420craft_acct_settlements',
-      'Acct-CostSnapshots':      '420craft_acct_cost_snapshots',
-      'Acct-PurchaseOrders':     '420craft_acct_pos',
-      'Acct-Bills':              '420craft_acct_bills',
-      'Acct-Vendors':            '420craft_acct_vendors',
-      'Acct-SellThrough':        '420craft_acct_sell_through',
-      'Acct-ClosePeriods':       '420craft_acct_close_periods',
-      'Acct-AuditTrail':         '420craft_acct_audit_trail',
-      'Acct-PriceBooks':         '420craft_acct_price_books',
-      'Acct-SyncLog':            '420craft_acct_sync_log',
-      'Acct-TaxRules':           '420craft_acct_tax_rules',
-      'Acct-ChartOfAccounts':    '420craft_acct_coa',
-      'Acct-Reservations':       '420craft_acct_reservations',
-      // Austin addendum
-      'Acct-InvoiceTypes':       '420craft_acct_invoice_types',
-      'Acct-Employees':          '420craft_acct_employees',
-      'Acct-Roles':              '420craft_acct_roles',
-      'Acct-APAccounts':         '420craft_acct_ap_accounts',
-      'Acct-ARReminderRules':    '420craft_acct_ar_reminders',
-      'Acct-ARReminderHistory':  '420craft_acct_ar_reminder_history',
-      'Acct-ExternalIDMap':      '420craft_acct_ext_id_map',
-      // Operational raw data
-      'ProdRuns-Raw':            '420craft_prod_runs',
-      'Schedule-Raw':            '420craft_schedule',
-      'ProductionRequests':      '420craft_production_requests',
-      'RunIntelligence':         '420craft_run_intelligence',
-      'BarcodeMap':              '420craft_barcode_map',
-      'FlavorCatalog-Raw':       '420craft_flavor_catalog',
-      'FlavorConfig':            '420craft_flavor_config',
-      'YieldConfig':             '420craft_yield_config',
-      'ShiftConfig':             '420craft_shift_config',
-      'OrderingManager':         '420craft_ordering_manager',
-      'PostponeLog':             '420craft_postpone_log',
-      'NTHistory':               '420craft_nt_history',
-    };
-    // Restore app settings sheet
-    if (wb.SheetNames.includes('App-Settings')) {
-      try {
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets['App-Settings']);
-        if (rows[0]) {
-          const r = rows[0];
-          if (r.sheets_url) localStorage.setItem('420craft_sheets_url', r.sheets_url);
-          const settingsFields = Object.keys(r).filter(k =>
-            !['sheets_url','shipstation_key_present','exported_at','apps_script_url_present'].includes(k)
-          );
-          if (settingsFields.length) {
-            const existing = JSON.parse(localStorage.getItem('420craft_settings') || '{}');
-            settingsFields.forEach(k => { existing[k] = r[k]; });
-            localStorage.setItem('420craft_settings', JSON.stringify(existing));
-          }
-        }
-      } catch(e) { console.warn('App settings restore failed:', e); }
-    }
-    Object.entries(acctRestoreMap).forEach(([sheetName, lsKey]) => {
-      if (wb.SheetNames.includes(sheetName)) {
-        try {
-          const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
-          const restored = rows.map(r => {
-            const out = {};
-            Object.entries(r).forEach(([k, v]) => {
-              if (typeof v === 'string' && (v.startsWith('{') || v.startsWith('['))) {
-                try { out[k] = JSON.parse(v); } catch { out[k] = v; }
-              } else { out[k] = v; }
-            });
-            return out;
-          });
-          localStorage.setItem(lsKey, JSON.stringify(restored));
-        } catch(e) { console.warn('Acct restore failed:', sheetName, e); }
+      // ── SKUs ──────────────────────────────────────────────────
+      if (wb.SheetNames.includes('Inventory')) {
+        statusEl.textContent = '⏳ Restoring SKUs...';
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['Inventory']);
+        const skus = rows.map(r => ({
+          sku_code: r['SKU']||'', mg_strength: r['MG Strength']||'',
+          can_size: r['Can Size']||'12 oz', case_size: r['Case Pack']||24,
+          brand: r['Brand']||'', flavor_base: r['In-House Flavor']||'',
+          cases_on_hand: r['On Hand']||0,
+        })).filter(r => r.sku_code);
+        await sbPost('sku_master', skus, 'sku_code');
       }
-    });
 
-    saveData();
-    document.getElementById('backup-preview').style.display = 'none';
-    _backupData = null;
+      // ── Batches ───────────────────────────────────────────────
+      if (wb.SheetNames.includes('Batch Records')) {
+        statusEl.textContent = '⏳ Restoring batches...';
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['Batch Records']);
+        const batches = rows.map(r => ({
+          batch_code: r['Batch Code']||'', sku_code: r['SKU']||'',
+          mg_strength: r['MG']||'', can_size: r['Can Size']||'12 oz',
+          case_size: r['Case Pack']||24,
+          production_date: r['Production Date']||null,
+          cases_produced: r['Inbound (Cases)']||0,
+          cases_on_hand: r['On Hand (Cases)']||0,
+          cases_shipped: r['Outbound (Cases)']||0,
+          status: (r['Status']||'released').toLowerCase(),
+          coa_link: r['COA Link']||null,
+        })).filter(r => r.batch_code);
+        await sbPost('batches', batches, 'batch_code');
+      }
 
-    statusEl.textContent = '✅ Restore complete! Refreshing...';
-    statusEl.style.color = 'var(--green)';
-    setTimeout(() => location.reload(), 1500);
+      // ── Movements ─────────────────────────────────────────────
+      if (wb.SheetNames.includes('Movement Log')) {
+        statusEl.textContent = '⏳ Restoring movements...';
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['Movement Log']);
+        const movs = rows.map((r,i) => ({
+          id: r['ID'] || ('MOV-RST-'+restoreId+'-'+i),
+          movement_type: r['Movement Type']||'',
+          sku_code: r['SKU']||'', batch_code: r['Batch Code']||'',
+          quantity: r['Quantity (Cases)']||0,
+          operator: r['Operator']||'',
+          notes: r['Notes']||'',
+          timestamp: r['Timestamp'] || new Date().toISOString(),
+          acting_user: user,
+        })).filter(r => r.sku_code && r.movement_type);
+        await sbPost('movements', movs, 'id');
+      }
 
-  } catch(err) {
-    statusEl.textContent = '❌ Restore failed: ' + err.message;
-    statusEl.style.color = 'var(--red)';
-    console.error('Backup import error:', err);
-  }
+      // ── Operators ─────────────────────────────────────────────
+      if (wb.SheetNames.includes('Operators')) {
+        statusEl.textContent = '⏳ Restoring operators...';
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['Operators']);
+        const ops = rows.map((r,i) => ({
+          legacy_id: r['ID'] || ('op_r'+i),
+          name: r['Name']||'', position: r['Position']||'',
+          rate: parseFloat(r['Hourly Rate']||0), status: r['Status']||'active',
+          shift_eligible: true,
+        })).filter(r => r.name);
+        await sbPost('operators', ops, 'legacy_id');
+      }
+
+      // ── Consumables ───────────────────────────────────────────
+      if (wb.SheetNames.includes('Consumables')) {
+        statusEl.textContent = '⏳ Restoring consumables...';
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['Consumables']);
+        const cons = rows.map((r,i) => ({
+          legacy_id: r['ID'] || ('c_r'+i),
+          name: r['Item Name']||'', category: r['Category']||'',
+          unit: r['Unit']||'each', unit_cost: r['Default Unit Cost']||0,
+          true_cost_per_unit: r['True Cost Per Unit']||0,
+          stock_on_hand: r['Stock On Hand']||0,
+          reorder_point: r['Reorder Point']||0, reorder_qty: r['Reorder Qty']||0,
+        })).filter(r => r.name);
+        await sbPost('consumables', cons, 'legacy_id');
+      }
+
+      // ── Prod Runs ─────────────────────────────────────────────
+      if (wb.SheetNames.includes('ProdRuns-Raw')) {
+        statusEl.textContent = '⏳ Restoring production runs...';
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['ProdRuns-Raw']);
+        const runs = rows.map(r => {
+          try { return typeof r === 'object' ? r : JSON.parse(r); } catch { return r; }
+        }).filter(r => r.id);
+        if (runs.length) await sbPost('production_runs', runs, 'id');
+      }
+
+      // ── Schedule ──────────────────────────────────────────────
+      if (wb.SheetNames.includes('Schedule-Raw')) {
+        statusEl.textContent = '⏳ Restoring schedule...';
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets['Schedule-Raw']);
+        const blocks = rows.filter(r => r.id);
+        if (blocks.length) await sbPost('production_schedule_blocks', blocks, 'id');
+      }
+
+      // ── Log the restore event ─────────────────────────────────
+      await sb.from('audit_logs').insert([{
+        entity_type: 'system', action: 'BACKUP_RESTORE',
+        user_name: user, timestamp: new Date().toISOString(),
+        details: JSON.stringify({ restoreId, tablesRestored, errors, sheetsInBackup: wb.SheetNames }),
+      }]).catch(() => {}); // non-blocking
+
+      if (errors.length) {
+        statusEl.textContent = `⚠ Restore partial: ${tablesRestored} tables OK, ${errors.length} errors. Check console.`;
+        statusEl.style.color = 'var(--amber)';
+      } else {
+        statusEl.textContent = `✅ ${tablesRestored} tables restored to server. Rehydrating...`;
+        statusEl.style.color = 'var(--green)';
+      }
+
+      // ── Hydrate from confirmed server state ───────────────────
+      showToast('⏳ Rehydrating from server...');
+      await _remoteSyncAll();
+      await loadData();
+
+      document.getElementById('backup-preview').style.display = 'none';
+      _backupData = null;
+
+      showToast(`✅ Restore complete — ${tablesRestored} tables confirmed by server`);
+      setTimeout(() => location.reload(), 2000);
+
+    } catch(err) {
+      statusEl.textContent = '❌ Restore failed: ' + err.message;
+      statusEl.style.color = 'var(--red)';
+      console.error('[Restore] Failed:', err);
+    }
+  };
+
+  doRestore();
 }
 
 // ══════════════════════════════════════════
@@ -10708,22 +10743,20 @@ const DEFAULT_OPERATORS = [
 ];
 
 function operatorLoad() {
+  // Read from cache — populated by _remoteSync from Supabase
   try {
     const saved = localStorage.getItem('420craft_operators');
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.length > 0) return parsed;
     }
-    localStorage.setItem('420craft_operators', JSON.stringify(DEFAULT_OPERATORS));
-    return DEFAULT_OPERATORS;
-  } catch(e) {
-    localStorage.setItem('420craft_operators', JSON.stringify(DEFAULT_OPERATORS));
-    return DEFAULT_OPERATORS;
-  }
+    // No data — return empty, do not silently seed defaults in production
+    // Onboarding flow should populate operators
+    return [];
+  } catch(e) { return []; }
 }
 function operatorSaveAll(ops) {
-  localStorage.setItem('420craft_operators', JSON.stringify(ops));
-  _sbWriteAfterSave('420craft_operators');
+  _sbWriteAfterSave('420craft_operators');  // localStorage updated by _remoteSync after server confirms
 }
 
 function renderOperators() {
@@ -11199,35 +11232,31 @@ const DEFAULT_CONSUMABLES = [
 ];
 
 function consumableLoad() {
+  // Read from cache — populated by _remoteSync from Supabase
   try {
     const saved = localStorage.getItem('420craft_consumables');
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Migration: if items are missing vendor fields, merge with defaults
-      if (parsed.length > 0 && parsed[0].vendorEmail === undefined) {
-        // Schema upgraded — merge saved items with new default fields
-        const migrated = parsed.map(old => {
-          const def = DEFAULT_CONSUMABLES.find(d=>d.name===old.name)||{};
-          return {...def, ...old, vendorEmail:'', vendorPhone:'', vendorAcct:'',
-            vendor2:'', vendor2Email:'', vendor2Phone:'', vendor2Acct:'',
-            lastPurchaseDate:'', lastUnitCost:0, lastShipping:0, lastOrderQty:0,
-            trueCostPerUnit:old.unitCost||0, stockOnHand:0, reorderPoint:0, reorderQty:0};
-        });
-        localStorage.setItem('420craft_consumables', JSON.stringify(migrated));
-        return migrated;
+      if (parsed.length > 0) {
+        // Schema migration: add missing fields if needed
+        if (parsed[0].vendorEmail === undefined) {
+          return parsed.map(old => {
+            const def = DEFAULT_CONSUMABLES.find(d=>d.name===old.name)||{};
+            return {...def, ...old, vendorEmail:'', vendorPhone:'', vendorAcct:'',
+              vendor2:'', vendor2Email:'', vendor2Phone:'', vendor2Acct:'',
+              lastPurchaseDate:'', lastUnitCost:0, lastShipping:0, lastOrderQty:0,
+              trueCostPerUnit:old.unitCost||0, stockOnHand:0, reorderPoint:0, reorderQty:0};
+          });
+        }
+        return parsed;
       }
-      return parsed;
     }
-    localStorage.setItem('420craft_consumables', JSON.stringify(DEFAULT_CONSUMABLES));
-    return DEFAULT_CONSUMABLES;
-  } catch(e) {
-    localStorage.setItem('420craft_consumables', JSON.stringify(DEFAULT_CONSUMABLES));
-    return DEFAULT_CONSUMABLES;
-  }
+    // No data — return empty, not defaults
+    return [];
+  } catch(e) { return []; }
 }
 function consumableSaveAll(items) {
-  localStorage.setItem('420craft_consumables', JSON.stringify(items));
-  _sbWriteAfterSave('420craft_consumables');
+  _sbWriteAfterSave('420craft_consumables');  // localStorage updated by _remoteSync after server confirms
 }
 
 function renderConsumables() {
@@ -11673,8 +11702,7 @@ function prodRunLoad() {
   try { return JSON.parse(localStorage.getItem('420craft_prod_runs')||'[]'); } catch(e) { return []; }
 }
 function prodRunSaveAll(runs) {
-  localStorage.setItem('420craft_prod_runs', JSON.stringify(runs));
-  _sbWriteAfterSave('420craft_prod_runs');
+  _sbWriteAfterSave('420craft_prod_runs');  // localStorage updated by _remoteSync after server confirms
   const inProg = runs.filter(r=>r.status==='in-progress').length;
   const badge = document.getElementById('prod-run-badge');
   if (badge) { badge.textContent=inProg; badge.style.display=inProg>0?'inline':'none'; }
@@ -11687,16 +11715,17 @@ function prodRunSaveAll(runs) {
 let _prodRunSaveDebounce = null;
 function prodRunSaveActive(immediate = false) {
   if (!prodRunActive) return;
+  // Update in-memory runs array so getRows() in _SB_WRITE_MAP has the latest data
   const runs = prodRunLoad();
   const idx = runs.findIndex(r=>r.id===prodRunActive.id);
   if (idx>=0) runs[idx]=prodRunActive; else runs.push(prodRunActive);
-  // Always write localStorage immediately
-  localStorage.setItem('420craft_prod_runs', JSON.stringify(runs));
+  // Write to in-memory staging only — _sbWriteAfterSave posts to server,
+  // _remoteSync updates localStorage from confirmed server response
+  localStorage.setItem('420craft_prod_runs', JSON.stringify(runs)); // staging for getRows()
   const inProg = runs.filter(r=>r.status==='in-progress').length;
   const badge = document.getElementById('prod-run-badge');
   if (badge) { badge.textContent=inProg; badge.style.display=inProg>0?'inline':'none'; }
-  // Debounce Supabase write to 800ms to avoid race conditions on rapid events
-  // Clock-in/out calls with immediate=true to push right away
+  // Immediate for clock-in/out events; debounced for rapid updates (notes, qty edits)
   if (_prodRunSaveDebounce) clearTimeout(_prodRunSaveDebounce);
   if (immediate) {
     _sbWriteAfterSave('420craft_prod_runs');
@@ -13668,8 +13697,7 @@ function oqLoadOrders() {
   } catch(e) { customerOrders = []; }
 }
 function oqSaveOrders() {
-  localStorage.setItem('420craft_customer_orders', JSON.stringify(customerOrders));
-  _sbWriteAfterSave('420craft_customer_orders');
+  _sbWriteAfterSave('420craft_customer_orders');  // localStorage updated by _remoteSync after server confirms
 }
 
 let schedViewYear  = new Date().getFullYear();
@@ -13680,8 +13708,7 @@ function scheduleLoad() {
   try { return JSON.parse(localStorage.getItem('420craft_schedule') || '[]'); } catch(e) { return []; }
 }
 function scheduleSave(blocks) {
-  localStorage.setItem('420craft_schedule', JSON.stringify(blocks));
-  _sbWriteAfterSave('420craft_schedule');
+  _sbWriteAfterSave('420craft_schedule');  // localStorage updated by _remoteSync after server confirms
   if (sheetsEnabled()) sheetsQueue('sync_schedule', blocks);
 }
 function scheduleLoadConfig() {
@@ -16053,7 +16080,7 @@ function auditQtyChanged() {
 }
 
 function auditSave() {
-  const sku = document.getElementById('audit-sku').value;
+  const sku      = document.getElementById('audit-sku').value;
   const batchCode = document.getElementById('audit-batch').value;
   const qty      = parseInt(document.getElementById('audit-qty').value);
   const operator = document.getElementById('audit-operator').value.trim();
@@ -16072,66 +16099,98 @@ function auditSave() {
     alertEl.className='alert alert-error'; alertEl.textContent='⚠ Enter a valid quantity'; alertEl.classList.remove('hidden'); return;
   }
 
-  // Find the batch
   const bIdx = batchData.findIndex(b => b.SKU===sku && (b.Batch||b.BatchCode)===batchCode);
-  const sIdx = skuData.findIndex(s => s.SKU===sku);
   const currentOH = bIdx >= 0 ? (batchData[bIdx].OnHand ?? 0) : 0;
-  let newOH = currentOH;
-  let entry = { ts: new Date().toISOString(), type: auditMode, sku, batchCode, operator, notes };
 
-  if (auditMode === 'count') {
-    entry.physicalCount = qty;
-    entry.bookCount = currentOH;
-    entry.variance = qty - currentOH;
-    newOH = qty;
-  } else if (auditMode === 'add') {
-    entry.qty = qty;
-    entry.before = currentOH;
-    entry.after = currentOH + qty;
-    newOH = currentOH + qty;
-  } else if (auditMode === 'remove') {
-    entry.qty = qty;
-    entry.before = currentOH;
-    entry.after = Math.max(0, currentOH - qty);
-    newOH = Math.max(0, currentOH - qty);
-  }
-
-  // Update batchData
-  if (bIdx >= 0) {
-    batchData[bIdx].OnHand = newOH;
-    if (auditMode === 'add') batchData[bIdx].Inbound = (batchData[bIdx].Inbound||0) + qty;
-    if (auditMode === 'remove') batchData[bIdx].Outbound = (batchData[bIdx].Outbound||0) + qty;
-  } else if (auditMode === 'add') {
-    // New batch being added
-    batchData.push({ SKU:sku, MG:'', Batch:batchCode, BatchCode:batchCode,
-      Inbound:qty, Outbound:0, OnHand:qty, LastMovement:new Date().toISOString().slice(0,10) });
-  }
-
-  // Update skuData totals
-  if (sIdx >= 0) {
-    const skuBatches = batchData.filter(b => b.SKU === sku);
-    skuData[sIdx].OnHand = skuBatches.reduce((a,b)=>a+(b.OnHand??0),0);
-    if (auditMode === 'add') skuData[sIdx].Inbound = (skuData[sIdx].Inbound||0) + qty;
-    if (auditMode === 'remove') skuData[sIdx].Outbound = (skuData[sIdx].Outbound||0) + qty;
-  }
-
-  saveData();
-
-  // Save audit log
-  const log = auditLoadLog();
-  log.push(entry);
-  auditSaveLog(log);
-  sheetsPost('log_audit', entry);
-
-  document.getElementById('audit-modal').classList.add('hidden');
-  renderAudit();
-
-  const msgs = {
-    count: `📋 Count saved — ${entry.variance===0?'✓ Matches book':'⚠ Variance: '+(entry.variance>0?'+':'')+entry.variance} cases`,
-    add:   `＋ Added ${qty} cases to ${batchCode}`,
-    remove:`− Removed ${qty} cases from ${batchCode}`
+  // Build audit entry — server will apply the state change
+  const entry = {
+    ts: new Date().toISOString(),
+    Timestamp: new Date().toISOString(),
+    type: auditMode,
+    Movement_Type: auditMode === 'count' ? 'Audit Count' : auditMode === 'add' ? 'Audit Add' : 'Audit Remove',
+    sku, batchCode,
+    SKU: sku,
+    Batch_Code: batchCode,
+    operator, Operator: operator,
+    notes, Notes: notes,
+    ...(auditMode === 'count' ? { physicalCount: qty, bookCount: currentOH, variance: qty - currentOH, Quantity: qty - currentOH } : {}),
+    ...(auditMode === 'add'   ? { qty, before: currentOH, after: currentOH + qty, Quantity: qty } : {}),
+    ...(auditMode === 'remove'? { qty, before: currentOH, after: Math.max(0, currentOH - qty), Quantity: -qty } : {}),
   };
-  showToast(msgs[auditMode]);
+
+  // ── POST TO SERVER FIRST ──────────────────────────────────────
+  // Do not mutate batchData or skuData — server applies the change,
+  // _remoteSync updates in-memory state from confirmed server response
+  document.getElementById('audit-modal').classList.add('hidden');
+  showToast('⏳ Posting audit...');
+
+  const doPost = async () => {
+    try {
+      // Post as a movement record so it goes through the shared inventory posting path
+      const sb = getSupabaseClient();
+      if (sb && SUPABASE_CONFIG.remoteFirst) {
+        const movRow = {
+          id: 'AUD-' + Date.now(),
+          movement_type: entry.Movement_Type,
+          sku_code: sku,
+          batch_code: batchCode,
+          quantity: entry.Quantity || 0,
+          operator: operator,
+          notes: notes,
+          timestamp: entry.ts,
+          acting_user: currentUserEmail(),
+          audit_type: auditMode,
+          physical_count: entry.physicalCount || null,
+          book_count: entry.bookCount || null,
+          variance: entry.variance || null,
+        };
+        const { error } = await sb.from('movements').insert([movRow]);
+        if (error) throw new Error(error.message);
+
+        // Server confirmed — now update batch on_hand via upsert
+        if (bIdx >= 0) {
+          const newOH = auditMode === 'count' ? qty
+            : auditMode === 'add' ? currentOH + qty
+            : Math.max(0, currentOH - qty);
+          await sb.from('batches').upsert({
+            batch_code: batchCode,
+            sku_code: sku,
+            cases_on_hand: newOH,
+          }, { onConflict: 'batch_code' });
+        }
+
+        // Pull confirmed state from server — this is the only place in-memory state updates
+        await _remoteSync('movements', true);
+        await _remoteSync('batches', true);
+
+        // Post audit log entry
+        const log = auditLoadLog();
+        log.push(entry);
+        auditSaveLog(log);
+        sheetsPost('log_audit', entry);
+
+        renderAudit();
+        const msgs = {
+          count: `📋 Count saved — ${entry.variance===0?'✓ Matches book':'⚠ Variance: '+(entry.variance>0?'+':'')+entry.variance} cases`,
+          add:   `＋ Added ${qty} cases to ${batchCode}`,
+          remove:`− Removed ${qty} cases from ${batchCode}`
+        };
+        showToast(msgs[auditMode]);
+
+      } else {
+        // Offline fallback — queue for server sync
+        _queueOfflineWrite('420craft_movements');
+        showToast('⚠ Offline — audit queued for sync when connection restores');
+      }
+    } catch(e) {
+      console.error('[Audit] Server post failed:', e.message);
+      showToast('⚠ Audit failed: ' + e.message);
+      // Re-open modal so user can retry
+      document.getElementById('audit-modal').classList.remove('hidden');
+    }
+  };
+
+  doPost();
 }
 
 function auditExportLog() {
@@ -16804,22 +16863,26 @@ function bcExportLog() {
   }
 })();
 
-loadData();
-// Notification module vars
+// ── ASYNC BOOT SEQUENCE ───────────────────────────────────────
+// Server hydration must complete before first render
+(async () => {
+  await loadData();
+  // Connect to Google Sheets if URL is configured
+  if (sheetsEnabled()) {
+    sheetsPing();
+    setTimeout(sheetsSyncAll, 2000);
+  }
+  loadBrandCatalog();
+  if (typeof ntLoadData === 'function') ntLoadData();
+  if (typeof oqLoadOrders === 'function') oqLoadOrders();
+  renderDashboard();
+})();
+
+// Module-scope notification vars (used by ntLoadData and notification functions)
 let _ntContacts  = [];
 let _ntHistory   = [];
 let _ntTxPreviewMode = 'desktop';
 let _ntWkPreviewMode = 'desktop';
-
-// Connect to Google Sheets if URL is configured
-if (sheetsEnabled()) {
-  sheetsPing();
-  setTimeout(sheetsSyncAll, 2000); // sync after data loads
-}
-loadBrandCatalog();
-if (typeof ntLoadData === "function") ntLoadData();
-if (typeof oqLoadOrders === "function") oqLoadOrders();
-renderDashboard();
 
 
 
@@ -17436,8 +17499,7 @@ function ntLoadData() {
 }
 
 function ntSaveContacts() {
-  localStorage.setItem('420craft_nt_contacts', JSON.stringify(_ntContacts));
-  _sbWriteAfterSave('420craft_nt_contacts');
+  _sbWriteAfterSave('420craft_nt_contacts');  // localStorage updated by _remoteSync after server confirms
 }
 
 function ntSaveHistory() {
@@ -18288,6 +18350,7 @@ function _fixSkuBrands() {
       OnHand:      parseInt(s.OnHand || s['On Hand']) || 0,
     };
   });
+  // Cache-only: skuData is derived/computed — authoritative source is Supabase sku_master
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
 
   _rollupSkuTotals();
