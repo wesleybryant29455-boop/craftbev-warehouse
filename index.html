@@ -1090,10 +1090,12 @@ function hideAuthGate(user) {
   }
   // Add user badge to topbar
   setTimeout(() => addUserBadge(user), 500);
-  setTimeout(async () => {
+
+  // Fetch permissions from cloud then apply nav — retry handles Supabase init delay
+  (async () => {
     await _fetchRemotePermissions();
     _applyNavPermissions();
-  }, 800);
+  })();
 
   // Check for any in-progress run and notify — don't redirect
   setTimeout(async () => {
@@ -1238,6 +1240,8 @@ function canViewPay() {
   return getUserPages(currentUserEmail()).includes('pay-visible');
 }
 
+let _showPagePatched = false;
+
 function _applyNavPermissions() {
   const email = currentUserEmail();
   const superAdmin = isSuperAdmin();
@@ -1256,43 +1260,69 @@ function _applyNavPermissions() {
     const match = el.getAttribute('onclick').match(/showPage\('([^']+)'/);
     if (match) {
       const pageId = match[1];
-      if (!allowed.has(pageId)) el.style.display = 'none';
+      el.style.display = allowed.has(pageId) ? '' : 'none';
     }
   });
 
-  // Hide section headers if all items in that section are hidden
+  // Hide nav-more-toggle and expanded sections if all their children are hidden
+  document.querySelectorAll('#ops-more, #acct-more, #admin-more').forEach(container => {
+    const visible = Array.from(container.querySelectorAll('.nav-item')).some(el => el.style.display !== 'none');
+    const toggle = document.querySelector(`[onclick*="navToggle('${container.id}"]`);
+    if (toggle) toggle.style.display = visible ? '' : 'none';
+    if (!visible) container.style.display = 'none';
+  });
+
+  // Hide section headers if all their nav items are hidden
   document.querySelectorAll('.nav-section').forEach(section => {
     let next = section.nextElementSibling;
     let allHidden = true;
     while (next && !next.classList.contains('nav-section')) {
-      if (next.style.display !== 'none') { allHidden = false; break; }
+      if (next.style.display !== 'none' && !next.classList.contains('nav-more-toggle')) {
+        allHidden = false; break;
+      }
       next = next.nextElementSibling;
     }
     if (allHidden) section.style.display = 'none';
   });
 
-  // Block direct page navigation
-  const _origShowPage = showPage;
-  showPage = function(id, el) {
-    if (!canAccessPage(id)) {
-      showToast('🔒 You don\'t have access to this section.');
-      return;
-    }
-    _origShowPage(id, el);
-  };
+  // Patch showPage once only — never double-wrap
+  if (!_showPagePatched) {
+    _showPagePatched = true;
+    const _origShowPage = showPage;
+    showPage = function(id, el) {
+      if (!canAccessPage(id)) {
+        showToast('🔒 You don\'t have access to this section.');
+        return;
+      }
+      _origShowPage(id, el);
+    };
+  }
 }
 
-// ── Fetch permissions from Supabase on load ───────────────────
+// ── Fetch permissions from Supabase — retry until client ready ─
 async function _fetchRemotePermissions() {
-  const sb = getSupabaseClient();
-  if (!sb) return;
-  try {
-    const { data, error } = await sb.from('user_permissions').select('*');
-    if (error || !data) return;
-    const perms = {};
-    data.forEach(row => { if (row.email) perms[row.email.toLowerCase()] = row.pages || []; });
-    localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
-  } catch(e) { console.warn('[Perms] Remote fetch failed:', e.message); }
+  // Retry up to 15 times (7.5 seconds) waiting for Supabase client
+  for (let i = 0; i < 15; i++) {
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        const { data, error } = await sb.from('user_permissions').select('*');
+        if (!error && data) {
+          const perms = {};
+          data.forEach(row => { if (row.email) perms[row.email.toLowerCase()] = row.pages || []; });
+          localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
+          console.log('[Perms] Loaded', Object.keys(perms).length, 'user permissions from cloud');
+          return true;
+        }
+      } catch(e) { console.warn('[Perms] Fetch error:', e.message); }
+      return false;
+    }
+    // Wait 500ms before retry
+    await new Promise(r => setTimeout(r, 500));
+  }
+  console.warn('[Perms] Supabase not ready after retries — using cached permissions');
+  return false;
+}
 }
 
 // ── Render the permissions admin panel ───────────────────────
