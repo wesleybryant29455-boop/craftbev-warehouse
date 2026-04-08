@@ -12140,14 +12140,7 @@ function _localDateStr() {
 }
 
 function _localDateTimeStr() {
-  // Returns full ISO string with local timezone offset
-  // e.g. 2026-04-08T09:15:00-04:00
-  // Using toISOString() would give UTC — we need local time so the timer
-  // calculates elapsed correctly without timezone offset errors
   return new Date().toISOString();
-  // Note: We store as UTC ISO string and always compare Date.now() vs new Date(str)
-  // Both are UTC so the math is correct regardless of which timezone the device is in
-}
 }
 
 function _localTimeStr() {
