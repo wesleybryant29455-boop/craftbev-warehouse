@@ -1032,6 +1032,30 @@
 </div>
 
 <script>
+// ── EARLY STUBS — available before main script block loads ───
+// waitForSupabase polls until the Supabase client initializes
+async function waitForSupabase(maxMs = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    try {
+      if (typeof getSupabaseClient === 'function') {
+        const sb = getSupabaseClient();
+        if (sb) return sb;
+      }
+    } catch(e) { /* client not ready yet */ }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  console.error('[Supabase] waitForSupabase timed out');
+  return null;
+}
+
+// prodRunLoad stub — real implementation in main script block
+function prodRunLoad() {
+  if (typeof _prodRunsData !== 'undefined') return _prodRunsData || [];
+  return [];
+}
+
+
 // ── GOOGLE AUTH CONFIG ────────────────────────────────────────
 const ALLOWED_DOMAIN = '420craftbeverages.com';
 const AUTH_KEY = '420craft_auth_user';
@@ -13410,7 +13434,7 @@ function _settingsSaveProduction() {
     prepMinutes:       cfg.prepMinutes,
     changeoverMinutes: cfg.changeoverMinutes,
     workDays:          cfg.workDays
-  }));
+  });
   settingsSave(cfg);
   _settingsRenderProduction();
   showToast('✓ Production settings saved');
