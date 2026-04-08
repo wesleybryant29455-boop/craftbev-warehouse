@@ -1199,7 +1199,11 @@ const ALL_NAV_PAGES = [
 function isSuperAdmin() {
   try {
     const auth = JSON.parse(sessionStorage.getItem(AUTH_KEY) || '{}');
-    return (auth.email||'').toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+    const email = (auth.email || '').toLowerCase();
+    if (email === SUPER_ADMIN_EMAIL.toLowerCase()) return true;
+    // Also check DEV_MODE
+    if (DEV_MODE && DEV_USER.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) return true;
+    return false;
   } catch { return false; }
 }
 
