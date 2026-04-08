@@ -5345,11 +5345,13 @@ async function loadData() {
   };
 
   showLoading('⏳');
-  const sb = await waitForSupabase(10000);
+
+  // Wait for Supabase client — but never block the UI thread
+  // waitForSupabase polls in the background without freezing navigation
+  const sb = await waitForSupabase(15000);
   if (!sb) {
-    showToast('⚠ Cannot connect to server — check your connection and refresh');
+    showToast('⚠ Cannot reach server — check connection and refresh');
     skuData = []; movements = []; batchData = [];
-    console.error('[Boot] Supabase unavailable after 10s');
     return;
   }
 
@@ -5381,8 +5383,7 @@ async function loadData() {
     _fixSkuBrands();
     console.log('[Boot] Hydrated from Supabase:', skuData.length, 'SKUs,', batchData.length, 'batches,', movements.length, 'movements');
   } catch(e) {
-    showToast('⚠ Server load failed: ' + e.message + ' — refresh to retry');
-    skuData = []; movements = []; batchData = [];
+    showToast('⚠ Server load error: ' + e.message);
     console.error('[Boot] Load failed:', e.message);
   }
 }
@@ -16902,18 +16903,21 @@ function bcExportLog() {
 })();
 
 // ── ASYNC BOOT SEQUENCE ───────────────────────────────────────
-// Server hydration must complete before first render
+// UI renders immediately — data hydrates in background from Supabase.
+// Nav is never blocked. Data populates as it arrives.
+loadBrandCatalog();
+if (typeof ntLoadData === 'function') ntLoadData();
+if (typeof oqLoadOrders === 'function') oqLoadOrders();
+renderDashboard(); // render immediately with empty state
+
+// Background hydration — does not block UI
 (async () => {
-  await loadData();
-  // Connect to Google Sheets if URL is configured
+  await loadData(); // fetches all tables from Supabase, postFetch sets globals
+  renderDashboard(); // re-render once data arrives
   if (sheetsEnabled()) {
     sheetsPing();
     setTimeout(sheetsSyncAll, 2000);
   }
-  loadBrandCatalog();
-  if (typeof ntLoadData === 'function') ntLoadData();
-  if (typeof oqLoadOrders === 'function') oqLoadOrders();
-  renderDashboard();
 })();
 
 // Module-scope notification vars (used by ntLoadData and notification functions)
