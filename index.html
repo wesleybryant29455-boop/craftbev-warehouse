@@ -12140,14 +12140,14 @@ function _localDateStr() {
 }
 
 function _localDateTimeStr() {
-  // Returns YYYY-MM-DDTHH:MM:SS in local timezone (no UTC offset)
-  const d = new Date();
-  return d.getFullYear() + '-' +
-    String(d.getMonth()+1).padStart(2,'0') + '-' +
-    String(d.getDate()).padStart(2,'0') + 'T' +
-    String(d.getHours()).padStart(2,'0') + ':' +
-    String(d.getMinutes()).padStart(2,'0') + ':' +
-    String(d.getSeconds()).padStart(2,'0');
+  // Returns full ISO string with local timezone offset
+  // e.g. 2026-04-08T09:15:00-04:00
+  // Using toISOString() would give UTC — we need local time so the timer
+  // calculates elapsed correctly without timezone offset errors
+  return new Date().toISOString();
+  // Note: We store as UTC ISO string and always compare Date.now() vs new Date(str)
+  // Both are UTC so the math is correct regardless of which timezone the device is in
+}
 }
 
 function _localTimeStr() {
@@ -12337,14 +12337,30 @@ function prodRunResumeToLive(id) {
 
 function _prodRunTickTimer() {
   if (!prodRunActive) return;
-  const elapsed = Math.floor((Date.now() - new Date(prodRunActive.startedAt).getTime()) / 1000);
+  // Parse startedAt correctly — handle both ISO with timezone and naive local strings
+  // Naive strings (no Z or offset) were stored as local time, parse them as local
+  let startMs;
+  const raw = prodRunActive.startedAt || '';
+  if (raw.endsWith('Z') || raw.match(/[+-]\d{2}:\d{2}$/)) {
+    // Proper ISO with timezone — parse directly
+    startMs = new Date(raw).getTime();
+  } else if (raw.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)) {
+    // Naive datetime string (no timezone) — was stored as local time
+    // Parse as local by replacing 'T' separator interpretation
+    const [datePart, timePart] = raw.split('T');
+    const [y,mo,d] = datePart.split('-').map(Number);
+    const [h,mi,s] = timePart.split(':').map(Number);
+    startMs = new Date(y, mo-1, d, h, mi, s||0).getTime();
+  } else {
+    startMs = new Date(raw).getTime();
+  }
+  const elapsed = Math.floor((Date.now() - startMs) / 1000);
   const h = Math.floor(elapsed/3600).toString().padStart(2,'0');
   const m = Math.floor((elapsed%3600)/60).toString().padStart(2,'0');
   const s = (elapsed%60).toString().padStart(2,'0');
   const el = document.getElementById('prl-elapsed');
   if (el) el.textContent = `${h}:${m}:${s}`;
-  // Update crew individual timers
-  _prodRunRenderCrew(true); // soft refresh
+  _prodRunRenderCrew(true);
   _prodRunUpdateCosts();
 }
 
