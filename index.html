@@ -1305,27 +1305,26 @@ function _applyNavPermissions() {
 
 // ── Fetch permissions from Supabase — retry until client ready ─
 async function _fetchRemotePermissions() {
-  // Retry up to 15 times (7.5 seconds) waiting for Supabase client
-  for (let i = 0; i < 15; i++) {
-    const sb = getSupabaseClient();
-    if (sb) {
-      try {
-        const { data, error } = await sb.from('user_permissions').select('*');
-        if (!error && data) {
-          const perms = {};
-          data.forEach(row => { if (row.email) perms[row.email.toLowerCase()] = row.pages || []; });
-          localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
-          console.log('[Perms] Loaded', Object.keys(perms).length, 'user permissions from cloud');
-          return true;
-        }
-      } catch(e) { console.warn('[Perms] Fetch error:', e.message); }
-      return false;
-    }
-    // Wait 500ms before retry
-    await new Promise(r => setTimeout(r, 500));
+  const sb = await waitForSupabase(8000);
+  if (!sb) {
+    console.warn('[Perms] Supabase not ready — skipping remote permissions fetch');
+    return false;
   }
-  console.warn('[Perms] Supabase not ready after retries — using cached permissions');
-  return false;
+  try {
+    const { data, error } = await sb.from('user_permissions').select('*');
+    if (!error && data) {
+      const perms = {};
+      data.forEach(row => { if (row.email) perms[row.email.toLowerCase()] = row.pages || []; });
+      localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
+      console.log('[Perms] Loaded', Object.keys(perms).length, 'user permissions from cloud');
+      return true;
+    }
+    console.warn('[Perms] Fetch error:', error?.message);
+    return false;
+  } catch(e) {
+    console.warn('[Perms] Fetch exception:', e.message);
+    return false;
+  }
 }
 
 // ── Render the permissions admin panel ───────────────────────
@@ -5336,22 +5335,16 @@ async function loadData() {
     if (el) el.textContent = msg || '⏳';
   };
 
-  const sb = getSupabaseClient();
+  showLoading('⏳');
+  const sb = await waitForSupabase(10000);
   if (!sb) {
-    // Supabase client not ready yet — retry once after short delay
-    await new Promise(r => setTimeout(r, 1000));
-    const sb2 = getSupabaseClient();
-    if (!sb2) {
-      showToast('⚠ Cannot connect to server — check your connection and refresh');
-      skuData = []; movements = []; batchData = [];
-      console.error('[Boot] Supabase client unavailable');
-      return;
-    }
+    showToast('⚠ Cannot connect to server — check your connection and refresh');
+    skuData = []; movements = []; batchData = [];
+    console.error('[Boot] Supabase unavailable after 10s');
+    return;
   }
 
   try {
-    showLoading('⏳');
-    // Fetch all core tables in parallel — postFetch sets globals directly
     await Promise.all([
       _remoteSync('sku_master', false),
       _remoteSync('batches', false),
@@ -21365,6 +21358,25 @@ const SUPABASE_CONFIG = {
   remoteFirst: true, // ALWAYS server-first — no localStorage fallback for operational data
   get configured() { return !!(this.url && this.anonKey); }
 };
+
+// ── WAIT FOR SUPABASE ─────────────────────────────────────────
+// Polls until getSupabaseClient() returns a live client.
+// Use this anywhere that calls getSupabaseClient() early in the file
+// before the client declaration at the bottom of the script block.
+async function waitForSupabase(maxMs = 10000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    try {
+      const sb = getSupabaseClient();
+      if (sb) return sb;
+    } catch(e) {
+      // _sbClient not yet initialized — keep waiting
+    }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  console.error('[Supabase] waitForSupabase timed out after', maxMs, 'ms');
+  return null;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // EDGE FUNCTIONS — server-side business logic
