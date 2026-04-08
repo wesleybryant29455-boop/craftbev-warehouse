@@ -12499,8 +12499,10 @@ function prodRunDoAddExpendable() {
 }
 
 function prodRunRemoveExpendable(idx) {
-  prodRunActive.expendables.splice(idx,1);
-  prodRunSaveActive(true); // immediate push
+  if (!prodRunActive) return;
+  if (!prodRunActive.expendables) return;
+  prodRunActive.expendables.splice(idx, 1);
+  prodRunSaveActive(true);
   _prodRunRenderExpendables();
   _prodRunUpdateCosts();
 }
@@ -21260,6 +21262,20 @@ const _pageRenderMap = {
 };
 
 // Table → local key + transform for cache update
+
+// ── UNIVERSAL ECHO GUARD ──────────────────────────────────────
+// Prevents a device from overwriting its own just-saved state
+// when Realtime bounces the write back. Allows through:
+// - updates from other users (always)
+// - own deletes (record count decreased)
+function _isOwnEcho(remoteRecord, localRecord) {
+  const myEmail = typeof currentUserEmail === 'function' ? currentUserEmail() : '';
+  if (!myEmail) return false;
+  const updatedBy = remoteRecord.updated_by || remoteRecord.acting_user || '';
+  if (updatedBy !== myEmail) return false;
+  const updatedAt = new Date(remoteRecord.updated_at || 0).getTime();
+  return (Date.now() - updatedAt) < 3000;
+}
 var _tableSync = {
   batches: {
     key: '420craft_batches',
@@ -21351,12 +21367,16 @@ var _tableSync = {
       const remote = runs.find(r => r.id === prodRunActive.id);
       if (!remote) return;
 
-      // Skip own echo — if this update was sent by the current user recently, ignore it
+      // Skip own echo — but only if server has same or MORE items than local
+      // If server has FEWER items (delete confirmed), always apply it
       const _myEmail = typeof currentUserEmail === 'function' ? currentUserEmail() : '';
       const _remoteUpdatedBy = remote.updated_by || remote.acting_user || '';
       const _remoteUpdatedAt = new Date(remote.updated_at || 0).getTime();
-      if (_myEmail && _remoteUpdatedBy === _myEmail && (Date.now() - _remoteUpdatedAt) < 3000) {
-        return; // own echo — skip silently
+      const _remoteExpCount = (remote.expendables || []).length;
+      const _localExpCount = (prodRunActive.expendables || []).length;
+      const _serverDeletedSomething = _remoteExpCount < _localExpCount;
+      if (_isOwnEcho(remote, prodRunActive) && !_serverDeletedSomething) {
+        return; // own echo with no deletion — skip
       }
 
       // Remote is source of truth — preserve active crew timer start times
@@ -22349,6 +22369,8 @@ var _SB_WRITE_MAP = {
       status: o.status||'active',
       rate: parseFloat(o.rate||0),
       shift_eligible: true,
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
     }),
     conflict: 'legacy_id',
   },
@@ -22368,6 +22390,8 @@ var _SB_WRITE_MAP = {
       reorder_point: parseFloat(c.reorderPoint||c.reorder_point||0),
       reorder_qty: parseFloat(c.reorderQty||c.reorder_qty||0),
       last_purchase_date: c.lastPurchaseDate||c.last_purchase_date||null,
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
       last_unit_cost: parseFloat(c.lastUnitCost||c.last_unit_cost||0),
     }),
     conflict: 'legacy_id',
