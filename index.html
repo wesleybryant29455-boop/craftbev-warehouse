@@ -1348,9 +1348,17 @@ function renderUserPermissions() {
 
   <div class="section" style="margin-bottom:20px">
     <div style="font-size:11px;font-family:var(--font-mono);color:var(--amber);letter-spacing:2px;margin-bottom:12px">ADD USER</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
       <input class="form-input" id="perm-new-email" placeholder="user@420craftbeverages.com" style="flex:1;min-width:200px">
       <button class="btn btn-primary" onclick="permAddUser()">+ Add User</button>
+    </div>
+    <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:1px;margin-bottom:8px">QUICK ROLE — type email above then click preset to add with that role</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <button onclick="permApplyRole('warehouse')" style="background:rgba(57,232,122,0.08);border:1px solid rgba(57,232,122,0.2);color:var(--green);border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">📦 Warehouse</button>
+      <button onclick="permApplyRole('production')" style="background:rgba(255,184,48,0.08);border:1px solid rgba(255,184,48,0.2);color:var(--amber);border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">🏭 Production</button>
+      <button onclick="permApplyRole('accounting')" style="background:rgba(74,144,226,0.08);border:1px solid rgba(74,144,226,0.2);color:var(--blue);border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">🏦 Accounting</button>
+      <button onclick="permApplyRole('executive')" style="background:rgba(160,100,255,0.08);border:1px solid rgba(160,100,255,0.2);color:#a064ff;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">📊 Executive</button>
+      <button onclick="permApplyRole('worker')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">👷 Worker</button>
     </div>
   </div>
 
@@ -1371,10 +1379,15 @@ function _renderPermUserCard(email, allowedPages, sections) {
         <div style="font-weight:700;font-size:14px;color:var(--text)">${email}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:2px">${allowedPages.length} pages accessible</div>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button onclick="permGrantAll('${email}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Grant All</button>
-        <button onclick="permRevokeAll('${email}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">✕ Revoke All</button>
-        <button onclick="permRemoveUser('${email}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text3);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">🗑 Remove</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button onclick="permApplyRoleTo('${email}','worker')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">👷 Worker</button>
+        <button onclick="permApplyRoleTo('${email}','warehouse')" style="background:rgba(57,232,122,0.08);border:1px solid rgba(57,232,122,0.2);color:var(--green);border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">📦 Warehouse</button>
+        <button onclick="permApplyRoleTo('${email}','production')" style="background:rgba(255,184,48,0.08);border:1px solid rgba(255,184,48,0.2);color:var(--amber);border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">🏭 Production</button>
+        <button onclick="permApplyRoleTo('${email}','accounting')" style="background:rgba(74,144,226,0.08);border:1px solid rgba(74,144,226,0.2);color:var(--blue);border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">🏦 Accounting</button>
+        <button onclick="permApplyRoleTo('${email}','executive')" style="background:rgba(160,100,255,0.08);border:1px solid rgba(160,100,255,0.2);color:#a064ff;border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">📊 Executive</button>
+        <button onclick="permGrantAll('${email}')" style="background:rgba(57,232,122,0.1);border:1px solid rgba(57,232,122,0.3);color:var(--green);border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">✓ All</button>
+        <button onclick="permRevokeAll('${email}')" style="background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">✕ None</button>
+        <button onclick="permRemoveUser('${email}')" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text3);border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer">🗑</button>
       </div>
     </div>
     ${sections.map(section => `
@@ -1447,6 +1460,44 @@ function permRevokeAll(email) {
   permsSave(perms);
   renderUserPermissions();
   showToast('Access revoked for ' + email);
+}
+
+// ── Role preset definitions ───────────────────────────────────
+const ROLE_PRESETS = {
+  worker:     ['dashboard','prod-run','log-movement'],
+  warehouse:  ['dashboard','inventory','inv-detail','log-movement','movement-history',
+               'shipping','reorder','pallet-map','consumables','batch-calc'],
+  production: ['dashboard','prod-run','schedule','inv-detail','inv-audit','log-movement',
+               'movement-history','batch-calc','operators','consumables','flavor-mgr','reorder'],
+  accounting: ['dashboard','acct-home','acct-ar','acct-ap','acct-settlements','acct-close',
+               'acct-deals','acct-costing','acct-vendors','acct-inventory-val','acct-reports',
+               'acct-shipment-costing','acct-invoice-types','acct-price-books','acct-tax-rules',
+               'acct-ar-reminders','acct-ap-accounts','acct-integrations','acct-qbo',
+               'acct-exceptions','acct-employees','pay-visible','order-queue'],
+  executive:  ['dashboard','inventory','inv-detail','brand-velocity','movement-history',
+               'order-queue','shipping','schedule','acct-home','acct-ar','acct-reports',
+               'acct-inventory-val','acct-costing','acct-deals','acct-shipment-costing',
+               'brand-launch','pay-visible'],
+};
+
+function permApplyRole(role) {
+  const email = (document.getElementById('perm-new-email')?.value||'').trim().toLowerCase();
+  if (!email || !email.includes('@')) { showToast('⚠ Enter an email first'); return; }
+  if (email === SUPER_ADMIN_EMAIL.toLowerCase()) { showToast('⚠ Super-admin always has full access'); return; }
+  const perms = permsLoad();
+  perms[email] = [...(ROLE_PRESETS[role] || [])];
+  permsSave(perms);
+  document.getElementById('perm-new-email').value = '';
+  renderUserPermissions();
+  showToast(`✓ ${email} added as ${role}`);
+}
+
+function permApplyRoleTo(email, role) {
+  const perms = permsLoad();
+  perms[email] = [...(ROLE_PRESETS[role] || [])];
+  permsSave(perms);
+  renderUserPermissions();
+  showToast(`✓ ${role} role applied to ${email}`);
 }
 
 function permRemoveUser(email) {
@@ -5270,59 +5321,48 @@ const SEED_BATCHES = [{"SKU":"Blind Tiger Root Beer","MG":"10 MG","Batch":"1.0",
 let skuData = [];
 let movements = [];
 let batchData = [];
+let _operatorsData = [];   // set directly by _remoteSync postFetch
+let _consumablesData = []; // set directly by _remoteSync postFetch
+let _scheduleData = [];    // set directly by _remoteSync postFetch
+let _prodRunsData = [];    // set directly by _remoteSync postFetch
 
 // ── APP BOOT STATE ────────────────────────────────────────────
-// Server is the source of truth. loadData() hydrates from Supabase.
-// localStorage is a stale-read fallback only — never authoritative on boot.
+// Cloud is the only source of truth.
+// postFetch handlers set globals directly from server response.
+// localStorage is not used for operational data.
 async function loadData() {
-  // Show loading state
   const showLoading = (msg) => {
     const el = document.getElementById('kpi-onhand');
     if (el) el.textContent = msg || '⏳';
   };
 
-  // Try server first
   const sb = getSupabaseClient();
-  if (sb && SUPABASE_CONFIG.remoteFirst) {
-    try {
-      showLoading('⏳');
-      // Hydrate all core operational entities from Supabase
-      await Promise.all([
-        _remoteSync('sku_master', false),
-        _remoteSync('batches', false),
-        _remoteSync('movements', false),
-      ]);
-      // Load into in-memory vars from confirmed cache
-      const skuRaw   = localStorage.getItem('420craft_skus');
-      const movRaw   = localStorage.getItem('420craft_movements');
-      const batRaw   = localStorage.getItem('420craft_batches');
-      skuData   = skuRaw   ? JSON.parse(skuRaw)   : [];
-      movements = movRaw   ? JSON.parse(movRaw)   : [];
-      batchData = batRaw   ? JSON.parse(batRaw)   : [];
-      _fixSkuBrands();
-      console.log('[Boot] Hydrated from Supabase:', skuData.length, 'SKUs,', batchData.length, 'batches,', movements.length, 'movements');
+  if (!sb) {
+    // Supabase client not ready yet — retry once after short delay
+    await new Promise(r => setTimeout(r, 1000));
+    const sb2 = getSupabaseClient();
+    if (!sb2) {
+      showToast('⚠ Cannot connect to server — check your connection and refresh');
+      skuData = []; movements = []; batchData = [];
+      console.error('[Boot] Supabase client unavailable');
       return;
-    } catch(e) {
-      console.warn('[Boot] Supabase hydration failed, falling back to cache:', e.message);
     }
   }
 
-  // Fallback: stale cache (offline or Supabase not ready)
-  const skuRaw = localStorage.getItem('420craft_skus');
-  const movRaw = localStorage.getItem('420craft_movements');
-  const batRaw = localStorage.getItem('420craft_batches');
-  if (skuRaw || movRaw || batRaw) {
-    skuData   = skuRaw ? JSON.parse(skuRaw) : [];
-    movements = movRaw ? JSON.parse(movRaw) : [];
-    batchData = batRaw ? JSON.parse(batRaw) : [];
+  try {
+    showLoading('⏳');
+    // Fetch all core tables in parallel — postFetch sets globals directly
+    await Promise.all([
+      _remoteSync('sku_master', false),
+      _remoteSync('batches', false),
+      _remoteSync('movements', false),
+    ]);
     _fixSkuBrands();
-    showToast('⚠ Running from cached data — server sync pending');
-    console.warn('[Boot] Using stale cache — server not available');
-  } else {
-    // No cache and no server — controlled failure, not silent seed
+    console.log('[Boot] Hydrated from Supabase:', skuData.length, 'SKUs,', batchData.length, 'batches,', movements.length, 'movements');
+  } catch(e) {
+    showToast('⚠ Server load failed: ' + e.message + ' — refresh to retry');
     skuData = []; movements = []; batchData = [];
-    showToast('⚠ No data available — connect to server and refresh');
-    console.error('[Boot] No server data and no cache — setup required');
+    console.error('[Boot] Load failed:', e.message);
   }
 }
 function saveData() {
@@ -10747,17 +10787,8 @@ const DEFAULT_OPERATORS = [
 ];
 
 function operatorLoad() {
-  // Read from cache — populated by _remoteSync from Supabase
-  try {
-    const saved = localStorage.getItem('420craft_operators');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.length > 0) return parsed;
-    }
-    // No data — return empty, do not silently seed defaults in production
-    // Onboarding flow should populate operators
-    return [];
-  } catch(e) { return []; }
+  // Read from in-memory global set by _remoteSync postFetch — no localStorage
+  return _operatorsData || [];
 }
 function operatorSaveAll(ops) {
   _sbWriteAfterSave('420craft_operators');  // localStorage updated by _remoteSync after server confirms
@@ -11236,28 +11267,8 @@ const DEFAULT_CONSUMABLES = [
 ];
 
 function consumableLoad() {
-  // Read from cache — populated by _remoteSync from Supabase
-  try {
-    const saved = localStorage.getItem('420craft_consumables');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.length > 0) {
-        // Schema migration: add missing fields if needed
-        if (parsed[0].vendorEmail === undefined) {
-          return parsed.map(old => {
-            const def = DEFAULT_CONSUMABLES.find(d=>d.name===old.name)||{};
-            return {...def, ...old, vendorEmail:'', vendorPhone:'', vendorAcct:'',
-              vendor2:'', vendor2Email:'', vendor2Phone:'', vendor2Acct:'',
-              lastPurchaseDate:'', lastUnitCost:0, lastShipping:0, lastOrderQty:0,
-              trueCostPerUnit:old.unitCost||0, stockOnHand:0, reorderPoint:0, reorderQty:0};
-          });
-        }
-        return parsed;
-      }
-    }
-    // No data — return empty, not defaults
-    return [];
-  } catch(e) { return []; }
+  // Read from in-memory global set by _remoteSync postFetch — no localStorage
+  return _consumablesData || [];
 }
 function consumableSaveAll(items) {
   _sbWriteAfterSave('420craft_consumables');  // localStorage updated by _remoteSync after server confirms
@@ -11703,7 +11714,8 @@ let _prlCrewTimers = {};    // { name: startTimestamp }
 
 // Storage
 function prodRunLoad() {
-  try { return JSON.parse(localStorage.getItem('420craft_prod_runs')||'[]'); } catch(e) { return []; }
+  // Read from in-memory global set by _remoteSync postFetch — no localStorage
+  return _prodRunsData || [];
 }
 function prodRunSaveAll(runs) {
   _sbWriteAfterSave('420craft_prod_runs');  // localStorage updated by _remoteSync after server confirms
@@ -13709,7 +13721,8 @@ let schedViewMonth = new Date().getMonth(); // 0-indexed
 
 // ── Persistence ───────────────────────────────────────────────────
 function scheduleLoad() {
-  try { return JSON.parse(localStorage.getItem('420craft_schedule') || '[]'); } catch(e) { return []; }
+  // Read from in-memory global set by _remoteSync postFetch — no localStorage
+  return _scheduleData || [];
 }
 function scheduleSave(blocks) {
   _sbWriteAfterSave('420craft_schedule');  // localStorage updated by _remoteSync after server confirms
@@ -21080,7 +21093,7 @@ const _tableSync = {
       Destination: r.destination || r.Destination || null,
     }),
     pages: ['inventory','inv-detail','movement-history','dashboard','brand-velocity'],
-    postFetch: (data) => { if(typeof movements!=='undefined') movements = data; },
+    postFetch: (data) => { movements = data; },
     orderBy: { col: 'created_at', asc: false }, limit: 1000000,
   },
   sku_master: {
@@ -21129,6 +21142,7 @@ const _tableSync = {
       leadOperator: r.lead_operator, notes: r.notes }),
     pages: ['prod-run','schedule','dashboard','inv-detail','acct-costing'],
     postFetch: (runs) => {
+      _prodRunsData = runs;
       if (!prodRunActive) return;
       const remote = runs.find(r => r.id === prodRunActive.id);
       if (!remote) return;
@@ -21181,12 +21195,14 @@ const _tableSync = {
       startTime: r.start_time, endTime: r.end_time,
       status: r.status, casesPlanned: r.cases_planned }),
     pages: ['schedule','prod-run','dashboard'],
+    postFetch: (data) => { _scheduleData = data; },
   },
   operators: {
     key: '420craft_operators',
     transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
       position: r.position, status: r.status, rate: parseFloat(r.rate||0) }),
     pages: ['operators','prod-run','schedule'],
+    postFetch: (data) => { _operatorsData = data; },
   },
   consumables: {
     key: '420craft_consumables',
@@ -21195,6 +21211,7 @@ const _tableSync = {
       trueCostPerUnit: r.true_cost_per_unit, stockOnHand: r.stock_on_hand,
       reorderPoint: r.reorder_point, reorderQty: r.reorder_qty }),
     pages: ['consumables','prod-run','reorder'],
+    postFetch: (data) => { _consumablesData = data; },
   },
   shipments: {
     key: '420craft_shipments',
@@ -21298,9 +21315,8 @@ async function _remoteSync(table, forceRender) {
 
     const mapped = cfg.transform ? data.map(cfg.transform) : data;
 
-    // ── ONLY PLACE localStorage is updated — always from server response ──
-    if (cfg.key) localStorage.setItem(cfg.key, JSON.stringify(mapped));
-
+    // ── SET IN-MEMORY GLOBALS DIRECTLY FROM SERVER ────────────
+    // No localStorage. Cloud is the only source of truth.
     if (cfg.postFetch) cfg.postFetch(mapped);
 
     // Re-render — tighter debounce for real-time feel
@@ -21346,7 +21362,7 @@ function _invalidateCache(table) {
 const SUPABASE_CONFIG = {
   url: '',
   anonKey: '',
-  remoteFirst: false,
+  remoteFirst: true, // ALWAYS server-first — no localStorage fallback for operational data
   get configured() { return !!(this.url && this.anonKey); }
 };
 
@@ -21388,24 +21404,16 @@ async function _callEdgeFunction(url, body) {
 }
 
 
-// Load config — Remote First is ON by default when URL+key are saved
+// Load config — credentials hardcoded, remoteFirst always ON
 (function _loadSupabaseConfig() {
   try {
-    // Hardcoded defaults — every device gets these automatically
     const DEFAULT_URL = 'https://vuiorapiugmfmgwdolzq.supabase.co';
     const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1aW9yYXBpdWdtZm1nd2RvbHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODEwNjQsImV4cCI6MjA5MTA1NzA2NH0.eHHsGvc1__KyJBhUiImPUghVhdie08V42FPt8WZFcvA';
-    const cfg = JSON.parse(localStorage.getItem('420craft_supabase_config') || '{}');
-    SUPABASE_CONFIG.url = cfg.url || DEFAULT_URL;
-    // Use saved key if valid JWT, otherwise use hardcoded default
-    const savedKey = cfg.anonKey || '';
-    SUPABASE_CONFIG.anonKey = savedKey.startsWith('eyJ') ? savedKey : DEFAULT_KEY;
-    // Always save correct config back to localStorage so all devices get it
-    if (!savedKey.startsWith('eyJ')) {
-      localStorage.setItem('420craft_supabase_config', JSON.stringify({ url: SUPABASE_CONFIG.url, anonKey: DEFAULT_KEY, remoteFirst: cfg.remoteFirst !== false }));
-    }
-    // Auto-enable Remote First for everyone
-    SUPABASE_CONFIG.remoteFirst = cfg.remoteFirst !== false;
-  } catch(e) {}
+    SUPABASE_CONFIG.url = DEFAULT_URL;
+    SUPABASE_CONFIG.anonKey = DEFAULT_KEY;
+    SUPABASE_CONFIG.remoteFirst = true; // non-negotiable
+    console.log('[Supabase] Config loaded — remoteFirst: true');
+  } catch(e) { console.error('[Supabase] Config error:', e.message); }
 })();
 
 // ── SUPABASE CLIENT (CDN-loaded, with retry) ─────────────────
