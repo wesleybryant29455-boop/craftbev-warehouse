@@ -4913,6 +4913,7 @@ async function sheetsPost(action, data) {
 // ── Full sync on page load ────────────────────────────────────
 function sheetsSyncAll() {
   if (!sheetsEnabled()) return;
+  if (typeof _appState === 'undefined') return; // not ready yet
   // NOTE: movements and full batch history are NOT sent to Sheets
   // Supabase is now the source of truth for those.
   // Sheets only receives: settings, operators, consumables, schedule,
@@ -5608,7 +5609,7 @@ function renderDashboard() {
       datasets: [
         {
           label: 'New Batch / Inbound',
-          data: MONTHLY_DATA.map(m => m.Inbound),
+          data: (MONTHLY_DATA||[]).map(m => m ? m.Inbound : 0),
           backgroundColor: 'rgba(57,232,122,0.75)',
           borderColor: '#39e87a',
           borderWidth: 1,
@@ -5616,7 +5617,7 @@ function renderDashboard() {
         },
         {
           label: 'Outbound',
-          data: MONTHLY_DATA.map(m => m.Outbound),
+          data: (MONTHLY_DATA||[]).map(m => m ? m.Outbound : 0),
           backgroundColor: 'rgba(176,108,255,0.65)',
           borderColor: '#b06cff',
           borderWidth: 1,
@@ -18510,8 +18511,10 @@ function acctLoadObj(key) {
 
 function acctSave(key, data) {
   // 1. Write to in-memory cache immediately — UI reads from here
-  _appState[key] = data;
-  // 2. Post to Supabase — this triggers Realtime on ALL connected devices
+  if (typeof _appState !== 'undefined') _appState[key] = data;
+  // 2. Post to Supabase only when authenticated — triggers Realtime on ALL devices
+  const _userEmail = typeof currentUserEmail === 'function' ? currentUserEmail() : '';
+  if (!_userEmail) return; // not authenticated yet — don't attempt write
   const sb = getSupabaseClient ? getSupabaseClient() : null;
   if (sb) {
     sb.from('app_state').upsert({
