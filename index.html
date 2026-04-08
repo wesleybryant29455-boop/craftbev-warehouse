@@ -1052,11 +1052,25 @@ const DEV_USER = { email: 'wbryant@420craftbeverages.com', name: 'Wesley (Dev)',
         // Check if Supabase already has a session (persisted from previous sign-in)
         // supabase.auth.getSession() will return existing session if token is still valid
         const _restoreSupabaseSession = async () => {
-          const sb = await waitForSupabase(10000);
+          // Inline poll — waitForSupabase is in block 5, not accessible here
+          let sb = null;
+          const _t1 = Date.now();
+          while (Date.now() - _t1 < 10000) {
+            try { if (typeof getSupabaseClient === 'function') { sb = getSupabaseClient(); if (sb) break; } } catch(e) {}
+            await new Promise(r => setTimeout(r, 200));
+          }
           if (sb) {
             const { data } = await sb.auth.getSession().catch(() => ({ data: null }));
             if (data?.session) {
               console.log('[Auth] ✅ Supabase session restored for', data.session.user?.email);
+              // Session restored — reload data with authenticated token
+              setTimeout(() => {
+                if (typeof loadData === 'function') {
+                  loadData().then(() => {
+                    if (typeof renderDashboard === 'function') renderDashboard();
+                  });
+                }
+              }, 300);
             } else {
               console.warn('[Auth] No Supabase session — RLS will use anon key until next sign-in');
             }
@@ -1088,7 +1102,13 @@ function handleGoogleCredential(response) {
     // This gives Supabase a user-scoped JWT so auth.email() works in RLS.
     // Without this, all Supabase writes use the anon key and RLS rejects them.
     const _trySupabaseAuth = async () => {
-      const sb = await waitForSupabase(10000);
+      // Inline poll — waitForSupabase is in block 5
+      let sb = null;
+      const _t2 = Date.now();
+      while (Date.now() - _t2 < 10000) {
+        try { if (typeof getSupabaseClient === 'function') { sb = getSupabaseClient(); if (sb) break; } } catch(e) {}
+        await new Promise(r => setTimeout(r, 200));
+      }
       if (!sb) { console.warn('[Auth] Supabase not ready — RLS will use anon key'); hideAuthGate(user); return; }
       try {
         const { data, error } = await sb.auth.signInWithIdToken({
@@ -1100,6 +1120,15 @@ function handleGoogleCredential(response) {
           console.warn('[Auth] RLS may reject writes — falling back to anon session');
         } else {
           console.log('[Auth] ✅ Supabase session established for', data.user?.email);
+          // Session established — reload all data with proper auth token
+          // Previous loadData() ran without session, so data may be empty
+          setTimeout(() => {
+            if (typeof loadData === 'function') {
+              loadData().then(() => {
+                if (typeof renderDashboard === 'function') renderDashboard();
+              });
+            }
+          }, 500);
         }
       } catch(e) {
         console.warn('[Auth] Supabase auth exception:', e.message);
@@ -5428,8 +5457,7 @@ async function loadData() {
 
   showLoading('⏳');
 
-  // Wait for Supabase client — but never block the UI thread
-  // waitForSupabase polls in the background without freezing navigation
+  // Wait for Supabase client
   const sb = await waitForSupabase(15000);
   if (!sb) {
     showToast('⚠ Cannot reach server — check connection and refresh');
@@ -5437,30 +5465,38 @@ async function loadData() {
     return;
   }
 
+  // Wait for auth session — RLS requires authenticated user
+  // Poll up to 10s for session to be established after Google sign-in
+  let hasSession = false;
+  const _ts = Date.now();
+  while (Date.now() - _ts < 10000) {
+    const { data: sd } = await sb.auth.getSession().catch(() => ({ data: null }));
+    if (sd?.session) { hasSession = true; break; }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  if (!hasSession) {
+    console.warn('[Boot] No Supabase session after 10s — data may be restricted by RLS');
+  }
+
   try {
     await Promise.all([
-      // Core inventory
       _remoteSync('sku_master', false),
       _remoteSync('batches', false),
       _remoteSync('movements', false),
-      // Operations
       _remoteSync('operators', false),
       _remoteSync('consumables', false),
       _remoteSync('production_runs', false),
       _remoteSync('production_schedule_blocks', false),
       _remoteSync('shipments', false),
       _remoteSync('customer_orders', false),
-      // Accounting
       _remoteSync('invoices', false),
       _remoteSync('vendors', false),
       _remoteSync('customer_deals', false),
       _remoteSync('settlement_periods', false),
-      // Reference data
       _remoteSync('brands', false),
       _remoteSync('customers', false),
       _remoteSync('notification_contacts', false),
     ]);
-    // Load all app config/state from cloud
     await _appStateSync();
     _fixSkuBrands();
     console.log('[Boot] Hydrated from Supabase:', skuData.length, 'SKUs,', batchData.length, 'batches,', movements.length, 'movements');
