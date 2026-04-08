@@ -1170,13 +1170,14 @@ function hideAuthGate(user) {
       if (typeof _remoteSync === 'function' && typeof SUPABASE_CONFIG !== 'undefined' && SUPABASE_CONFIG?.configured) {
         await _remoteSync('production_runs', true);
       }
+      if (typeof prodRunLoad !== 'function') return; // block 5 not ready yet
       const runs = prodRunLoad();
       const active = runs.find(r => r.status === 'in-progress');
       if (active) {
         showToast('🔄 Active run: ' + (active.flavorName || active.sku || active.id) + ' — go to Prod Run to resume');
       }
     } catch(e) { console.warn('Post-login run check failed:', e); }
-  }, 1200);
+  }, 3000);
 }
 
 function addUserBadge(user) {
@@ -22306,8 +22307,6 @@ var _SB_WRITE_MAP = {
       cases_shipped: parseInt(b.cases_shipped||b.Outbound||0),
       lead_operator: b.lead_operator||b.Operator||null,
       notes: b.notes||b.Notes||null,
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
     }),
     conflict: 'batch_code',
   },
@@ -22325,9 +22324,7 @@ var _SB_WRITE_MAP = {
       quantity: parseInt(m.quantity||m.Quantity||0),
       destination: m.destination||m.Destination||null,
       write_off_reason: m.write_off_reason||m.WriteOffReason||null,
-      notes: m.notes||m.Notes||
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',null,
+      notes: m.notes||m.Notes||null,
       operator: m.operator||m.Operator||null,
       created_at: m.created_at||m.Timestamp||new Date().toISOString(),
     }),
@@ -22353,9 +22350,7 @@ var _SB_WRITE_MAP = {
       tracking_number: s.trackingNumber||s.tracking_number||null,
       items: s.items||[],
       cogs: s.cogs||null,
-      carrier_cost: parseFloat(s.cogs?.carrierTotal||s.carrier_cos
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',t||0),
+      carrier_cost: parseFloat(s.cogs?.carrierTotal||s.carrier_cost||0),
       labor_cost: parseFloat(s.cogs?.laborTotal||s.labor_cost||0),
       total_cost: parseFloat(s.cogs?.totalCogs||s.total_cost||0),
       ship_date: s.shipDate||s.ship_date||null,
@@ -22375,8 +22370,6 @@ var _SB_WRITE_MAP = {
       status: o.status||'active',
       rate: parseFloat(o.rate||0),
       shift_eligible: true,
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
     }),
     conflict: 'legacy_id',
   },
@@ -22396,8 +22389,6 @@ var _SB_WRITE_MAP = {
       reorder_point: parseFloat(c.reorderPoint||c.reorder_point||0),
       reorder_qty: parseFloat(c.reorderQty||c.reorder_qty||0),
       last_purchase_date: c.lastPurchaseDate||c.last_purchase_date||null,
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
       last_unit_cost: parseFloat(c.lastUnitCost||c.last_unit_cost||0),
     }),
     conflict: 'legacy_id',
@@ -22436,18 +22427,14 @@ var _SB_WRITE_MAP = {
     getRows: () => {
       return _scheduleData || [];
     },
-    toRow
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',: b => ({
+    toRow: b => ({
       title: b.title||'',
       sku_code: b.skuCode||b.sku_code||'',
       start_time: b.startTime||b.start_time||null,
       end_time: b.endTime||b.end_time||null,
       status: b.status||'scheduled',
       cases_planned: parseInt(b.casesPlanned||b.cases_planned||0),
-      lead_operator: b.lea
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',dOperator||b.lead_operator||null,
+      lead_operator: b.leadOperator||b.lead_operator||null,
       notes: b.notes||null,
     }),
     conflict: 'id',
@@ -22458,8 +22445,6 @@ var _SB_WRITE_MAP = {
       return acctLoad('420craft_shipping_materials');
     },
     toRow: m => ({
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
       legacy_id: String(m.id||m.legacy_id||''),
       name: m.name||'',
       unit: m.unit||'each',
@@ -22473,8 +22458,6 @@ var _SB_WRITE_MAP = {
     getRows: () => {
       return _customerOrdersData || [];
     },
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
     toRow: o => ({
       status: o.status||'requested',
       items: o.items||[],
@@ -22486,25 +22469,19 @@ var _SB_WRITE_MAP = {
   },
   '420craft_audit_log': {
     table: 'audit_logs',
-    g
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',etRows: () => {
+    getRows: () => {
       return acctLoad('420craft_audit_log');
     },
     toRow: r => ({
       action:      r.action || r.type || 'audit',
       entity_type: r.entityType || r.type || '',
-      entity_id:   String(r.entityId || r.batchCode || r.sku ||
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'', ''),
+      entity_id:   String(r.entityId || r.batchCode || r.sku || ''),
       user_name:   r.userName || r.operator || r.user || '',
       note:        r.note || r.notes || '',
       created_at:  r.timestamp || r.ts || new Date().toISOString(),
     }),
     conflict: null,
-    insertOnly: fals
-      updated_at: new Date().toISOString(),
-      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',e,
+    insertOnly: false,
   },
   '420craft_nt_contacts': {
     table: 'notification_contacts',
