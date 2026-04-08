@@ -5033,7 +5033,7 @@ function sheetsSyncAll() {
   ];
   acctSyncKeys.forEach(({ action, key }) => {
     try {
-      const raw = localStorage.getItem(key);
+      const raw = JSON.stringify(_appState[key] || acctLoad(key) || []);
       if (raw && raw !== '[]' && raw !== '{}') {
         sheetsQueue(action, { key: key.replace('420craft_',''), data: JSON.parse(raw) });
       }
@@ -5061,7 +5061,7 @@ async function _syncBatchRecordsToSheets() {
       const { data } = await sb.from('batches').select('*').order('production_date', { ascending: false });
       batches = data || [];
     } else {
-      batches = JSON.parse(localStorage.getItem('420craft_batches') || '[]');
+      batches = batchData || [];
     }
 
     if (!batches.length) return;
@@ -5102,7 +5102,7 @@ async function _syncShipmentCOCToSheets() {
       const { data } = await sb.from('shipments').select('*').order('created_at', { ascending: false });
       shipments = data || [];
     } else {
-      shipments = JSON.parse(localStorage.getItem('420craft_shipments') || '[]');
+      shipments = _shipmentsData || [];
     }
 
     if (!shipments.length) return;
@@ -6246,7 +6246,7 @@ function _renderReorderCard(a) {
 function _getUpcomingProductionRuns() {
   // Get scheduled production blocks in next 30 days
   try {
-    const blocks = JSON.parse(localStorage.getItem('420craft_schedule')||'[]');
+    const blocks = _scheduleData || [];
     const now = new Date();
     const cutoff = new Date(now.getTime() + 30*24*60*60*1000);
     return blocks.filter(b => {
@@ -7137,7 +7137,7 @@ function _brandColor(name) {
 }
 
 function loadBrandCatalog() {
-  const saved = localStorage.getItem('420craft_brands');
+  const saved = JSON.stringify(_brandsData || []);
   brandCatalog = saved ? JSON.parse(saved) : _seedBrandCatalog();
   // Migrate old brands that lack new fields
   brandCatalog = brandCatalog.map(b => ({
@@ -7903,7 +7903,7 @@ const SH_TYPE_ICONS  = { sample:'📦', order:'🛒', ltl:'🚛', whitelabel:'�
 
 // ── Data ──────────────────────────────────
 function shLoad() {
-  try { shipments = JSON.parse(localStorage.getItem('420craft_shipments') || '[]'); } catch(e) { shipments = []; }
+  try { shipments = _shipmentsData || []; } catch(e) { shipments = []; }
 }
 function shSave() {
   // Server-authoritative: Supabase first, localStorage updated by _remoteSync on confirmation
@@ -7965,7 +7965,7 @@ function shCheckApiStatus() {
 function shPopulateWorkerDropdown(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  const ops = JSON.parse(localStorage.getItem('420craft_operators') || '[]');
+  const ops = _operatorsData || [];
   const cur = el.value;
   el.innerHTML = '<option value="">— Select Worker —</option>' +
     ops.map(o => `<option value="${o.name}" data-rate="${o.rate||0}">${o.name} ($${o.rate||0}/hr)</option>`).join('');
@@ -8821,7 +8821,7 @@ async function shSubmitShipment() {
 
   // Log outbound movements
   const now = new Date().toISOString();
-  const allBatches = JSON.parse(localStorage.getItem('420craft_batches')||'[]');
+  const allBatches = batchData || [];
   (s.items||[]).forEach(item => {
     const alloc = item.batchAllocation || shFifoBatches(item.sku, item.mg, item.qty).allocation;
     if (alloc.length) {
@@ -9051,7 +9051,7 @@ async function shGetLiveRates() {
   const boxes       = s.boxes || [];
   const totalWeight = boxes.reduce((a,b) => a+(parseFloat(b.weight)||0), 0) || 1;
   const firstBox    = boxes[0] || {};
-  const fromZip     = (JSON.parse(localStorage.getItem('420craft_settings')||'{}').warehouseZip) || '';
+  const fromZip     = ((acctLoadObj('420craft_settings')).warehouseZip) || '';
 
   if (!sheetsEnabled()) {
     panel.innerHTML = shRatesManualFallback(s, 'Connect Google Sheets first (Backup & Restore)');
@@ -9954,7 +9954,7 @@ function shFifoBatches(sku, mg, qtyNeeded) {
   // Use in-memory batchData first, fall back to localStorage
   let allBatches = (typeof batchData !== 'undefined' && batchData.length)
     ? batchData
-    : JSON.parse(localStorage.getItem('420craft_batches') || '[]');
+    : batchData || [];
   const matching = allBatches
     .filter(b => {
       const bSku = b.SKU || '';
@@ -10385,7 +10385,7 @@ function backupExport() {
     XLSX.utils.book_append_sheet(wb, wsCons, 'Consumables');
 
     // ── Sheet 7: Shipments ───────────────────────────
-    const shipmentsData = JSON.parse(localStorage.getItem('420craft_shipments') || '[]');
+    const shipmentsData = _shipmentsData || [];
     if (shipmentsData.length) {
       const shipRows = shipmentsData.map(s => ({
         'ID': s.id||'',
@@ -10511,7 +10511,7 @@ function backupExport() {
       ['flavor_config', 'json', JSON.stringify(flavorCfg)],
       ['yield_config',  'json', JSON.stringify(yieldCfg)],
       ['shift_config',  'json', JSON.stringify(shiftCfg)],
-      ['ordering_manager', 'json', localStorage.getItem('420craft_ordering_manager')||''],
+      ['ordering_manager', 'json', JSON.stringify(_appState['420craft_ordering_manager']||'')],
     ];
     const wsCfg = XLSX.utils.aoa_to_sheet(cfgRows);
     wsCfg['!cols'] = [{wch:25},{wch:10},{wch:80}];
@@ -10533,7 +10533,7 @@ function backupExport() {
     }
 
     // ── Sheet: Customer Orders ────────────────────────
-    const custOrders = JSON.parse(localStorage.getItem('420craft_customer_orders') || '[]');
+    const custOrders = _customerOrdersData || [];
     if (custOrders.length) {
       const coRows = custOrders.map(o => ({
         'ID': o.id||'', 'Brand': o.brand||'', 'Status': o.status||'',
@@ -10635,7 +10635,7 @@ function backupExport() {
     // ── APP SETTINGS + AUTH SHEET ────────────────────────────────
     try {
       const settingsRaw = (acctLoadObj('420craft_settings'));
-      const authRaw = JSON.parse(localStorage.getItem('420craft_auth_user') || '{}');;
+      const authRaw = {};;
       const wsSettings = XLSX.utils.json_to_sheet([{
         sheets_url:     localStorage.getItem('420craft_sheets_url') || '',
         auth_role:      authRaw.role || '',
@@ -10652,7 +10652,7 @@ function backupExport() {
     // Generic JSON→sheet writer for all acct + operational data
     [...acctSheetDefs, ...opSheetDefs].forEach(({ key, name }) => {
       try {
-        const raw = localStorage.getItem(key);
+        const raw = JSON.stringify(_appState[key] || acctLoad(key) || []);
         if (!raw) return;
         const data = JSON.parse(raw);
         const arr = Array.isArray(data) ? data : (data && typeof data === 'object' ? [data] : null);
@@ -11289,7 +11289,7 @@ function consumableGeneratePO() {
   document.getElementById('po-modal').classList.remove('hidden');
 
   // Try to pre-fill ordering manager from saved settings
-  const savedMgr = localStorage.getItem('420craft_ordering_manager');
+  const savedMgr = JSON.stringify(_appState['420craft_ordering_manager']||null);
   if (savedMgr) {
     const mgr = JSON.parse(savedMgr);
     document.getElementById('po-mgr-name').value = mgr.name||'';
@@ -13257,7 +13257,7 @@ function prodRunDelete(id) {
 // ── Central settings loader — everything reads from here ──────────
 function settingsLoad() {
   try {
-    const saved = JSON.parse(localStorage.getItem('420craft_settings') || 'null');
+    const saved = (Object.keys(acctLoadObj('420craft_settings')).length ? acctLoadObj('420craft_settings') : null);
     const base  = Object.assign({}, _settingsDefaults(), saved || {});
 
     // Merge legacy flavor_config (richer per-SKU batch gallons) into batchGallons
@@ -13862,7 +13862,7 @@ function _settingsRemoveHoliday(idx) {
 let customerOrders = [];
 function oqLoadOrders() {
   try {
-    customerOrders = JSON.parse(localStorage.getItem('420craft_customer_orders') || '[]');
+    customerOrders = _customerOrdersData || [];
   } catch(e) { customerOrders = []; }
 }
 function oqSaveOrders() {
@@ -13884,7 +13884,7 @@ function scheduleSave(blocks) {
 function scheduleLoadConfig() {
   // Read from central settings — falls back to legacy shift_config key
   try {
-    const central = JSON.parse(localStorage.getItem('420craft_settings') || 'null');
+    const central = (Object.keys(acctLoadObj('420craft_settings')).length ? acctLoadObj('420craft_settings') : null);
     if (central && central.shiftStart) return {
       shiftStart:        central.shiftStart,
       shiftEnd:          central.shiftEnd,
@@ -16394,7 +16394,7 @@ let bcBatchLog = [];
 let bcRunIdCounter = 0;
 
 function bcLoadData() {
-  const saved = localStorage.getItem('420craft_batch_log');
+  const saved = JSON.stringify(acctLoad('420craft_batch_log'));
   bcBatchLog = saved ? JSON.parse(saved) : [];
 }
 function bcSaveData() {
@@ -17012,24 +17012,24 @@ function bcExportLog() {
 // Force re-seed consumables and operators if schema is stale
 (function migrateOnLoad() {
   try {
-    const saved = localStorage.getItem('420craft_consumables');
+    const saved = JSON.stringify(_consumablesData || []);
     if (saved) {
       const parsed = JSON.parse(saved);
       // If old format (COMMON_EXPENDABLES style - no id field) or missing vendor fields
       if (!parsed.length || parsed[0].id === undefined) {
-        localStorage.removeItem('420craft_consumables');
+        // localStorage not used
       }
     }
-    const ops = localStorage.getItem('420craft_operators');
+    const ops = JSON.stringify(_operatorsData || []);
     if (ops) {
       const parsed = JSON.parse(ops);
       if (!parsed.length || parsed[0].id === undefined) {
-        localStorage.removeItem('420craft_operators');
+        // localStorage not used
       }
     }
   } catch(e) {
-    localStorage.removeItem('420craft_consumables');
-    localStorage.removeItem('420craft_operators');
+    // localStorage not used
+    // localStorage not used
   }
 })();
 
@@ -17066,7 +17066,7 @@ setTimeout(() => {
 
 function flavorLoadCatalog() {
   try {
-    const saved = localStorage.getItem('420craft_flavor_catalog');
+    const saved = JSON.stringify(acctLoad('420craft_flavor_catalog'));
     if (saved) return JSON.parse(saved);
   } catch(e) {}
   return JSON.parse(JSON.stringify(FLAVOR_CATALOG));
@@ -17668,7 +17668,7 @@ function oqExportCSV() {
 
 function ntLoadData() {
   try { _ntContacts = (_notificationContactsData || []); } catch(e) { _ntContacts=[]; }
-  try { _ntHistory  = JSON.parse(localStorage.getItem('420craft_nt_history')  || '[]'); } catch(e) { _ntHistory=[]; }
+  try { _ntHistory  = (acctLoad('420craft_nt_history')); } catch(e) { _ntHistory=[]; }
 }
 
 function ntSaveContacts() {
@@ -20217,7 +20217,7 @@ function acctDiagnostics() {
     // Storage key checks
     const expectedKeys = Object.values(ACCT_KEYS);
     let missingKeys = 0;
-    expectedKeys.forEach(k => { if (!localStorage.getItem(k)) missingKeys++; });
+    expectedKeys.forEach(k => { if (!(_appState[k] || acctLoad(k)?.length)) missingKeys++; });
 
     // Sync errors
     const syncLog = acctLoad(QBO_KEYS?.SYNC_LOG||'420craft_acct_sync_log');
@@ -20968,7 +20968,7 @@ function rolesLoad() {
 
 function currentUserRole() {
   try {
-    const auth = JSON.parse(sessionStorage.getItem('420craft_auth_user') || localStorage.getItem('420craft_auth_user') || '{}');
+    const auth = JSON.parse(sessionStorage.getItem('420craft_auth_user') || '{}');
     // If role already resolved and cached, use it
     if (auth.role) return auth.role;
     // Look up by email in employee profiles
@@ -21063,7 +21063,7 @@ function renderAcctRoles() {
 
 function acctNewEmployeeModal() {
   const roles = rolesLoad();
-  const ops = JSON.parse(localStorage.getItem('420craft_operators')||'[]');
+  const ops = _operatorsData || [];
   const userCanSeePay = canViewPay();
   acctModal('NEW EMPLOYEE PROFILE',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Full Name *</label><input class="form-input" id="ne-name" placeholder="Full name"></div>
@@ -21227,7 +21227,15 @@ const _pageRenderMap = {
   'reorder':            () => { try { if(typeof renderReorder==='function') renderReorder(); } catch(e){} },
   'movement-history':   () => { try { if(typeof renderHistory==='function') renderHistory(); } catch(e){} },
   'log-movement':       () => { try { if(typeof _logPopulateDestProfiles==='function') _logPopulateDestProfiles(); } catch(e){} },
-  'prod-run':           () => { try { if(typeof renderProdRuns==='function') renderProdRuns(); } catch(e){} },
+  'prod-run': () => { try {
+    if (typeof renderProdRuns === 'function') renderProdRuns();
+    const liveEl = document.getElementById('prod-run-live');
+    if (liveEl && !liveEl.classList.contains('hidden') && prodRunActive) {
+      if (typeof _prodRunRenderCrew === 'function') _prodRunRenderCrew();
+      if (typeof _prodRunRenderExpendables === 'function') _prodRunRenderExpendables();
+      if (typeof _prodRunUpdateCosts === 'function') _prodRunUpdateCosts();
+    }
+  } catch(e){} },
   'schedule':           () => { try { if(typeof renderSchedule==='function') renderSchedule(); } catch(e){} },
   'order-queue':        () => { try { if(typeof renderOrderQueue==='function') renderOrderQueue(); } catch(e){} },
   'shipping':           () => { try { if(typeof shLoad==='function'){shLoad();} if(typeof renderShipping==='function') renderShipping(); } catch(e){} },
@@ -21348,7 +21356,7 @@ var _tableSync = {
       // for 2 seconds. This prevents the race where server returns stale data
       // before our write commits, wiping out newly added items.
       const now = Date.now();
-      if (_prodRunLastSave && (now - _prodRunLastSave) < 2000) {
+      if (_prodRunLastSave && (now - _prodRunLastSave) < 500) {
         console.log('[ProdRun] Skipping realtime overwrite — local write too recent');
         return;
       }
@@ -21740,7 +21748,16 @@ function _createSupabaseClient(sbLib) {
       'reorder':            () => { if(typeof renderReorder==='function') renderReorder(); },
       'movement-history':   () => { if(typeof renderMovementHistory==='function') renderMovementHistory(); },
       'log-movement':       () => { if(typeof renderLogMovement==='function') renderLogMovement(); },
-      'prod-run':           () => { if(typeof prodRunLoad==='function'&&typeof renderProdRuns==='function') renderProdRuns(); },
+      'prod-run': () => { try { 
+    if (typeof renderProdRuns === 'function') renderProdRuns();
+    // If live screen is open, also re-render it
+    const liveEl = document.getElementById('prod-run-live');
+    if (liveEl && !liveEl.classList.contains('hidden') && prodRunActive) {
+      if (typeof _prodRunRenderCrew === 'function') _prodRunRenderCrew();
+      if (typeof _prodRunRenderExpendables === 'function') _prodRunRenderExpendables();
+      if (typeof _prodRunUpdateCosts === 'function') _prodRunUpdateCosts();
+    }
+  } catch(e){} },
       'schedule':           () => { if(typeof renderSchedule==='function') renderSchedule(); },
       'order-queue':        () => { if(typeof renderOrderQueue==='function') renderOrderQueue(); },
       'shipping':           () => { if(typeof renderShipping==='function') renderShipping(); },
@@ -22255,7 +22272,7 @@ var _SB_WRITE_MAP = {
   '420craft_batches': {
     table: 'batches',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_batches')||'[]'); } catch { return []; }
+      return batchData || [];
     },
     toRow: b => ({
       batch_code: b.batch_code||b.BatchCode||b.Batch||b['Batch Code']||'',
@@ -22277,7 +22294,7 @@ var _SB_WRITE_MAP = {
   '420craft_movements': {
     table: 'movements',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_movements')||'[]'); } catch { return []; }
+      return movements || [];
     },
     toRow: m => ({
       batch_code: m.batch_code||m.Batch_Code||m['Batch Code']||'',
@@ -22298,7 +22315,7 @@ var _SB_WRITE_MAP = {
   '420craft_shipments': {
     table: 'shipments',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_shipments')||'[]'); } catch { return []; }
+      return _shipmentsData || [];
     },
     toRow: s => ({
       internal_id: s.id||s.internal_id||`SH-${Date.now()}`,
@@ -22325,7 +22342,7 @@ var _SB_WRITE_MAP = {
   '420craft_operators': {
     table: 'operators',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_operators')||'[]'); } catch { return []; }
+      return _operatorsData || [];
     },
     toRow: o => ({
       legacy_id: String(o.id||o.legacy_id||''),
@@ -22340,7 +22357,7 @@ var _SB_WRITE_MAP = {
   '420craft_consumables': {
     table: 'consumables',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_consumables')||'[]'); } catch { return []; }
+      return _consumablesData || [];
     },
     toRow: c => ({
       legacy_id: String(c.id||c.legacy_id||''),
@@ -22360,7 +22377,7 @@ var _SB_WRITE_MAP = {
   '420craft_prod_runs': {
     table: 'production_runs',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_prod_runs')||'[]'); } catch { return []; }
+      return _prodRunsData || [];
     },
     toRow: r => ({
       id: r.id||null,
@@ -22388,7 +22405,7 @@ var _SB_WRITE_MAP = {
   '420craft_schedule': {
     table: 'production_schedule_blocks',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_schedule')||'[]'); } catch { return []; }
+      return _scheduleData || [];
     },
     toRow: b => ({
       title: b.title||'',
@@ -22405,7 +22422,7 @@ var _SB_WRITE_MAP = {
   '420craft_shipping_materials': {
     table: 'shipping_materials',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_shipping_materials')||'[]'); } catch { return []; }
+      return acctLoad('420craft_shipping_materials');
     },
     toRow: m => ({
       legacy_id: String(m.id||m.legacy_id||''),
@@ -22419,7 +22436,7 @@ var _SB_WRITE_MAP = {
   '420craft_customer_orders': {
     table: 'customer_orders',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_customer_orders')||'[]'); } catch { return []; }
+      return _customerOrdersData || [];
     },
     toRow: o => ({
       status: o.status||'requested',
@@ -22433,7 +22450,7 @@ var _SB_WRITE_MAP = {
   '420craft_audit_log': {
     table: 'audit_logs',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_audit_log')||'[]'); } catch { return []; }
+      return acctLoad('420craft_audit_log');
     },
     toRow: r => ({
       action:      r.action || r.type || 'audit',
@@ -22449,7 +22466,7 @@ var _SB_WRITE_MAP = {
   '420craft_nt_contacts': {
     table: 'notification_contacts',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_nt_contacts')||'[]'); } catch { return []; }
+      return _notificationContactsData || [];
     },
     toRow: c => ({
       legacy_id: String(c.id||c.legacy_id||''),
@@ -22465,7 +22482,7 @@ var _SB_WRITE_MAP = {
   '420craft_brands': {
     table: 'brands',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_brands')||'[]'); } catch { return []; }
+      return _brandsData || [];
     },
     toRow: b => ({
       name: b.name||'',
@@ -22479,7 +22496,7 @@ var _SB_WRITE_MAP = {
   '420craft_address_book': {
     table: 'customers',
     getRows: () => {
-      try { return JSON.parse(localStorage.getItem('420craft_address_book')||'[]'); } catch { return []; }
+      return _customersData || [];
     },
     toRow: c => ({
       name: c.name||c.company||'',
@@ -22845,7 +22862,7 @@ async function renderAdminDiagnostics() {
     skus: (typeof skuData !== 'undefined' ? skuData : []).length,
     batches: (typeof batchData !== 'undefined' ? batchData : []).length,
     movements: (typeof movements !== 'undefined' ? movements : []).length,
-    shipments: JSON.parse(localStorage.getItem('420craft_shipments')||'[]').length,
+    shipments: _shipmentsData || [].length,
     operators: operatorLoad().length,
     consumables: consumableLoad().length,
     deals: acctLoad(ACCT_KEYS.DEALS).length,
@@ -22945,7 +22962,7 @@ async function renderAdminDiagnostics() {
            '420craft_brands','420craft_customer_orders','420craft_acct_deals','420craft_acct_invoices',
            '420craft_acct_settlements','420craft_acct_cost_snapshots','420craft_acct_vendors',
            '420craft_acct_pos','420craft_acct_employees','420craft_acct_roles'].map(key => {
-          const raw = localStorage.getItem(key);
+          const raw = JSON.stringify(_appState[key] || acctLoad(key) || []);
           let count = '—';
           try { const d = JSON.parse(raw||'[]'); count = Array.isArray(d)?d.length+' records':'1 obj'; } catch {}
           const hasData = !!(raw && raw !== '[]' && raw !== '{}' && raw !== 'null');
@@ -23216,7 +23233,7 @@ async function diagRunMigration() {
   log('  ✅ Production runs done');
 
   // Shipments
-  const ships = JSON.parse(localStorage.getItem('420craft_shipments') || '[]');
+  const ships = _shipmentsData || [];
   log(`🚚 Migrating ${ships.length} shipments...`);
   for (const s of ships) {
     const { error } = await sb.from('shipments').upsert({
@@ -23381,7 +23398,7 @@ function _prlInitMobileTabs() {
 
 // ── LABOR EFFICIENCY ENGINE ───────────────────────────────────
 function calcLaborEfficiency(period) {
-  const runs = JSON.parse(localStorage.getItem('420craft_prod_runs')||'[]');
+  const runs = _prodRunsData || [];
   const periodRuns = runs.filter(r =>
     (r.startedAt||r.startDate||'').slice(0,7) === period && r.status === 'completed'
   );
@@ -23456,7 +23473,7 @@ function calcInventoryAging() {
 
 // ── MATERIAL PRICE VARIANCE ENGINE ───────────────────────────
 function calcMaterialPriceVariance() {
-  const consumables = JSON.parse(localStorage.getItem('420craft_consumables')||'[]');
+  const consumables = _consumablesData || [];
   return consumables.filter(c => c.unitCost && c.lastUnitCost && c.lastUnitCost > 0).map(c => {
     const standard = parseFloat(c.unitCost)||0;
     const actual = parseFloat(c.lastUnitCost)||0;
@@ -24160,7 +24177,7 @@ const _origRenderOQ = typeof renderOrderQueue === 'function' ? renderOrderQueue 
 function _acctEnrichOrderQueue() {
   // Find order cards and add accounting badge
   setTimeout(() => {
-    const orders = JSON.parse(localStorage.getItem('420craft_customer_orders')||'[]');
+    const orders = _customerOrdersData || [];
     orders.forEach(order => {
       const deal = dealGetActive(order.customer||order.customerName||'', order.brand||order.brandName||'')[0];
       const invs = invoicesLoad().filter(i => i.refOrderId === order.id || i.customerName === (order.customer||order.customerName));
