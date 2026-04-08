@@ -1032,29 +1032,6 @@
 </div>
 
 <script>
-// ── EARLY STUBS — available before main script block loads ───
-// waitForSupabase polls until the Supabase client initializes
-async function waitForSupabase(maxMs = 15000) {
-  const start = Date.now();
-  while (Date.now() - start < maxMs) {
-    try {
-      if (typeof getSupabaseClient === 'function') {
-        const sb = getSupabaseClient();
-        if (sb) return sb;
-      }
-    } catch(e) { /* client not ready yet */ }
-    await new Promise(r => setTimeout(r, 200));
-  }
-  console.error('[Supabase] waitForSupabase timed out');
-  return null;
-}
-
-// prodRunLoad stub — real implementation in main script block
-function prodRunLoad() {
-  if (typeof _prodRunsData !== 'undefined') return _prodRunsData || [];
-  return [];
-}
-
 
 // ── GOOGLE AUTH CONFIG ────────────────────────────────────────
 const ALLOWED_DOMAIN = '420craftbeverages.com';
@@ -1124,7 +1101,7 @@ function hideAuthGate(user) {
   // Check for any in-progress run and notify — don't redirect
   setTimeout(async () => {
     try {
-      if (typeof _remoteSync === 'function' && SUPABASE_CONFIG.configured) {
+      if (typeof _remoteSync === 'function' && typeof SUPABASE_CONFIG !== 'undefined' && SUPABASE_CONFIG.configured) {
         await _remoteSync('production_runs', true);
       }
       const runs = prodRunLoad();
@@ -1329,7 +1306,13 @@ function _applyNavPermissions() {
 
 // ── Fetch permissions from Supabase — retry until client ready ─
 async function _fetchRemotePermissions() {
-  const sb = await waitForSupabase(8000);
+  // Poll for Supabase inline — block 3 cannot access block 5 functions
+  let sb = null;
+  const _t0 = Date.now();
+  while (Date.now() - _t0 < 8000) {
+    try { if (typeof getSupabaseClient === 'function') { sb = getSupabaseClient(); if (sb) break; } } catch(e) {}
+    await new Promise(r => setTimeout(r, 200));
+  }
   if (!sb) {
     console.warn('[Perms] Supabase not ready — skipping remote permissions fetch');
     return false;
@@ -4776,6 +4759,11 @@ window.addEventListener('load', function() {
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
+let _ntContacts  = [];
+let _ntHistory   = [];
+let _ntTxPreviewMode = 'desktop';
+let _ntWkPreviewMode = 'desktop';
+
 
 // ══════════════════════════════════════════
 // GOOGLE SHEETS LIVE SYNC
@@ -16945,10 +16933,7 @@ renderDashboard(); // render immediately with empty state
 })();
 
 // Module-scope notification vars (used by ntLoadData and notification functions)
-let _ntContacts  = [];
-let _ntHistory   = [];
-let _ntTxPreviewMode = 'desktop';
-let _ntWkPreviewMode = 'desktop';
+// _ntContacts moved to top of block
 
 
 
