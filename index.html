@@ -21295,7 +21295,7 @@ var _tableSync = {
       Outbound: parseInt(r.cases_shipped || r.Outbound || 0),
     }),
     pages: ['inventory','inv-detail','inv-audit','dashboard','brand-velocity','reorder','acct-inventory-val','acct-costing','batch-calc'],
-    postFetch: (data) => { batchData = data; _rollupSkuTotalsFromBatches(); },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) { batchData = data; _rollupSkuTotalsFromBatches(); } },
   },
   movements: {
     key: '420craft_movements',
@@ -21313,7 +21313,7 @@ var _tableSync = {
       Destination: r.destination || r.Destination || null,
     }),
     pages: ['inventory','inv-detail','movement-history','dashboard','brand-velocity'],
-    postFetch: (data) => { movements = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) movements = data; },
     orderBy: { col: 'created_at', asc: false }, limit: 1000000,
   },
   sku_master: {
@@ -21417,14 +21417,14 @@ var _tableSync = {
       startTime: r.start_time, endTime: r.end_time,
       status: r.status, casesPlanned: r.cases_planned }),
     pages: ['schedule','prod-run','dashboard'],
-    postFetch: (data) => { _scheduleData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _scheduleData = data; },
   },
   operators: {
     key: '420craft_operators',
     transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
       position: r.position, status: r.status, rate: parseFloat(r.rate||0) }),
     pages: ['operators','prod-run','schedule'],
-    postFetch: (data) => { _operatorsData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _operatorsData = data; },
   },
   consumables: {
     key: '420craft_consumables',
@@ -21433,7 +21433,7 @@ var _tableSync = {
       trueCostPerUnit: r.true_cost_per_unit, stockOnHand: r.stock_on_hand,
       reorderPoint: r.reorder_point, reorderQty: r.reorder_qty }),
     pages: ['consumables','prod-run','reorder'],
-    postFetch: (data) => { _consumablesData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _consumablesData = data; },
   },
   shipments: {
     key: '420craft_shipments',
@@ -21444,14 +21444,14 @@ var _tableSync = {
       trackingNumber: r.tracking_number, shipDate: r.ship_date,
       cogs: r.cogs||{ carrierTotal: r.carrier_cost, totalCogs: r.total_cost } }),
     pages: ['shipping','order-queue','dashboard','acct-shipment-costing'],
-    postFetch: (data) => { _shipmentsData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _shipmentsData = data; },
   },
   customer_orders: {
     key: '420craft_customer_orders',
     transform: r => ({ ...r, id: r.id, customerId: r.customer_id,
       status: r.status, items: r.items||[], shipTo: r.ship_to }),
     pages: ['order-queue','dashboard','shipping'],
-    postFetch: (data) => { _customerOrdersData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _customerOrdersData = data; },
   },
   vendors: {
     key: null,
@@ -21490,20 +21490,20 @@ var _tableSync = {
     transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
       company: r.company, email: r.email, phone: r.phone }),
     pages: ['notifications'],
-    postFetch: (data) => { _notificationContactsData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _notificationContactsData = data; },
   },
   brands: {
     key: '420craft_brands',
     transform: r => ({ ...r, id: r.id, name: r.name, status: r.status||'Active',
       devLog: r.dev_log||[], checklist: r.checklist||{} }),
     pages: ['brand-launch','acct-deals'],
-    postFetch: (data) => { _brandsData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _brandsData = data; },
   },
   customers: {
     key: '420craft_address_book',
     transform: r => ({ ...r, id: r.id, name: r.name, email: r.email, phone: r.phone }),
     pages: ['shipping','acct-ar','acct-ap'],
-    postFetch: (data) => { _customersData = data; },
+    postFetch: (data) => { if (!data.length || !_isOwnEcho(data[0], null)) _customersData = data; },
   },
   app_state: {
     key: null,
@@ -22306,6 +22306,8 @@ var _SB_WRITE_MAP = {
       cases_shipped: parseInt(b.cases_shipped||b.Outbound||0),
       lead_operator: b.lead_operator||b.Operator||null,
       notes: b.notes||b.Notes||null,
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
     }),
     conflict: 'batch_code',
   },
@@ -22323,7 +22325,9 @@ var _SB_WRITE_MAP = {
       quantity: parseInt(m.quantity||m.Quantity||0),
       destination: m.destination||m.Destination||null,
       write_off_reason: m.write_off_reason||m.WriteOffReason||null,
-      notes: m.notes||m.Notes||null,
+      notes: m.notes||m.Notes||
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',null,
       operator: m.operator||m.Operator||null,
       created_at: m.created_at||m.Timestamp||new Date().toISOString(),
     }),
@@ -22349,7 +22353,9 @@ var _SB_WRITE_MAP = {
       tracking_number: s.trackingNumber||s.tracking_number||null,
       items: s.items||[],
       cogs: s.cogs||null,
-      carrier_cost: parseFloat(s.cogs?.carrierTotal||s.carrier_cost||0),
+      carrier_cost: parseFloat(s.cogs?.carrierTotal||s.carrier_cos
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',t||0),
       labor_cost: parseFloat(s.cogs?.laborTotal||s.labor_cost||0),
       total_cost: parseFloat(s.cogs?.totalCogs||s.total_cost||0),
       ship_date: s.shipDate||s.ship_date||null,
@@ -22430,14 +22436,18 @@ var _SB_WRITE_MAP = {
     getRows: () => {
       return _scheduleData || [];
     },
-    toRow: b => ({
+    toRow
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',: b => ({
       title: b.title||'',
       sku_code: b.skuCode||b.sku_code||'',
       start_time: b.startTime||b.start_time||null,
       end_time: b.endTime||b.end_time||null,
       status: b.status||'scheduled',
       cases_planned: parseInt(b.casesPlanned||b.cases_planned||0),
-      lead_operator: b.leadOperator||b.lead_operator||null,
+      lead_operator: b.lea
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',dOperator||b.lead_operator||null,
       notes: b.notes||null,
     }),
     conflict: 'id',
@@ -22448,6 +22458,8 @@ var _SB_WRITE_MAP = {
       return acctLoad('420craft_shipping_materials');
     },
     toRow: m => ({
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
       legacy_id: String(m.id||m.legacy_id||''),
       name: m.name||'',
       unit: m.unit||'each',
@@ -22461,6 +22473,8 @@ var _SB_WRITE_MAP = {
     getRows: () => {
       return _customerOrdersData || [];
     },
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',
     toRow: o => ({
       status: o.status||'requested',
       items: o.items||[],
@@ -22472,19 +22486,25 @@ var _SB_WRITE_MAP = {
   },
   '420craft_audit_log': {
     table: 'audit_logs',
-    getRows: () => {
+    g
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',etRows: () => {
       return acctLoad('420craft_audit_log');
     },
     toRow: r => ({
       action:      r.action || r.type || 'audit',
       entity_type: r.entityType || r.type || '',
-      entity_id:   String(r.entityId || r.batchCode || r.sku || ''),
+      entity_id:   String(r.entityId || r.batchCode || r.sku ||
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'', ''),
       user_name:   r.userName || r.operator || r.user || '',
       note:        r.note || r.notes || '',
       created_at:  r.timestamp || r.ts || new Date().toISOString(),
     }),
     conflict: null,
-    insertOnly: false,
+    insertOnly: fals
+      updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail==='function'?currentUserEmail():'',e,
   },
   '420craft_nt_contacts': {
     table: 'notification_contacts',
