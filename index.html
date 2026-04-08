@@ -11874,19 +11874,18 @@ function prodRunSaveAll(runs) {
   }
 }
 let _prodRunSaveDebounce = null;
+let _prodRunLastSave = 0; // timestamp of last local save — used to block realtime echo
+
 function prodRunSaveActive(immediate = false) {
   if (!prodRunActive) return;
-  // Update in-memory runs array so getRows() in _SB_WRITE_MAP has the latest data
   const runs = prodRunLoad();
   const idx = runs.findIndex(r=>r.id===prodRunActive.id);
   if (idx>=0) runs[idx]=prodRunActive; else runs.push(prodRunActive);
-  // Write to in-memory staging only — _sbWriteAfterSave posts to server,
-  // _remoteSync updates localStorage from confirmed server response
-  _prodRunsData = runs; // in-memory staging for getRows()
+  _prodRunsData = runs;
+  _prodRunLastSave = Date.now(); // stamp the save so realtime echo is blocked for 2s
   const inProg = runs.filter(r=>r.status==='in-progress').length;
   const badge = document.getElementById('prod-run-badge');
   if (badge) { badge.textContent=inProg; badge.style.display=inProg>0?'inline':'none'; }
-  // Immediate for clock-in/out events; debounced for rapid updates (notes, qty edits)
   if (_prodRunSaveDebounce) clearTimeout(_prodRunSaveDebounce);
   if (immediate) {
     _sbWriteAfterSave('420craft_prod_runs');
@@ -21335,10 +21334,18 @@ var _tableSync = {
       const remote = runs.find(r => r.id === prodRunActive.id);
       if (!remote) return;
 
-      // Remote is source of truth for everything.
-      // Only thing we preserve locally: active crew timer start times
-      // so elapsed clocks keep ticking on this device.
-      const activeTimers = {}; // name → clockInAt for crew still clocked in HERE
+      // ── WRITE-LOCK GUARD ─────────────────────────────────────
+      // If we just saved locally, don't let a Realtime echo overwrite our state
+      // for 2 seconds. This prevents the race where server returns stale data
+      // before our write commits, wiping out newly added items.
+      const now = Date.now();
+      if (_prodRunLastSave && (now - _prodRunLastSave) < 2000) {
+        console.log('[ProdRun] Skipping realtime overwrite — local write too recent');
+        return;
+      }
+
+      // Remote is source of truth — preserve active crew timer start times
+      const activeTimers = {};
       (prodRunActive.crew||[]).forEach(c => {
         if (!c.clockOutAt && _prlCrewTimers[c.name]) {
           activeTimers[c.name] = c.clockInAt;
@@ -21351,25 +21358,17 @@ var _tableSync = {
       // Restore/reconcile crew timers
       (prodRunActive.crew||[]).forEach(c => {
         if (!c.clockOutAt) {
-          if (activeTimers[c.name]) {
-            // Was clocked in on this device — keep timer running from original clockInAt
-            _prlCrewTimers[c.name] = new Date(c.clockInAt).getTime();
-          } else {
-            // Clocked in on another device — start tracking from clockInAt
-            _prlCrewTimers[c.name] = new Date(c.clockInAt).getTime();
-          }
+          _prlCrewTimers[c.name] = new Date(c.clockInAt).getTime();
         } else {
-          // Clocked out — remove timer
           delete _prlCrewTimers[c.name];
         }
       });
 
-      // Re-render entire live screen if visible
+      // Re-render live screen if visible
       if (!document.getElementById('prod-run-live').classList.contains('hidden')) {
         _prodRunRenderCrew();
         _prodRunRenderExpendables();
         _prodRunUpdateCosts();
-        // Sync notes textarea
         const notesEl = document.getElementById('prl-notes');
         if (notesEl && document.activeElement !== notesEl) {
           notesEl.value = prodRunActive.notes || '';
