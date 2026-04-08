@@ -1306,15 +1306,25 @@ function _applyNavPermissions() {
 
 // ── Fetch permissions from Supabase — retry until client ready ─
 async function _fetchRemotePermissions() {
-  // Poll for Supabase inline — block 3 cannot access block 5 functions
+  // Wait for block 5 to finish executing before polling
+  await new Promise(r => setTimeout(r, 500));
+
+  // Poll for Supabase client — block 3 cannot access block 5 vars directly
   let sb = null;
   const _t0 = Date.now();
-  while (Date.now() - _t0 < 8000) {
-    try { if (typeof getSupabaseClient === 'function') { sb = getSupabaseClient(); if (sb) break; } } catch(e) {}
-    await new Promise(r => setTimeout(r, 200));
+  while (Date.now() - _t0 < 15000) {
+    try {
+      if (typeof getSupabaseClient === 'function' &&
+          typeof SUPABASE_CONFIG !== 'undefined' &&
+          SUPABASE_CONFIG.configured) {
+        sb = getSupabaseClient();
+        if (sb) break;
+      }
+    } catch(e) {}
+    await new Promise(r => setTimeout(r, 300));
   }
   if (!sb) {
-    console.warn('[Perms] Supabase not ready — skipping remote permissions fetch');
+    console.warn('[Perms] Supabase not ready after 15s — skipping permissions fetch');
     return false;
   }
   try {
@@ -16939,20 +16949,23 @@ function bcExportLog() {
 // ── ASYNC BOOT SEQUENCE ───────────────────────────────────────
 // UI renders immediately — data hydrates in background from Supabase.
 // Nav is never blocked. Data populates as it arrives.
-loadBrandCatalog();
-if (typeof ntLoadData === 'function') ntLoadData();
-if (typeof oqLoadOrders === 'function') oqLoadOrders();
-renderDashboard(); // render immediately with empty state
+// setTimeout(0) ensures all var declarations are assigned before first render.
+setTimeout(() => {
+  loadBrandCatalog();
+  if (typeof ntLoadData === 'function') ntLoadData();
+  if (typeof oqLoadOrders === 'function') oqLoadOrders();
+  renderDashboard();
 
-// Background hydration — does not block UI
-(async () => {
-  await loadData(); // fetches all tables from Supabase, postFetch sets globals
-  renderDashboard(); // re-render once data arrives
-  if (sheetsEnabled()) {
-    sheetsPing();
-    setTimeout(sheetsSyncAll, 2000);
-  }
-})();
+  // Background hydration — does not block UI
+  (async () => {
+    await loadData();
+    renderDashboard();
+    if (sheetsEnabled()) {
+      sheetsPing();
+      setTimeout(sheetsSyncAll, 2000);
+    }
+  })();
+}, 0);
 
 // Module-scope notification vars (used by ntLoadData and notification functions)
 // _ntContacts moved to top of block
