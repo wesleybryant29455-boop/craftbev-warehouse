@@ -15591,9 +15591,9 @@ function prodRunAddCommonItem(name, unitCost) {
   const existing = prodRunActive.expendables.find(e=>e.name===name);
   if (existing) { showToast('Already in list'); return; }
   prodRunActive.expendables.push({name, qty:0, unitCost, addedAt:new Date().toISOString()});
-  prodRunSaveActive();
+  prodRunSaveActive(true); // immediate — ensures server commits within write-lock window
   _prodRunRenderExpendables();
-  _prodRunRenderCommonChips(); // refresh chips to show ✓
+  _prodRunRenderCommonChips();
   _prodRunUpdateCosts();
   showToast(`+ ${name} added`);
 }
@@ -21356,7 +21356,9 @@ var _tableSync = {
       // for 2 seconds. This prevents the race where server returns stale data
       // before our write commits, wiping out newly added items.
       const now = Date.now();
-      if (_prodRunLastSave && (now - _prodRunLastSave) < 500) {
+      // Write-lock: block realtime overwrite for 3s after local save
+      // This covers: 800ms debounce + ~500ms Supabase commit + ~200ms realtime roundtrip
+      if (_prodRunLastSave && (now - _prodRunLastSave) < 3000) {
         console.log('[ProdRun] Skipping realtime overwrite — local write too recent');
         return;
       }
