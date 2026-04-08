@@ -4882,22 +4882,22 @@ function sheetsSyncAll() {
     consumables:        consumableLoad(),
     prodRuns:           prodRunLoad(),
     schedule:           scheduleLoad(),
-    postponeLog:        JSON.parse(localStorage.getItem('420craft_postpone_log') || '[]'),
-    custRequests:       JSON.parse(localStorage.getItem('420craft_production_requests') || '[]'),
+    postponeLog:        (acctLoad('420craft_postpone_log')),
+    custRequests:       (acctLoad('420craft_production_requests')),
     settings:           mergedSettings,
     runIntelligence:    schedIntelligenceLoad(),
     barcodeMap:         barcodeMapLoad(),
-    addressBook:        JSON.parse(localStorage.getItem('420craft_address_book') || '[]'),
-    shippingMaterials:  JSON.parse(localStorage.getItem('420craft_shipping_materials') || '[]'),
-    brands:             JSON.parse(localStorage.getItem('420craft_brands') || '[]'),
-    flavorCatalog:      JSON.parse(localStorage.getItem('420craft_flavor_catalog') || '[]'),
-    flavorConfig:       JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}'),
-    yieldConfig:        JSON.parse(localStorage.getItem('420craft_yield_config') || '{}'),
-    shiftConfig:        JSON.parse(localStorage.getItem('420craft_shift_config') || 'null'),
-    destProfiles:       JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]'),
-    ntContacts:         JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]'),
-    ntHistory:          JSON.parse(localStorage.getItem('420craft_nt_history') || '[]'),
-    orderingManager:    JSON.parse(localStorage.getItem('420craft_ordering_manager') || 'null'),
+    addressBook:        (_customersData || []),
+    shippingMaterials:  (acctLoad('420craft_shipping_materials')),
+    brands:             (_brandsData || []),
+    flavorCatalog:      (acctLoad('420craft_flavor_catalog')),
+    flavorConfig:       (acctLoadObj('420craft_flavor_config')),
+    yieldConfig:        (acctLoadObj('420craft_yield_config')),
+    shiftConfig:        (_appState['420craft_shift_config'] || null),
+    destProfiles:       (acctLoad('420craft_dest_profiles')),
+    ntContacts:         (_notificationContactsData || []),
+    ntHistory:          (acctLoad('420craft_nt_history')),
+    orderingManager:    (_appState['420craft_ordering_manager'] || null),
   });
 
   // Sync accounting data in separate queued actions (keeps payload size manageable)
@@ -5228,7 +5228,7 @@ async function fetchFromSheets() {
         // Fallback: cache locally if integrations table doesn't exist yet
         const localMap = barcodeMapLoad();
         const merged = Object.assign({}, rawBarcodes, localMap);
-        localStorage.setItem('420craft_barcode_map', JSON.stringify(merged));
+        acctSave('420craft_barcode_map', merged);
       });
     }
 
@@ -5320,10 +5320,19 @@ const SEED_BATCHES = [{"SKU":"Blind Tiger Root Beer","MG":"10 MG","Batch":"1.0",
 let skuData = [];
 let movements = [];
 let batchData = [];
-let _operatorsData = [];   // set directly by _remoteSync postFetch
-let _consumablesData = []; // set directly by _remoteSync postFetch
-let _scheduleData = [];    // set directly by _remoteSync postFetch
-let _prodRunsData = [];    // set directly by _remoteSync postFetch
+let _operatorsData = [];
+let _consumablesData = [];
+let _scheduleData = [];
+let _prodRunsData = [];
+let _shipmentsData = [];
+let _customerOrdersData = [];
+let _vendorsData = [];
+let _invoicesData = [];
+let _dealsData = [];
+let _settlementsData = [];
+let _brandsData = [];
+let _customersData = [];
+let _notificationContactsData = [];
 
 // ── APP BOOT STATE ────────────────────────────────────────────
 // Cloud is the only source of truth.
@@ -5346,10 +5355,29 @@ async function loadData() {
 
   try {
     await Promise.all([
+      // Core inventory
       _remoteSync('sku_master', false),
       _remoteSync('batches', false),
       _remoteSync('movements', false),
+      // Operations
+      _remoteSync('operators', false),
+      _remoteSync('consumables', false),
+      _remoteSync('production_runs', false),
+      _remoteSync('production_schedule_blocks', false),
+      _remoteSync('shipments', false),
+      _remoteSync('customer_orders', false),
+      // Accounting
+      _remoteSync('invoices', false),
+      _remoteSync('vendors', false),
+      _remoteSync('customer_deals', false),
+      _remoteSync('settlement_periods', false),
+      // Reference data
+      _remoteSync('brands', false),
+      _remoteSync('customers', false),
+      _remoteSync('notification_contacts', false),
     ]);
+    // Load all app config/state from cloud
+    await _appStateSync();
     _fixSkuBrands();
     console.log('[Boot] Hydrated from Supabase:', skuData.length, 'SKUs,', batchData.length, 'batches,', movements.length, 'movements');
   } catch(e) {
@@ -5374,21 +5402,21 @@ function saveData() {
     consumables:       consumableLoad(),
     prodRuns:          prodRunLoad(),
     schedule:          scheduleLoad(),
-    postponeLog:       JSON.parse(localStorage.getItem('420craft_postpone_log') || '[]'),
-    custRequests:      JSON.parse(localStorage.getItem('420craft_production_requests') || '[]'),
+    postponeLog:       (acctLoad('420craft_postpone_log')),
+    custRequests:      (acctLoad('420craft_production_requests')),
     settings:          settingsLoad(),
     runIntelligence:   schedIntelligenceLoad(),
-    addressBook:       JSON.parse(localStorage.getItem('420craft_address_book') || '[]'),
-    shippingMaterials: JSON.parse(localStorage.getItem('420craft_shipping_materials') || '[]'),
-    brands:            JSON.parse(localStorage.getItem('420craft_brands') || '[]'),
-    flavorCatalog:     JSON.parse(localStorage.getItem('420craft_flavor_catalog') || '[]'),
-    flavorConfig:      JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}'),
-    yieldConfig:       JSON.parse(localStorage.getItem('420craft_yield_config') || '{}'),
-    shiftConfig:       JSON.parse(localStorage.getItem('420craft_shift_config') || 'null'),
-    destProfiles:      JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]'),
-    ntContacts:        JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]'),
-    ntHistory:         JSON.parse(localStorage.getItem('420craft_nt_history') || '[]'),
-    orderingManager:   JSON.parse(localStorage.getItem('420craft_ordering_manager') || 'null'),
+    addressBook:       (_customersData || []),
+    shippingMaterials: (acctLoad('420craft_shipping_materials')),
+    brands:            (_brandsData || []),
+    flavorCatalog:     (acctLoad('420craft_flavor_catalog')),
+    flavorConfig:      (acctLoadObj('420craft_flavor_config')),
+    yieldConfig:       (acctLoadObj('420craft_yield_config')),
+    shiftConfig:       (_appState['420craft_shift_config'] || null),
+    destProfiles:      (acctLoad('420craft_dest_profiles')),
+    ntContacts:        (_notificationContactsData || []),
+    ntHistory:         (acctLoad('420craft_nt_history')),
+    orderingManager:   (_appState['420craft_ordering_manager'] || null),
   });
 }
 
@@ -7343,7 +7371,7 @@ function bpOpenAddFlavor(mode) {
   // Populate stock flavor select
   const select = document.getElementById('bpf-stock-select');
   const stockFlavors = Object.keys(settingsLoad().batchGallons || {});
-  const existing = JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}');
+  const existing = (acctLoadObj('420craft_flavor_config'));
   const allStock = [...new Set([...stockFlavors, ...Object.keys(existing)])].sort();
   select.innerHTML = '<option value="">— Select flavor —</option>' + allStock.map(f=>`<option>${f}</option>`).join('');
   // MG pills
@@ -7823,7 +7851,7 @@ function shPopulateWorkerDropdown(id) {
 function shPopulateBrandDropdown() {
   const el = document.getElementById('sh-c1-brand');
   if (!el) return;
-  const brands = JSON.parse(localStorage.getItem('420craft_brands') || '[]');
+  const brands = (_brandsData || []);
   el.innerHTML = '<option value="">— Select Brand —</option>' +
     brands.map(b => `<option value="${b.name}">${b.name}</option>`).join('');
 }
@@ -9147,7 +9175,7 @@ async function shCreateSSOrder(s) {
 let addressBook = [];
 
 function abLoad() {
-  try { addressBook = JSON.parse(localStorage.getItem('420craft_address_book') || '[]'); } catch(e) { addressBook = []; }
+  try { addressBook = (_customersData || []); } catch(e) { addressBook = []; }
 }
 function abSave() {
   _sbWriteAfterSave('420craft_address_book');  // localStorage updated by _remoteSync after server confirms
@@ -9880,7 +9908,7 @@ const SM_CATEGORIES = ['Boxes & Containers','Void Fill','Wrap & Protection','Lab
 
 function smLoad() {
   try {
-    shippingMaterials = JSON.parse(localStorage.getItem('420craft_shipping_materials') || '[]');
+    shippingMaterials = (acctLoad('420craft_shipping_materials'));
     if (!shippingMaterials.length) shippingMaterials = _smSeed();
   } catch(e) { shippingMaterials = _smSeed(); }
 }
@@ -10327,7 +10355,7 @@ function backupExport() {
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
 
     // ── Sheet: Brands ────────────────────────────────
-    const brandsData = JSON.parse(localStorage.getItem('420craft_brands') || '[]');
+    const brandsData = (_brandsData || []);
     if (brandsData.length) {
       const brandRows = brandsData.map(b => ({
         'ID': b.id||'', 'Brand Name': b.name||'', 'Contact': b.contact||'',
@@ -10339,7 +10367,7 @@ function backupExport() {
     }
 
     // ── Sheet: Flavor Catalog ─────────────────────────
-    const flavorCat = JSON.parse(localStorage.getItem('420craft_flavor_catalog') || '[]');
+    const flavorCat = (acctLoad('420craft_flavor_catalog'));
     if (flavorCat.length) {
       const flRows = flavorCat.map(f => ({
         'ID': f.id||'', 'Flavor Name': f.name||'', 'Base': f.base||'',
@@ -10351,9 +10379,9 @@ function backupExport() {
     }
 
     // ── Sheet: Flavor Config (JSON) ───────────────────
-    const flavorCfg = JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}');
-    const yieldCfg  = JSON.parse(localStorage.getItem('420craft_yield_config') || '{}');
-    const shiftCfg  = JSON.parse(localStorage.getItem('420craft_shift_config') || 'null');
+    const flavorCfg = (acctLoadObj('420craft_flavor_config'));
+    const yieldCfg  = (acctLoadObj('420craft_yield_config'));
+    const shiftCfg  = (_appState['420craft_shift_config'] || null);
     const cfgRows = [
       ['Key', 'Type', 'Value'],
       ['flavor_config', 'json', JSON.stringify(flavorCfg)],
@@ -10366,7 +10394,7 @@ function backupExport() {
     XLSX.utils.book_append_sheet(wb, wsCfg, 'Config');
 
     // ── Sheet: Audit Log ──────────────────────────────
-    const auditLog = JSON.parse(localStorage.getItem('420craft_audit_log') || '[]');
+    const auditLog = (acctLoad('420craft_audit_log'));
     if (auditLog.length) {
       const auditRows = auditLog.map(a => ({
         'Timestamp': a.ts||a.timestamp||'', 'Type': a.type||'',
@@ -10394,7 +10422,7 @@ function backupExport() {
     }
 
     // ── Sheet: Destination Profiles ───────────────────
-    const destProfs = JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]');
+    const destProfs = (acctLoad('420craft_dest_profiles'));
     if (destProfs.length) {
       const dpRows = destProfs.map(p => ({
         'ID': p.id||'', 'Name': p.name||'', 'Company': p.company||'',
@@ -10408,7 +10436,7 @@ function backupExport() {
     }
 
     // ── Sheet: Batch Scan Log ─────────────────────────
-    const batchLog = JSON.parse(localStorage.getItem('420craft_batch_log') || '[]');
+    const batchLog = (acctLoad('420craft_batch_log'));
     if (batchLog.length) {
       const blRows = batchLog.map(b => ({
         'Timestamp': b.ts||'', 'Batch Code': b.code||b.batchCode||'',
@@ -10420,7 +10448,7 @@ function backupExport() {
     }
 
     // ── Sheet: Network Contacts (NT) ──────────────────
-    const ntContacts = JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]');
+    const ntContacts = (_notificationContactsData || []);
     if (ntContacts.length) {
       const ntRows = ntContacts.map(c => ({
         'ID': c.id||'', 'Name': c.name||'', 'Company': c.company||'',
@@ -10482,7 +10510,7 @@ function backupExport() {
 
     // ── APP SETTINGS + AUTH SHEET ────────────────────────────────
     try {
-      const settingsRaw = JSON.parse(localStorage.getItem('420craft_settings') || '{}');
+      const settingsRaw = (acctLoadObj('420craft_settings'));
       const authRaw = JSON.parse(localStorage.getItem('420craft_auth_user') || '{}');;
       const wsSettings = XLSX.utils.json_to_sheet([{
         sheets_url:     localStorage.getItem('420craft_sheets_url') || '',
@@ -11180,7 +11208,7 @@ function poSendEmail() {
   const mgrName  = document.getElementById('po-mgr-name')?.value.trim()||'';
   const mgrEmail = document.getElementById('po-mgr-email')?.value.trim()||'';
   if (mgrName||mgrEmail) {
-    localStorage.setItem('420craft_ordering_manager', JSON.stringify({name:mgrName, email:mgrEmail}));
+    acctSave('420craft_ordering_manager', {name:mgrName, email:mgrEmail});
   }
 
   const poNotes = document.getElementById('po-notes')?.value.trim()||'';
@@ -11730,7 +11758,7 @@ function prodRunSaveActive(immediate = false) {
   if (idx>=0) runs[idx]=prodRunActive; else runs.push(prodRunActive);
   // Write to in-memory staging only — _sbWriteAfterSave posts to server,
   // _remoteSync updates localStorage from confirmed server response
-  localStorage.setItem('420craft_prod_runs', JSON.stringify(runs)); // staging for getRows()
+  _prodRunsData = runs; // in-memory staging for getRows()
   const inProg = runs.filter(r=>r.status==='in-progress').length;
   const badge = document.getElementById('prod-run-badge');
   if (badge) { badge.textContent=inProg; badge.style.display=inProg>0?'inline':'none'; }
@@ -13102,7 +13130,7 @@ function settingsLoad() {
 
     // Merge legacy flavor_config (richer per-SKU batch gallons) into batchGallons
     // flavor_config keys look like: { "Black Cherry": { batchGallons: 77 }, ... }
-    const flavorCfg = JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}');
+    const flavorCfg = (acctLoadObj('420craft_flavor_config'));
     if (Object.keys(flavorCfg).length) {
       if (!base.batchGallons) base.batchGallons = {};
       Object.entries(flavorCfg).forEach(([flavor, val]) => {
@@ -13114,7 +13142,7 @@ function settingsLoad() {
     }
 
     // Merge legacy yield_config (cans per gallon) into canSizes
-    const yieldCfg = JSON.parse(localStorage.getItem('420craft_yield_config') || '{}');
+    const yieldCfg = (acctLoadObj('420craft_yield_config'));
     const gwYields  = yieldCfg.great_western?.yields || {};
     if (Object.keys(gwYields).length && base.canSizes) {
       base.canSizes = base.canSizes.map(s => {
@@ -13128,21 +13156,21 @@ function settingsLoad() {
 }
 
 function settingsSave(cfg) {
-  localStorage.setItem('420craft_settings', JSON.stringify(cfg));
+  acctSave('420craft_settings', cfg);
 
   // Keep legacy flavor_config in sync so batch calculator still works
   if (cfg.batchGallons) {
     const flavorCfg = {};
     Object.entries(cfg.batchGallons).forEach(([k,v]) => { flavorCfg[k] = { batchGallons: v }; });
-    localStorage.setItem('420craft_flavor_config', JSON.stringify(flavorCfg));
+    acctSave('420craft_flavor_config', flavorCfg);
   }
 
   // Keep legacy yield_config in sync so batch calculator still works
   if (cfg.canSizes) {
-    const yieldCfg = JSON.parse(localStorage.getItem('420craft_yield_config') || '{}');
+    const yieldCfg = (acctLoadObj('420craft_yield_config'));
     if (!yieldCfg.great_western) yieldCfg.great_western = { name:'Great Western', yields:{} };
     cfg.canSizes.forEach(s => { yieldCfg.great_western.yields[s.label] = s.cansPerGallon; });
-    localStorage.setItem('420craft_yield_config', JSON.stringify(yieldCfg));
+    acctSave('420craft_yield_config', yieldCfg);
   }
 
   if (sheetsEnabled()) sheetsQueue('save_settings', cfg);
@@ -13375,7 +13403,7 @@ function _settingsSaveProduction() {
   if (!cfg.workDays.length) cfg.workDays = [1,2,3,4,5];
 
   // Sync back to legacy shift_config key so schedule still reads it
-  localStorage.setItem('420craft_shift_config', JSON.stringify({
+  acctSave('420craft_shift_config', {
     shiftStart:        cfg.shiftStart,
     shiftEnd:          cfg.shiftEnd,
     prepMinutes:       cfg.prepMinutes,
@@ -13584,14 +13612,14 @@ function _settingsSaveYields() {
 
   settingsSave(cfg);
   // Also sync to legacy yield_config so batch calculator still works
-  const yieldCfg = JSON.parse(localStorage.getItem('420craft_yield_config') || '{}');
+  const yieldCfg = (acctLoadObj('420craft_yield_config'));
   if (!yieldCfg.great_western) yieldCfg.great_western = { name:'Great Western', yields:{} };
   sizes.forEach(s => { yieldCfg.great_western.yields[s.label] = s.cansPerGallon; });
-  localStorage.setItem('420craft_yield_config', JSON.stringify(yieldCfg));
+  acctSave('420craft_yield_config', yieldCfg);
   // Sync to flavor config
   const flavorCfg = {};
   Object.entries(gallons).forEach(([k,v]) => { flavorCfg[k] = v; });
-  localStorage.setItem('420craft_flavor_config', JSON.stringify(flavorCfg));
+  acctSave('420craft_flavor_config', flavorCfg);
 
   _settingsRenderYields();
   showToast('✓ Yield settings saved');
@@ -13734,7 +13762,7 @@ function scheduleLoadConfig() {
     };
   } catch(e) {}
   try {
-    return JSON.parse(localStorage.getItem('420craft_shift_config') || 'null') || {
+    return (_appState['420craft_shift_config'] || null) || {
       shiftStart: '08:00', shiftEnd: '16:30', prepMinutes: 30,
       changeoverMinutes: 45, workDays: [1,2,3,4,5]
     };
@@ -13743,15 +13771,15 @@ function scheduleLoadConfig() {
   }
 }
 function scheduleSaveConfig(cfg) {
-  localStorage.setItem('420craft_shift_config', JSON.stringify(cfg));
+  acctSave('420craft_shift_config', cfg);
 }
 
 // ── Run Intelligence (learning engine) ────────────────────────────
 function schedIntelligenceLoad() {
-  try { return JSON.parse(localStorage.getItem('420craft_run_intelligence') || '{}'); } catch(e) { return {}; }
+  try { return (acctLoadObj('420craft_run_intelligence')); } catch(e) { return {}; }
 }
 function schedIntelligenceSave(data) {
-  localStorage.setItem('420craft_run_intelligence', JSON.stringify(data));
+  acctSave('420craft_run_intelligence', data);
   if (sheetsEnabled()) sheetsQueue('save_run_intelligence', data);
 }
 
@@ -14142,7 +14170,7 @@ function _schedRenderCalendar() {
 function _schedRenderBacklog() {
   const el = document.getElementById('sched-backlog');
   if (!el) return;
-  const orders   = JSON.parse(localStorage.getItem('420craft_production_requests') || '[]');
+  const orders   = (acctLoad('420craft_production_requests'));
   const blocks   = scheduleLoad();
   const BCOLORS  = {'AppGirls':'#7ed321','Blind Tiger':'#3498db','Gata Juice':'#f5a623','Reef Shark':'#1abc9c','Simple Garden':'#9b59b6','Wyatt Purp':'#e74c3c','Going Steady':'#fd79a8'};
 
@@ -14355,7 +14383,7 @@ function scheduleOpenAssign(orderId, batchIndex, runIndex, prefillDate) {
   // Always close day modal first — fixes layering bug
   scheduleCloseDayModal();
 
-  const orders  = JSON.parse(localStorage.getItem('420craft_production_requests') || '[]');
+  const orders  = (acctLoad('420craft_production_requests'));
   const flavors = flavorLoadCatalog ? flavorLoadCatalog() : [];
   const cfg     = scheduleLoadConfig();
   const todayRaw = new Date().toISOString().slice(0,10);
@@ -14531,7 +14559,7 @@ function _schedAssignSourceChanged() {
   if (!sel) return;
   const orderId = sel.value;
   if (orderId === 'manual') return;
-  const orders = JSON.parse(localStorage.getItem('420craft_production_requests') || '[]');
+  const orders = (acctLoad('420craft_production_requests'));
   const order  = orders.find(o => o.id === orderId);
   if (!order) return;
   // Auto-fill brand
@@ -14607,7 +14635,7 @@ function _schedAssignSave(orderId, batchIndex, runIndex) {
   if (!date)        { showToast('⚠ Select a scheduled date'); return; }
   if (!notes)       { showToast('⚠ Run notes are required — tell your crew what they need to know'); return; }
 
-  const orders    = JSON.parse(localStorage.getItem('420craft_production_requests') || '[]');
+  const orders    = (acctLoad('420craft_production_requests'));
   const order     = orderId ? orders.find(o => o.id === orderId) : null;
   const flavors   = flavorLoadCatalog ? flavorLoadCatalog() : [];
   const flavorObj = flavors.find(f => f.name.toLowerCase() === flavor.toLowerCase());
@@ -15140,7 +15168,7 @@ function _schedSavePostpone() {
   }
 
   // ── Postpone log ──
-  const postponeLog = JSON.parse(localStorage.getItem('420craft_postpone_log') || '[]');
+  const postponeLog = (acctLoad('420craft_postpone_log'));
   postponeLog.push({
     blockId:      blockId,
     flavorName:   b.flavorName,
@@ -15155,7 +15183,7 @@ function _schedSavePostpone() {
     dayShift:     dayShift,
     loggedAt:     new Date().toISOString()
   });
-  localStorage.setItem('420craft_postpone_log', JSON.stringify(postponeLog));
+  acctSave('420craft_postpone_log', postponeLog);
   if (sheetsEnabled()) sheetsQueue('append_postpone', postponeLog[postponeLog.length - 1]);
 
   scheduleClosePostpone();
@@ -15444,11 +15472,11 @@ function prodRunAddCommonItem(name, unitCost) {
 
 // ── Barcode Map — localStorage + Sheets backup ─────────────────────
 function barcodeMapLoad() {
-  try { return JSON.parse(localStorage.getItem('420craft_barcode_map') || '{}'); } catch(e) { return {}; }
+  try { return (acctLoadObj('420craft_barcode_map')); } catch(e) { return {}; }
 }
 
 function barcodeMapSave(map) {
-  localStorage.setItem('420craft_barcode_map', JSON.stringify(map));
+  acctSave('420craft_barcode_map', map);
   // Sync to Sheets immediately whenever a new barcode is learned
   if (sheetsEnabled()) sheetsQueue('save_barcode_map', map);
 }
@@ -15840,10 +15868,10 @@ function openBatchModal(batchCode, sku) {
 let auditMode = 'count'; // 'count' | 'add' | 'remove'
 
 function auditLoadLog() {
-  try { return JSON.parse(localStorage.getItem('420craft_audit_log') || '[]'); } catch(e) { return []; }
+  try { return (acctLoad('420craft_audit_log')); } catch(e) { return []; }
 }
 function auditSaveLog(log) {
-  localStorage.setItem('420craft_audit_log', JSON.stringify(log));
+  acctSave('420craft_audit_log', log);
   // Write to Supabase (background, non-blocking — audit logs are append-only)
   _sbWriteAfterSave('420craft_audit_log');
   if (sheetsEnabled()) sheetsQueue('save_audit_log', { auditLog: log });
@@ -16238,7 +16266,7 @@ function bcLoadData() {
   bcBatchLog = saved ? JSON.parse(saved) : [];
 }
 function bcSaveData() {
-  localStorage.setItem('420craft_batch_log', JSON.stringify(bcBatchLog));
+  acctSave('420craft_batch_log', bcBatchLog);
   if (sheetsEnabled()) sheetsQueue('sync_all', { batchLog: bcBatchLog });
 }
 
@@ -16280,10 +16308,10 @@ function bcCansForRun(batchVolumeMl, canSize) {
 
 // Flavor config: { flavorName: { batchVolumeMl, defaultCaseSize } }
 function bcLoadFlavorConfig() {
-  try { return JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}'); } catch(e) { return {}; }
+  try { return (acctLoadObj('420craft_flavor_config')); } catch(e) { return {}; }
 }
 function bcSaveFlavorConfig(cfg) {
-  localStorage.setItem('420craft_flavor_config', JSON.stringify(cfg));
+  acctSave('420craft_flavor_config', cfg);
 }
 function bcGetBatchVolume(flavor) {
   const cfg = bcLoadFlavorConfig();
@@ -16910,7 +16938,7 @@ function flavorLoadCatalog() {
 }
 
 function flavorSaveCatalog(catalog) {
-  localStorage.setItem('420craft_flavor_catalog', JSON.stringify(catalog));
+  acctSave('420craft_flavor_catalog', catalog);
 }
 
 function flavorGetById(id) {
@@ -17210,12 +17238,12 @@ function logSaveDestProfile() {
   const phone   = document.getElementById('log-dest-phone')?.value.trim();
   if (!name) { showToast('⚠ Enter a recipient name to save'); return; }
 
-  const profiles = JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]');
+  const profiles = (acctLoad('420craft_dest_profiles'));
   const exists = profiles.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
   const profile = { name, company, addr, email, phone, savedAt: new Date().toISOString() };
   if (exists >= 0) profiles[exists] = profile;
   else profiles.unshift(profile);
-  localStorage.setItem('420craft_dest_profiles', JSON.stringify(profiles));
+  acctSave('420craft_dest_profiles', profiles);
   if (sheetsEnabled()) sheetsQueue('save_dest_profiles', { destProfiles: profiles });
 
   // Refresh dropdown
@@ -17226,7 +17254,7 @@ function logSaveDestProfile() {
 function logLoadDestProfile() {
   const sel = document.getElementById('log-dest-profile');
   if (!sel?.value) return;
-  const profiles = JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]');
+  const profiles = (acctLoad('420craft_dest_profiles'));
   const p = profiles.find(x => x.name === sel.value);
   if (!p) return;
   const f = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
@@ -17241,7 +17269,7 @@ function logLoadDestProfile() {
 function _logPopulateDestProfiles() {
   const sel = document.getElementById('log-dest-profile');
   if (!sel) return;
-  const profiles = JSON.parse(localStorage.getItem('420craft_dest_profiles') || '[]');
+  const profiles = (acctLoad('420craft_dest_profiles'));
   sel.innerHTML = '<option value="">— Load saved profile —</option>' +
     profiles.map(p => `<option value="${p.name}">${p.name}${p.company?' ('+p.company+')':''}</option>`).join('');
 }
@@ -17504,7 +17532,7 @@ function oqExportCSV() {
 
 
 function ntLoadData() {
-  try { _ntContacts = JSON.parse(localStorage.getItem('420craft_nt_contacts') || '[]'); } catch(e) { _ntContacts=[]; }
+  try { _ntContacts = (_notificationContactsData || []); } catch(e) { _ntContacts=[]; }
   try { _ntHistory  = JSON.parse(localStorage.getItem('420craft_nt_history')  || '[]'); } catch(e) { _ntHistory=[]; }
 }
 
@@ -17513,7 +17541,7 @@ function ntSaveContacts() {
 }
 
 function ntSaveHistory() {
-  localStorage.setItem('420craft_nt_history', JSON.stringify(_ntHistory));
+  acctSave('420craft_nt_history', _ntHistory);
 }
 
 function renderNotifications() {
@@ -18110,7 +18138,7 @@ const DEFAULT_BATCH_GALLONS = {
 // Seed flavor config with defaults if not already set
 function seedFlavorConfig() {
   try {
-    const existing = JSON.parse(localStorage.getItem('420craft_flavor_config') || '{}');
+    const existing = (acctLoadObj('420craft_flavor_config'));
     let changed = false;
     Object.entries(DEFAULT_BATCH_GALLONS).forEach(([flavor, gallons]) => {
       if (!existing[flavor]) {
@@ -18121,7 +18149,7 @@ function seedFlavorConfig() {
         changed = true;
       }
     });
-    if (changed) localStorage.setItem('420craft_flavor_config', JSON.stringify(existing));
+    if (changed) acctSave('420craft_flavor_config', existing);
   } catch(e) {}
 }
 seedFlavorConfig();
@@ -18143,7 +18171,7 @@ const YIELD_DEFAULTS = {
 
 function getYieldConfig() {
   try {
-    const saved = JSON.parse(localStorage.getItem('420craft_yield_config') || '{}');
+    const saved = (acctLoadObj('420craft_yield_config'));
     // Always ensure great_western exists
     if (!saved.great_western) saved.great_western = YIELD_DEFAULTS.great_western;
     if (!saved.custom_1) saved.custom_1 = { name: 'Custom Provider 1', notes: '', yields: { '7.5 oz': 106, '12 oz': 67, '12 oz slim': 67, '16 oz': 50 } };
@@ -18263,7 +18291,7 @@ function saveYieldConfig() {
     yields
   };
 
-  localStorage.setItem('420craft_yield_config', JSON.stringify(cfg));
+  acctSave('420craft_yield_config', cfg);
 
   // Also update the provider select label
   const opt = document.querySelector(`#yield-provider-select option[value="${sel}"]`);
@@ -18276,7 +18304,7 @@ function resetYieldToDefaults() {
   const sel = document.getElementById('yield-provider-select')?.value || 'great_western';
   const cfg = getYieldConfig();
   cfg[sel] = { ...YIELD_DEFAULTS.great_western, name: cfg[sel]?.name || 'Great Western (INVERT)' };
-  localStorage.setItem('420craft_yield_config', JSON.stringify(cfg));
+  acctSave('420craft_yield_config', cfg);
   loadYieldConfig();
   showToast('↺ Reset to Great Western defaults');
 }
@@ -18287,7 +18315,7 @@ function addYieldProvider() {
   const key = 'custom_' + Date.now();
   const cfg = getYieldConfig();
   cfg[key] = { name, notes: '', yields: { '7.5 oz': 106, '12 oz': 67, '12 oz slim': 67, '16 oz': 50 } };
-  localStorage.setItem('420craft_yield_config', JSON.stringify(cfg));
+  acctSave('420craft_yield_config', cfg);
 
   const sel = document.getElementById('yield-provider-select');
   if (sel) {
@@ -18327,7 +18355,7 @@ function _rollupSkuTotals() {
     const totalOnHand = batches.reduce((s,b)=>s+parseInt(b.cases_on_hand||b.OnHand||b['On Hand']||0),0);
     return {...sku, OnHand: totalOnHand};
   });
-  localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+  // skuData lives in memory — server is authoritative
 }
 
 // Used on fresh-device boot — derives all totals from confirmed server batch data
@@ -18344,7 +18372,7 @@ function _rollupSkuTotalsFromBatches() {
     const totalOutbound= batches.reduce((s,b)=>s+parseInt(b.cases_shipped||b.Outbound||0),0);
     return {...sku, OnHand: totalOnHand, Inbound: totalInbound, Outbound: totalOutbound};
   });
-  localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+  // skuData lives in memory — server is authoritative
 }
 
 function _fixSkuBrands() {
@@ -18376,7 +18404,7 @@ function _fixSkuBrands() {
     };
   });
   // Cache-only: skuData is derived/computed — authoritative source is Supabase sku_master
-  localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+  // skuData lives in memory — server is authoritative
 
   _rollupSkuTotals();
 }
@@ -18408,13 +18436,60 @@ const ACCT_KEYS = {
   SELL_THROUGH:'420craft_acct_sell_through', RESERVATIONS:'420craft_acct_reservations',
 };
 
-function acctLoad(key){try{return JSON.parse(localStorage.getItem(key)||'[]');}catch(e){return [];}}
-function acctLoadObj(key){try{return JSON.parse(localStorage.getItem(key)||'{}');}catch(e){return {};}}
-function acctSave(key,data){
-  localStorage.setItem(key,JSON.stringify(data));
-  _sbWriteAcct(key,Array.isArray(data)?data:[data]);
-  if(typeof sheetsQueue==='function'&&typeof sheetsEnabled==='function'&&sheetsEnabled())
-    sheetsQueue('save_acct_data',{key:key.replace('420craft_',''),data});
+// ── CLOUD-FIRST STATE ENGINE ──────────────────────────────────
+// ALL app state lives in Supabase app_state table.
+// In-memory cache for instant reads. Every write posts to cloud.
+// NO localStorage for operational or accounting data.
+const _appState = {}; // in-memory cache keyed by state_key
+
+async function _appStateSync() {
+  // Load all app_state rows into memory on boot
+  const sb = await waitForSupabase(10000);
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from('app_state').select('*');
+    if (error) { console.warn('[AppState] Load error:', error.message); return; }
+    data.forEach(row => {
+      try { _appState[row.state_key] = JSON.parse(row.state_value); }
+      catch { _appState[row.state_key] = row.state_value; }
+    });
+    console.log('[AppState] Loaded', data.length, 'state entries from cloud');
+  } catch(e) { console.warn('[AppState] Sync error:', e.message); }
+}
+
+function acctLoad(key) {
+  // Read from in-memory cache — populated by _appStateSync on boot
+  const val = _appState[key];
+  if (val === undefined || val === null) return [];
+  return Array.isArray(val) ? val : [];
+}
+
+function acctLoadObj(key) {
+  const val = _appState[key];
+  if (val === undefined || val === null) return {};
+  return (typeof val === 'object' && !Array.isArray(val)) ? val : {};
+}
+
+function acctSave(key, data) {
+  // 1. Write to in-memory cache immediately — UI reads from here
+  _appState[key] = data;
+  // 2. Post to Supabase — this triggers Realtime on ALL connected devices
+  const sb = getSupabaseClient ? getSupabaseClient() : null;
+  if (sb) {
+    sb.from('app_state').upsert({
+      state_key: key,
+      state_value: JSON.stringify(data),
+      updated_at: new Date().toISOString(),
+      updated_by: currentUserEmail ? currentUserEmail() : 'system',
+    }, { onConflict: 'state_key' })
+    .then(({error}) => {
+      if (error) console.warn('[AppState] Save error:', key, error.message);
+      // Supabase Realtime broadcasts the change to all other devices automatically
+      // They receive it via postgres_changes subscription and call _remoteSync('app_state', true)
+    });
+  }
+  if (typeof sheetsQueue==='function' && typeof sheetsEnabled==='function' && sheetsEnabled())
+    sheetsQueue('save_acct_data', {key: key.replace('420craft_',''), data});
 }
 function acctId(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,6).toUpperCase();}
 function acctNow(){return new Date().toISOString();}
@@ -18430,10 +18505,10 @@ function _brandFromSku(sku){const s=(sku||'').toLowerCase();if(s.includes('appgi
 
 function acctAudit(action,entity,entityId,changes,note){
   const log=acctLoad(ACCT_KEYS.ACCT_AUDIT);
-  const user=localStorage.getItem('420craft_auth_user')?JSON.parse(localStorage.getItem('420craft_auth_user')||'{}').name||'System':'System';
+  const user=currentUserEmail ? (currentUserEmail() || 'System') : 'System';
   log.push({id:acctId('AUDIT'),ts:acctNow(),action,entity,entityId,changes:changes||null,note:note||'',user});
   if(log.length>5000)log.splice(0,log.length-5000);
-  localStorage.setItem(ACCT_KEYS.ACCT_AUDIT,JSON.stringify(log));
+  acctSave(ACCT_KEYS.ACCT_AUDIT, log);
 }
 
 const DEFAULT_COA=[
@@ -19567,8 +19642,8 @@ function parseSellThroughCSV(csvText,customerId,brandName,period){
 // ── QBO SYNC LAYER ───────────────────────────────────────────
 const QBO_KEYS={CONFIG:'420craft_acct_qbo_config',EXT_MAP:'420craft_acct_ext_id_map',SYNC_LOG:'420craft_acct_sync_log'};
 function qboConfigLoad(){return acctLoadObj(QBO_KEYS.CONFIG);}
-function qboConfigSave(cfg){localStorage.setItem(QBO_KEYS.CONFIG,JSON.stringify(cfg));}
-function qboSyncLog(action,entity,entityId,status,detail){const log=acctLoad(QBO_KEYS.SYNC_LOG);log.push({id:acctId('QLOG'),ts:acctNow(),action,entity,entityId,status,detail:detail||''});if(log.length>2000)log.splice(0,log.length-2000);localStorage.setItem(QBO_KEYS.SYNC_LOG,JSON.stringify(log));}
+function qboConfigSave(cfg){ acctSave(QBO_KEYS.CONFIG, cfg); }
+function qboSyncLog(action,entity,entityId,status,detail){const log=acctLoad(QBO_KEYS.SYNC_LOG);log.push({id:acctId('QLOG'),ts:acctNow(),action,entity,entityId,status,detail:detail||''});if(log.length>2000)log.splice(0,log.length-2000);acctSave(QBO_KEYS.SYNC_LOG, log);}
 async function _qboApiCall(method,endpoint,payload,cfg){
   if(!cfg||!cfg.accessToken||!cfg.companyId)return{error:'QBO credentials missing — configure in Integrations'};
   try{
@@ -19616,7 +19691,7 @@ function qboBulkSync(){
 // ── SQUARE LAYER ─────────────────────────────────────────────
 const SQ_KEYS={CONFIG:'420craft_acct_square_config'};
 function squareConfigLoad(){return acctLoadObj(SQ_KEYS.CONFIG);}
-function squareConfigSave(cfg){localStorage.setItem(SQ_KEYS.CONFIG,JSON.stringify(cfg));}
+function squareConfigSave(cfg){ acctSave(SQ_KEYS.CONFIG, cfg); }
 function squareEligibilityCheck(sku,channel,brandName){
   const deals=dealGetActive(null,brandName);const deal=deals[0];
   if(deal&&deal.thcRestricted)return{eligible:false,reason:'THC-restricted — Square not permitted'};
@@ -21215,18 +21290,21 @@ const _tableSync = {
       trackingNumber: r.tracking_number, shipDate: r.ship_date,
       cogs: r.cogs||{ carrierTotal: r.carrier_cost, totalCogs: r.total_cost } }),
     pages: ['shipping','order-queue','dashboard','acct-shipment-costing'],
+    postFetch: (data) => { _shipmentsData = data; },
   },
   customer_orders: {
     key: '420craft_customer_orders',
     transform: r => ({ ...r, id: r.id, customerId: r.customer_id,
       status: r.status, items: r.items||[], shipTo: r.ship_to }),
     pages: ['order-queue','dashboard','shipping'],
+    postFetch: (data) => { _customerOrdersData = data; },
   },
   vendors: {
     key: null,
     transform: r => ({ ...r, vendorId: r.id, name: r.name,
       paymentTerms: r.payment_terms, accountNo: r.account_number }),
     pages: ['acct-vendors','acct-ap'],
+    postFetch: (data) => { _vendorsData = data; },
   },
   invoices: {
     key: null,
@@ -21235,6 +21313,7 @@ const _tableSync = {
       dueDate: r.due_date, totalAmount: r.total_amount,
       paidAmount: r.paid_amount, openAmount: r.open_amount }),
     pages: ['acct-ar','acct-home','acct-exceptions','acct-reports'],
+    postFetch: (data) => { _invoicesData = data; },
   },
   customer_deals: {
     key: null,
@@ -21243,29 +21322,47 @@ const _tableSync = {
       dealType: r.deal_type, pricePerCase: r.price_per_case,
       ourSharePct: r.our_share_pct, paymentTerms: r.payment_terms }),
     pages: ['acct-deals','acct-home','acct-settlements'],
+    postFetch: (data) => { _dealsData = data; },
   },
   settlement_periods: {
     key: null,
     transform: r => ({ ...r, customerId: r.customer_id, netDue: r.net_due,
       openingInventory: r.opening_inventory, shippedOut: r.shipped_out }),
     pages: ['acct-settlements','acct-home','acct-reports'],
+    postFetch: (data) => { _settlementsData = data; },
   },
   notification_contacts: {
     key: '420craft_nt_contacts',
     transform: r => ({ ...r, id: r.legacy_id||r.id, name: r.name,
       company: r.company, email: r.email, phone: r.phone }),
     pages: ['notifications'],
+    postFetch: (data) => { _notificationContactsData = data; },
   },
   brands: {
     key: '420craft_brands',
     transform: r => ({ ...r, id: r.id, name: r.name, status: r.status||'Active',
       devLog: r.dev_log||[], checklist: r.checklist||{} }),
     pages: ['brand-launch','acct-deals'],
+    postFetch: (data) => { _brandsData = data; },
   },
   customers: {
     key: '420craft_address_book',
     transform: r => ({ ...r, id: r.id, name: r.name, email: r.email, phone: r.phone }),
     pages: ['shipping','acct-ar','acct-ap'],
+    postFetch: (data) => { _customersData = data; },
+  },
+  app_state: {
+    key: null,
+    transform: r => r,
+    pages: [],
+    postFetch: (data) => {
+      // Load all key-value pairs into _appState in-memory store
+      data.forEach(row => {
+        try { _appState[row.state_key] = JSON.parse(row.state_value); }
+        catch { _appState[row.state_key] = row.state_value; }
+      });
+      console.log('[AppState] Realtime sync: loaded', data.length, 'state entries');
+    },
   },
   audit_logs: {
     key: null,
@@ -21500,6 +21597,7 @@ function _createSupabaseClient(sbLib) {
       consumables:               ['consumables','prod-run','reorder'],
       shipping_materials:        ['shipping'],
       notification_contacts:     ['notifications'],
+      app_state:                 ['settings','schedule','prod-run','operators','consumables','notifications','acct-home','acct-ar','acct-ap','acct-deals','acct-settlements','acct-costing','acct-vendors','acct-reports'],
       // Admin & integrations
       user_profiles:             ['acct-employees','acct-roles','admin-diagnostics'],
       employee_profiles:         ['acct-employees'],
@@ -21589,6 +21687,7 @@ function _createSupabaseClient(sbLib) {
         notification_contacts:      'Notification contacts updated',
         user_profiles:              'User profile updated',
         integrations:               'Integration updated',
+        app_state:                  'Settings updated',
       }[table] || `${table.replace(/_/g,' ')} updated`;
       showToast(`🔄 ${what}${who ? ' by ' + who : ''}`);
     }
@@ -21668,12 +21767,12 @@ const PALLET_H       = 70;  // space height px
 const PALLET_GAP     = 10;  // gap in default grid
 
 function _palletLoad() {
-  try { return JSON.parse(localStorage.getItem('420craft_pallet_map') || '[]'); }
+  try { return (acctLoad('420craft_pallet_map')); }
   catch(e) { return []; }
 }
 
 function _palletSave(spaces) {
-  localStorage.setItem('420craft_pallet_map', JSON.stringify(spaces));
+  acctSave('420craft_pallet_map', spaces);
   if (SUPABASE_CONFIG.remoteFirst) {
     const sb = getSupabaseClient();
     if (sb) sb.from('settings').upsert({ key: 'pallet_map', value: JSON.stringify(spaces) }, { onConflict: 'key' }).catch(()=>{});
@@ -22514,7 +22613,7 @@ async function loadBatchesFromRemote() {
     OnHand: parseInt(r.cases_on_hand || r['On Hand'] || r.OnHand || 0),
     Outbound: parseInt(r.cases_shipped || r.Outbound || 0),
   }));
-  localStorage.setItem('420craft_batches', JSON.stringify(batchData));
+  // batchData lives in memory — server is authoritative
   console.log('[Remote] Loaded', batchData.length, 'batches from Supabase');
 }
 
@@ -22835,7 +22934,7 @@ async function diagForcePullProdRuns() {
       startedAt: r.started_at, completedAt: r.completed_at,
       leadOperator: r.lead_operator, notes: r.notes,
     }));
-    localStorage.setItem('420craft_prod_runs', JSON.stringify(mapped));
+    _prodRunsData = mapped; // in-memory — prod runs live in Supabase production_runs table
     const active = mapped.find(r => r.status === 'in-progress');
     if(el) el.innerHTML = `✅ Pulled ${mapped.length} runs from Supabase\nIn-progress: ${mapped.filter(r=>r.status==='in-progress').length}\n\n${active ? '🔄 Active run found: '+active.id+'\n   Flavor: '+(active.flavorName||'?')+'\n\nClick "Resume Active Run" button to go live.' : '(no in-progress run found in Supabase)'}`;
     if (active && !prodRunActive) {
