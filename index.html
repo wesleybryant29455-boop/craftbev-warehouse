@@ -1049,7 +1049,21 @@ const DEV_USER = { email: 'wbryant@420craftbeverages.com', name: 'Wesley (Dev)',
     try {
       const user = JSON.parse(saved);
       if (user.email && user.email.endsWith('@' + ALLOWED_DOMAIN)) {
-        hideAuthGate(user);
+        // Check if Supabase already has a session (persisted from previous sign-in)
+        // supabase.auth.getSession() will return existing session if token is still valid
+        const _restoreSupabaseSession = async () => {
+          const sb = await waitForSupabase(10000);
+          if (sb) {
+            const { data } = await sb.auth.getSession().catch(() => ({ data: null }));
+            if (data?.session) {
+              console.log('[Auth] ✅ Supabase session restored for', data.session.user?.email);
+            } else {
+              console.warn('[Auth] No Supabase session — RLS will use anon key until next sign-in');
+            }
+          }
+          hideAuthGate(user);
+        };
+        _restoreSupabaseSession();
         return;
       }
     } catch(e) {}
@@ -1066,16 +1080,39 @@ function handleGoogleCredential(response) {
   const hd = payload.hd || ''; // hosted domain
 
   if (email.endsWith('@' + ALLOWED_DOMAIN) || hd === ALLOWED_DOMAIN) {
-    // Authorized — save session and show portal
+    // Save frontend session
     const user = { email, name, picture };
     sessionStorage.setItem(AUTH_KEY, JSON.stringify(user));
-    hideAuthGate(user);
+
+    // ── SIGN INTO SUPABASE WITH GOOGLE TOKEN ─────────────────
+    // This gives Supabase a user-scoped JWT so auth.email() works in RLS.
+    // Without this, all Supabase writes use the anon key and RLS rejects them.
+    const _trySupabaseAuth = async () => {
+      const sb = await waitForSupabase(10000);
+      if (!sb) { console.warn('[Auth] Supabase not ready — RLS will use anon key'); hideAuthGate(user); return; }
+      try {
+        const { data, error } = await sb.auth.signInWithIdToken({
+          provider: 'google',
+          token: response.credential,
+        });
+        if (error) {
+          console.warn('[Auth] Supabase signInWithIdToken failed:', error.message);
+          console.warn('[Auth] RLS may reject writes — falling back to anon session');
+        } else {
+          console.log('[Auth] ✅ Supabase session established for', data.user?.email);
+        }
+      } catch(e) {
+        console.warn('[Auth] Supabase auth exception:', e.message);
+      }
+      hideAuthGate(user);
+    };
+    _trySupabaseAuth();
+
   } else {
     // Wrong domain
     const errEl = document.getElementById('auth-error');
     errEl.style.display = 'block';
     errEl.textContent = `Access denied. Only @${ALLOWED_DOMAIN} accounts are allowed. (Signed in as: ${email})`;
-    // Sign them out of Google so they can try again
     if (window.google && google.accounts) {
       google.accounts.id.disableAutoSelect();
     }
@@ -5600,16 +5637,18 @@ function renderDashboard() {
   document.getElementById('kpi-lowstock').textContent = lowCount;
 
   // Monthly chart
-  const ctx = document.getElementById('monthlyChart').getContext('2d');
+  const ctx = document.getElementById('monthlyChart')?.getContext('2d');
+  if (!ctx) return;
   if (monthlyChart) monthlyChart.destroy();
+  const _md = MONTHLY_DATA || [];
   monthlyChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: MONTHLY_DATA.map(m => m.Month.replace('20','').replace('-',' / ')),
+      labels: _md.map(m => (m?.Month||'').replace('20','').replace('-',' / ')),
       datasets: [
         {
           label: 'New Batch / Inbound',
-          data: (MONTHLY_DATA||[]).map(m => m ? m.Inbound : 0),
+          data: _md.map(m => m ? m.Inbound : 0),
           backgroundColor: 'rgba(57,232,122,0.75)',
           borderColor: '#39e87a',
           borderWidth: 1,
@@ -5617,7 +5656,7 @@ function renderDashboard() {
         },
         {
           label: 'Outbound',
-          data: (MONTHLY_DATA||[]).map(m => m ? m.Outbound : 0),
+          data: _md.map(m => m ? m.Outbound : 0),
           backgroundColor: 'rgba(176,108,255,0.65)',
           borderColor: '#b06cff',
           borderWidth: 1,
@@ -5639,8 +5678,10 @@ function renderDashboard() {
   });
 
   // Top outbound bars
-  const sorted = [...skuData].sort((a,b) => b.Outbound - a.Outbound).slice(0,8);
-  const maxOut = sorted[0].Outbound;
+  const sorted = [...(skuData||[])].sort((a,b) => (b.Outbound||0) - (a.Outbound||0)).slice(0,8);
+  if (!sorted.length) { document.getElementById('top-outbound-bars').innerHTML = '<div style="color:var(--text3);padding:20px;text-align:center">No data yet</div>'; }
+  else {
+  const maxOut = sorted[0].Outbound || 1;
   const colors = ['#7ed321','#a8e63d','#5cb800','#3a8c00','#f5a623','#e67e22','#27ae60','#2ecc71'];
   document.getElementById('top-outbound-bars').innerHTML = sorted.map((s,i) => `
     <div class="sku-bar-item">
@@ -5652,6 +5693,7 @@ function renderDashboard() {
         <div class="sku-bar-fill" style="width:${(s.Outbound/maxOut*100).toFixed(1)}%;background:${colors[i%colors.length]}"></div>
       </div>
     </div>`).join('');
+  } // end else sorted.length
 
   // Recent activity — combine seed movements + logged ones
   const allMov = [...movements].reverse().slice(0, 10);
@@ -18512,22 +18554,23 @@ function acctLoadObj(key) {
 function acctSave(key, data) {
   // 1. Write to in-memory cache immediately — UI reads from here
   if (typeof _appState !== 'undefined') _appState[key] = data;
-  // 2. Post to Supabase only when authenticated — triggers Realtime on ALL devices
-  const _userEmail = typeof currentUserEmail === 'function' ? currentUserEmail() : '';
-  if (!_userEmail) return; // not authenticated yet — don't attempt write
+  // 2. Post to Supabase only when we have a real Supabase auth session
+  // Using sb.auth.getSession() ensures we have a user-scoped JWT, not just anon
+  // This is required for RLS auth.email() to work correctly
   const sb = getSupabaseClient ? getSupabaseClient() : null;
   if (sb) {
-    sb.from('app_state').upsert({
-      state_key: key,
-      state_value: JSON.stringify(data),
-      updated_at: new Date().toISOString(),
-      updated_by: currentUserEmail ? currentUserEmail() : 'system',
-    }, { onConflict: 'state_key' })
-    .then(({error}) => {
-      if (error) console.warn('[AppState] Save error:', key, error.message);
-      // Supabase Realtime broadcasts the change to all other devices automatically
-      // They receive it via postgres_changes subscription and call _remoteSync('app_state', true)
-    });
+    sb.auth.getSession().then(({ data: sd }) => {
+      if (!sd?.session) return; // no Supabase session — skip write, data safe in memory
+      sb.from('app_state').upsert({
+        state_key: key,
+        state_value: JSON.stringify(data),
+        updated_at: new Date().toISOString(),
+        updated_by: sd.session.user?.email || 'system',
+      }, { onConflict: 'state_key' })
+      .then(({ error }) => {
+        if (error) console.warn('[AppState] Save error:', key, error.message);
+      });
+    }).catch(() => {});
   }
   if (typeof sheetsQueue==='function' && typeof sheetsEnabled==='function' && sheetsEnabled())
     sheetsQueue('save_acct_data', {key: key.replace('420craft_',''), data});
