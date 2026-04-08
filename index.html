@@ -18314,10 +18314,25 @@ function _rollupSkuTotals() {
   skuData = skuData.map(sku => {
     const skuCode = sku.Full_SKU || sku.SKU || sku.sku_code || '';
     const batches = batchData.filter(b => (b.sku_code||b.SKU||b.Full_SKU||'') === skuCode);
-    // OnHand = current live stock from active batches
     const totalOnHand = batches.reduce((s,b)=>s+parseInt(b.cases_on_hand||b.OnHand||b['On Hand']||0),0);
-    // Keep Inbound/Outbound from SEED_SKUS — do NOT overwrite with batch rollup
     return {...sku, OnHand: totalOnHand};
+  });
+  localStorage.setItem('420craft_skus', JSON.stringify(skuData));
+}
+
+// Used on fresh-device boot — derives all totals from confirmed server batch data
+function _rollupSkuTotalsFromBatches() {
+  if (!Array.isArray(skuData) || !Array.isArray(batchData)) return;
+  skuData = skuData.map(sku => {
+    const skuCode = sku.Full_SKU || sku.SKU || sku.sku_code || '';
+    const batches = batchData.filter(b => {
+      const bc = b.sku_code || b.SKU || b.Full_SKU || '';
+      return bc === skuCode;
+    });
+    const totalOnHand  = batches.reduce((s,b)=>s+parseInt(b.cases_on_hand||b.OnHand||0),0);
+    const totalInbound = batches.reduce((s,b)=>s+parseInt(b.cases_produced||b.Inbound||0),0);
+    const totalOutbound= batches.reduce((s,b)=>s+parseInt(b.cases_shipped||b.Outbound||0),0);
+    return {...sku, OnHand: totalOnHand, Inbound: totalInbound, Outbound: totalOutbound};
   });
   localStorage.setItem('420craft_skus', JSON.stringify(skuData));
 }
@@ -21043,7 +21058,7 @@ const _tableSync = {
       Outbound: parseInt(r.cases_shipped || r.Outbound || 0),
     }),
     pages: ['inventory','inv-detail','inv-audit','dashboard','brand-velocity','reorder','acct-inventory-val','acct-costing','batch-calc'],
-    postFetch: (data) => { batchData = data; _rollupSkuTotals(); },
+    postFetch: (data) => { batchData = data; _rollupSkuTotalsFromBatches(); },
   },
   movements: {
     key: '420craft_movements',
@@ -21070,23 +21085,34 @@ const _tableSync = {
       CanSize: r.can_size, CaseSize: r.case_size }),
     pages: ['inventory','sku-manager','batch-calc','brand-velocity','reorder'],
     postFetch: (data) => {
-      if (typeof skuData === 'undefined' || !skuData) return;
-      // Only update product definition fields — NEVER overwrite inventory totals
-      // Inbound/Outbound/OnHand come from movements and SEED_SKUS, not sku_master
+      if (typeof skuData === 'undefined') return;
+      if (!skuData || skuData.length === 0) {
+        // Fresh device or empty cache — populate skuData directly from server
+        skuData = data.map(r => ({
+          SKU:         r.sku_code || '',
+          Full_SKU:    r.sku_code || '',
+          MG_Strength: r.mg_strength || '',
+          CanSize:     r.can_size || '12 oz',
+          CaseSize:    parseInt(r.case_size || 24),
+          Brand:       r.brand || '',
+          FlavorBase:  r.flavor_base || '',
+          Inbound:     0, Outbound: 0, OnHand: 0, // will be populated from batches
+        }));
+        _fixSkuBrands && _fixSkuBrands();
+        return;
+      }
+      // Existing data — only update product definition fields, never inventory totals
       data.forEach(remote => {
         const skuCode = remote.sku_code || remote.SKU || remote.Full_SKU || '';
         const existing = skuData.find(s => (s.Full_SKU||s.SKU||s.sku_code||'') === skuCode);
         if (existing) {
-          // Update definition fields only
-          existing.CanSize   = remote.can_size    || remote.CanSize   || existing.CanSize;
-          existing.CaseSize  = remote.case_size   || remote.CaseSize  || existing.CaseSize;
-          existing.Brand     = remote.brand       || remote.Brand     || existing.Brand;
-          existing.FlavorBase= remote.flavor_base || remote.FlavorBase|| existing.FlavorBase;
-          // Never touch: Inbound, Outbound, OnHand
+          existing.CanSize    = remote.can_size    || remote.CanSize    || existing.CanSize;
+          existing.CaseSize   = remote.case_size   || remote.CaseSize   || existing.CaseSize;
+          existing.Brand      = remote.brand       || remote.Brand      || existing.Brand;
+          existing.FlavorBase = remote.flavor_base || remote.FlavorBase || existing.FlavorBase;
         }
       });
       _fixSkuBrands && _fixSkuBrands();
-      // Do NOT call _rollupSkuTotals here — that overwrites correct Inbound/Outbound from SEED_SKUS
     },
   },
   production_runs: {
