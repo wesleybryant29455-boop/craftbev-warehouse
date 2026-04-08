@@ -21351,16 +21351,12 @@ var _tableSync = {
       const remote = runs.find(r => r.id === prodRunActive.id);
       if (!remote) return;
 
-      // ── WRITE-LOCK GUARD ─────────────────────────────────────
-      // If we just saved locally, don't let a Realtime echo overwrite our state
-      // for 2 seconds. This prevents the race where server returns stale data
-      // before our write commits, wiping out newly added items.
-      const now = Date.now();
-      // Write-lock: block realtime overwrite for 3s after local save
-      // This covers: 800ms debounce + ~500ms Supabase commit + ~200ms realtime roundtrip
-      if (_prodRunLastSave && (now - _prodRunLastSave) < 3000) {
-        console.log('[ProdRun] Skipping realtime overwrite — local write too recent');
-        return;
+      // Skip own echo — if this update was sent by the current user recently, ignore it
+      const _myEmail = typeof currentUserEmail === 'function' ? currentUserEmail() : '';
+      const _remoteUpdatedBy = remote.updated_by || remote.acting_user || '';
+      const _remoteUpdatedAt = new Date(remote.updated_at || 0).getTime();
+      if (_myEmail && _remoteUpdatedBy === _myEmail && (Date.now() - _remoteUpdatedAt) < 3000) {
+        return; // own echo — skip silently
       }
 
       // Remote is source of truth — preserve active crew timer start times
@@ -22396,6 +22392,7 @@ var _SB_WRITE_MAP = {
       lead_operator: r.leadOperator||r.lead_operator||null,
       notes: r.notes||null,
       updated_at: new Date().toISOString(),
+      updated_by: typeof currentUserEmail === 'function' ? currentUserEmail() : '',
     }),
     conflict: 'id',
     // Only filter out truly empty/demo rows — in-progress runs MUST sync
