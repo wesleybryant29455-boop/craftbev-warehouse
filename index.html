@@ -3887,71 +3887,104 @@ window.addEventListener('load', function() {
 
   <!-- ════════ ORDER QUEUE PAGE ════════ -->
   <div class="page" id="page-order-queue">
-    <div class="section-header">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div>
-          <div class="section-title">🏭 PRODUCTION QUEUE</div>
-          <div class="section-desc">Customer production requests · schedule runs · update status as batches progress</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3)">AUTO-REFRESH</div>
-          <button class="btn btn-ghost" onclick="renderOrderQueue()" style="font-size:12px;padding:6px 14px">🔄 Refresh</button>
-          <button class="btn btn-primary" onclick="oqExportCSV()" style="font-size:12px;padding:6px 14px">⬇ Export</button>
-        </div>
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+      <div>
+        <div class="section-title">🏭 PRODUCTION QUEUE</div>
+        <div class="section-desc">All production requests — from customer submission to completed batch</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="oq-brand-filter" onchange="renderOrderQueue()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:6px 12px;border-radius:8px">
+          <option value="">All Brands</option>
+        </select>
+        <button onclick="renderOrderQueue()" class="btn btn-ghost" style="font-size:12px">↻ Refresh</button>
       </div>
     </div>
 
-    <!-- KPI strip -->
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:22px" id="oq-kpi-row"></div>
+    <!-- Split layout: left sidebar + right main -->
+    <div style="display:grid;grid-template-columns:220px 1fr;gap:16px;min-height:600px">
 
-    <!-- Calendar view toggle -->
-    <div id="oq-filter-bar" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-      <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px">FILTER:</div>
-      <button class="btn btn-ghost" id="oq-f-all"          onclick="oqFilter('all')"          style="font-size:11px;padding:5px 12px;border-color:var(--green);color:var(--green)">All</button>
-      <button class="btn btn-ghost" id="oq-f-requested"    onclick="oqFilter('requested')"    style="font-size:11px;padding:5px 12px">📋 Requested</button>
-      <button class="btn btn-ghost" id="oq-f-scheduled"    onclick="oqFilter('scheduled')"    style="font-size:11px;padding:5px 12px">📅 Scheduled</button>
-      <button class="btn btn-ghost" id="oq-f-in-production"onclick="oqFilter('in-production')" style="font-size:11px;padding:5px 12px">⚗️ In Production</button>
-      <button class="btn btn-ghost" id="oq-f-complete"     onclick="oqFilter('complete')"     style="font-size:11px;padding:5px 12px">✅ Complete</button>
-      <div style="flex:1"></div>
-      <select class="select-input" id="oq-brand-filter" onchange="renderOrderQueue()" style="font-size:12px;padding:5px 12px">
-        <option value="">All Brands</option>
-        <option>AppGirls</option><option>Blind Tiger</option><option>Gata Juice</option>
-        <option>Reef Shark</option><option>Simple Garden</option><option>Wyatt Purp</option>
-      </select>
+      <!-- Left sidebar: status filters with live counts -->
+      <div>
+        <div id="oq-sidebar" style="display:flex;flex-direction:column;gap:6px;position:sticky;top:20px">
+          <div onclick="oqSetFilter('requested')" id="oq-tab-requested"
+            style="padding:12px 16px;border-radius:10px;cursor:pointer;border:1px solid rgba(255,184,48,0.3);background:rgba(255,184,48,0.08);transition:all 0.15s"
+            onmouseover="this.style.background='rgba(255,184,48,0.15)'" onmouseout="this.style.background=window._oqActive==='requested'?'rgba(255,184,48,0.15)':'rgba(255,184,48,0.08)'">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:12px;color:var(--amber);font-weight:700">📋 REQUESTED</span>
+              <span id="oq-count-requested" style="font-size:11px;font-family:var(--font-mono);color:var(--amber);background:rgba(255,184,48,0.2);padding:1px 7px;border-radius:8px">0</span>
+            </div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">Awaiting scheduling</div>
+          </div>
+          <div onclick="oqSetFilter('in_production')" id="oq-tab-in_production"
+            style="padding:12px 16px;border-radius:10px;cursor:pointer;border:1px solid rgba(0,188,212,0.3);background:rgba(0,188,212,0.08);transition:all 0.15s"
+            onmouseover="this.style.background='rgba(0,188,212,0.15)'" onmouseout="this.style.background=window._oqActive==='in_production'?'rgba(0,188,212,0.15)':'rgba(0,188,212,0.08)'">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:12px;color:#00bcd4;font-weight:700">⚗️ IN PRODUCTION</span>
+              <span id="oq-count-in_production" style="font-size:11px;font-family:var(--font-mono);color:#00bcd4;background:rgba(0,188,212,0.2);padding:1px 7px;border-radius:8px">0</span>
+            </div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">Actively running now</div>
+          </div>
+          <div onclick="oqSetFilter('scheduled')" id="oq-tab-scheduled"
+            style="padding:12px 16px;border-radius:10px;cursor:pointer;border:1px solid rgba(176,108,255,0.3);background:rgba(176,108,255,0.08);transition:all 0.15s"
+            onmouseover="this.style.background='rgba(176,108,255,0.15)'" onmouseout="this.style.background=window._oqActive==='scheduled'?'rgba(176,108,255,0.15)':'rgba(176,108,255,0.08)'">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:12px;color:var(--purple);font-weight:700">📅 SCHEDULED</span>
+              <span id="oq-count-scheduled" style="font-size:11px;font-family:var(--font-mono);color:var(--purple);background:rgba(176,108,255,0.2);padding:1px 7px;border-radius:8px">0</span>
+            </div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">Date confirmed</div>
+          </div>
+          <div onclick="oqSetFilter('complete')" id="oq-tab-complete"
+            style="padding:12px 16px;border-radius:10px;cursor:pointer;border:1px solid rgba(57,232,122,0.3);background:rgba(57,232,122,0.06);transition:all 0.15s"
+            onmouseover="this.style.background='rgba(57,232,122,0.12)'" onmouseout="this.style.background=window._oqActive==='complete'?'rgba(57,232,122,0.12)':'rgba(57,232,122,0.06)'">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:12px;color:var(--green);font-weight:700">✅ COMPLETE</span>
+              <span id="oq-count-complete" style="font-size:11px;font-family:var(--font-mono);color:var(--green);background:rgba(57,232,122,0.15);padding:1px 7px;border-radius:8px">0</span>
+            </div>
+            <div style="font-size:10px;color:var(--text3);margin-top:3px">Finished batches</div>
+          </div>
+          <div onclick="oqSetFilter('all')" id="oq-tab-all"
+            style="padding:10px 16px;border-radius:10px;cursor:pointer;border:1px solid var(--border2);background:var(--bg3);transition:all 0.15s;margin-top:4px"
+            onmouseover="this.style.borderColor='var(--text3)'" onmouseout="this.style.borderColor='var(--border2)'">
+            <span style="font-size:11px;color:var(--text3)">📊 All Items</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right main: order cards -->
+      <div id="oq-orders-list"></div>
     </div>
-
-    <!-- Orders grid -->
-    <div id="oq-orders-list" style="display:flex;flex-direction:column;gap:12px"></div>
 
     <!-- Status update modal -->
     <div id="oq-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:600;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)" onclick="oqCloseModal(event)">
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px;width:100%;max-width:500px;box-shadow:0 24px 80px rgba(0,0,0,0.6)" onclick="event.stopPropagation()">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px;width:100%;max-width:520px;box-shadow:0 24px 80px rgba(0,0,0,0.6)" onclick="event.stopPropagation()">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
-          <div style="font-family:var(--font-display);font-size:20px;letter-spacing:1px">UPDATE ORDER</div>
+          <div style="font-family:var(--font-display);font-size:18px;letter-spacing:1px" id="oq-modal-title">UPDATE REQUEST</div>
           <button onclick="oqCloseModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
         </div>
         <div id="oq-modal-order-info" style="background:var(--bg3);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px"></div>
         <div class="form-group" style="margin-bottom:14px">
-          <label class="form-label">New Status</label>
+          <label class="form-label">Update Status</label>
           <select class="form-input" id="oq-modal-status">
-            <option value="requested">📋 Requested — Awaiting scheduling</option>
-            <option value="scheduled">📅 Scheduled — Production date confirmed</option>
-            <option value="in-production">⚗️ In Production — Batch actively running</option>
-            <option value="qc">🔬 QC / Testing — Awaiting COA results</option>
-            <option value="complete">✅ Complete — Finished goods logged to inventory</option>
+            <option value="submitted">📋 Submitted — Awaiting review</option>
+            <option value="received">👀 Received — Team reviewing</option>
+            <option value="approved">✓ Approved — Ready to schedule</option>
+            <option value="scheduled">📅 Scheduled — Date confirmed</option>
+            <option value="in_production">⚗️ In Production — Batch running</option>
+            <option value="produced">📦 Produced — Batch complete</option>
+            <option value="shipped">🚚 Shipped</option>
+            <option value="complete">✅ Complete</option>
+            <option value="on_hold_admin">⏸ On Hold (Admin)</option>
             <option value="cancelled">❌ Cancelled</option>
           </select>
         </div>
         <div class="form-group" style="margin-bottom:14px">
-          <label class="form-label">Update Note (sent to customer)</label>
-          <textarea class="form-input" id="oq-modal-note" rows="3" placeholder="e.g. Product received and ready for pickup Tuesday..."></textarea>
+          <label class="form-label">Note to Customer (optional)</label>
+          <textarea class="form-input" id="oq-modal-note" rows="3" placeholder="e.g. Scheduled for April 15th — your batch will run in the morning shift..."></textarea>
         </div>
-        <div class="form-group" style="margin-bottom:18px">
-          <label class="form-label">Assigned Operator</label>
-          <input class="form-input" id="oq-modal-operator" placeholder="Your name">
-        </div>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn-primary" onclick="oqSaveStatus()" style="flex:1">✓ Update Status</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button id="oq-start-batch-btn" style="display:none;background:var(--green);border:none;color:#0a0e08;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:800;cursor:pointer;font-family:var(--font-body)">▶ Start Batch Now</button>
+          <button class="btn btn-primary" onclick="oqSaveStatus()" style="flex:1">✓ Save Update</button>
           <button class="btn btn-ghost" onclick="oqCloseModal()">Cancel</button>
         </div>
       </div>
@@ -17550,115 +17583,332 @@ function logGetDestData() {
 // ════════════════════════════════════════════════════════════════
 
 function renderOrderQueue() {
-  const brandF  = document.getElementById('oq-brand-filter')?.value || getGlobalBrand() || '';
-  const statusF = document.getElementById('oq-status-filter')?.value || '';
-  const search  = (document.getElementById('oq-search')?.value || '').toLowerCase();
+  _oqLoad();
+}
 
-  oqLoadOrders();
-  let orders = [...customerOrders];
+window._oqActive = 'requested';
+window._oqAllItems = [];
 
-  if (brandF)  orders = orders.filter(o => o.brand === brandF);
-  if (statusF) orders = orders.filter(o => o.status === statusF);
-  if (search)  orders = orders.filter(o =>
-    (o.id||'').toLowerCase().includes(search) ||
-    (o.brand||'').toLowerCase().includes(search) ||
-    (o.contactName||'').toLowerCase().includes(search)
-  );
+function oqSetFilter(status) {
+  window._oqActive = status;
+  // Update tab highlight
+  ['requested','in_production','scheduled','complete','all'].forEach(s => {
+    const tab = document.getElementById('oq-tab-'+s);
+    if (!tab) return;
+    const colors = {
+      requested:    'rgba(255,184,48,0.15)',
+      in_production:'rgba(0,188,212,0.15)',
+      scheduled:    'rgba(176,108,255,0.15)',
+      complete:     'rgba(57,232,122,0.12)',
+      all:          'var(--bg2)',
+    };
+    tab.style.background = s === status ? (colors[s]||'var(--bg2)') : (s==='all'?'var(--bg3)':colors[s].replace('0.15','0.06').replace('0.12','0.06'));
+  });
+  _oqRenderList();
+}
 
-  // KPI strip
-  const kpiRow = document.getElementById('oq-kpi-row');
-  if (kpiRow) {
-    const statuses = [
-      { label:'Total', count: customerOrders.length, col:'var(--text2)' },
-      { label:'Requested', count: customerOrders.filter(o=>o.status==='requested'||o.status==='pending').length, col:'var(--text3)' },
-      { label:'Scheduled', count: customerOrders.filter(o=>o.status==='scheduled').length, col:'var(--blue)' },
-      { label:'In Production', count: customerOrders.filter(o=>['in-progress','in-production'].includes(o.status)).length, col:'var(--amber)' },
-      { label:'Complete', count: customerOrders.filter(o=>o.status==='complete').length, col:'var(--green)' },
-    ];
-    kpiRow.innerHTML = statuses.map(s=>`
-      <div style="background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px;text-align:center">
-        <div style="font-family:var(--font-display);font-size:28px;color:${s.col}">${s.count}</div>
-        <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:1px;margin-top:2px">${s.label.toUpperCase()}</div>
-      </div>`).join('');
-  }
-
+async function _oqLoad() {
   const list = document.getElementById('oq-orders-list');
   if (!list) return;
+  list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Loading production queue…</div>';
 
-  if (!orders.length) {
-    list.innerHTML = `<div style="text-align:center;padding:60px;color:var(--text3)">
-      <div style="font-size:40px;margin-bottom:14px">📋</div>
-      <div style="font-size:15px;margin-bottom:8px">${search||brandF||statusF ? 'No orders match your filters' : 'No production orders yet'}</div>
-      <div style="font-size:13px;color:var(--text3)">Orders created from customer requests will appear here</div>
+  try {
+    const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+    if (!sb) throw new Error('No Supabase connection');
+
+    // Load brand filter
+    const brandF = document.getElementById('oq-brand-filter')?.value || '';
+
+    // Populate brand dropdown from brands table
+    const { data: brandsData } = await sb.from('brands').select('id, name').eq('status','active').order('name');
+    const sel = document.getElementById('oq-brand-filter');
+    if (sel && brandsData) {
+      const current = sel.value;
+      sel.innerHTML = '<option value="">All Brands</option>' + brandsData.map(b=>`<option value="${b.name}" ${current===b.name?'selected':''}>${b.name}</option>`).join('');
+    }
+    const brandMap = {};
+    (brandsData||[]).forEach(b => { brandMap[b.id] = b.name; });
+
+    // 1. Portal production requests (customer submitted)
+    let prQ = sb.from('portal_production_requests')
+      .select('id, sku_name, flavor, mg_strength, can_size, estimated_cases, batch_count, requested_prod_date, requested_ship_date, priority, po_number, notes, status, hold_reason, submitted_at, created_at, brand_id')
+      .not('status', 'in', '("complete","cancelled")')
+      .order('created_at', { ascending: false });
+    const { data: portalReqs } = await prQ;
+
+    // 2. Production runs (in-progress and recent completed)
+    const runs = (_prodRunsData || []).filter(r => r.status === 'in-progress' || r.status === 'completed');
+
+    // 3. Schedule blocks (upcoming)
+    const schedBlocks = (_scheduleData || []).filter(b => b.status === 'scheduled' || b.status === 'in-progress');
+
+    // Build unified items list
+    const items = [];
+
+    // Portal requests → "requested" bucket
+    (portalReqs || []).forEach(r => {
+      const brandName = brandMap[r.brand_id] || r.brand_id || '—';
+      if (brandF && brandName !== brandF) return;
+      let bucket = 'requested';
+      if (['scheduled'].includes(r.status)) bucket = 'scheduled';
+      if (['in_production','produced'].includes(r.status)) bucket = 'in_production';
+      if (['shipped','complete','invoiced'].includes(r.status)) bucket = 'complete';
+      if (['on_hold_credit','on_hold_admin'].includes(r.status)) bucket = 'requested';
+      items.push({
+        _id: r.id, _type: 'portal_request', _bucket: bucket,
+        brand: brandName, flavor: r.flavor || r.sku_name || '—',
+        mg: r.mg_strength, canSize: r.can_size,
+        estCases: r.estimated_cases, batchCount: r.batch_count,
+        prodDate: r.requested_prod_date, shipDate: r.requested_ship_date,
+        priority: r.priority || 'normal',
+        status: r.status, holdReason: r.hold_reason,
+        notes: r.notes, poNumber: r.po_number,
+        submittedAt: r.submitted_at, createdAt: r.created_at,
+        _raw: r
+      });
+    });
+
+    // Active production runs → "in_production" bucket
+    runs.filter(r => r.status === 'in-progress').forEach(r => {
+      const brandName = getBrandLine ? getBrandLine(r.sku || r.sku_code || '') : '—';
+      if (brandF && brandName !== brandF) return;
+      items.push({
+        _id: r.id, _type: 'production_run', _bucket: 'in_production',
+        brand: brandName, flavor: r.flavorName || r.flavor_name || r.sku || '—',
+        estCases: r.totalCases || r.cases_produced || 0,
+        status: 'in_production', priority: 'high',
+        startedAt: r.startedAt || r.started_at,
+        createdAt: r.startedAt || r.started_at,
+        _raw: r
+      });
+    });
+
+    // Completed runs → "complete" bucket
+    runs.filter(r => r.status === 'completed').forEach(r => {
+      const brandName = getBrandLine ? getBrandLine(r.sku || r.sku_code || '') : '—';
+      if (brandF && brandName !== brandF) return;
+      items.push({
+        _id: r.id, _type: 'production_run', _bucket: 'complete',
+        brand: brandName, flavor: r.flavorName || r.flavor_name || r.sku || '—',
+        estCases: r.totalCases || r.cases_produced || 0,
+        status: 'complete', priority: 'normal',
+        completedAt: r.completedAt || r.completed_at,
+        createdAt: r.startedAt || r.started_at,
+        _raw: r
+      });
+    });
+
+    // Schedule blocks → "scheduled" bucket
+    schedBlocks.forEach(b => {
+      const brandName = getBrandLine ? getBrandLine(b.skuCode || b.sku_code || '') : '—';
+      if (brandF && brandName !== brandF) return;
+      // Don't duplicate if already in portal requests
+      items.push({
+        _id: b.id, _type: 'schedule_block', _bucket: 'scheduled',
+        brand: brandName, flavor: b.title || b.skuCode || b.sku_code || '—',
+        estCases: b.casesPlanned || b.cases_planned || 0,
+        prodDate: b.startTime || b.start_time,
+        status: 'scheduled', priority: 'normal',
+        createdAt: b.startTime || b.start_time,
+        _raw: b
+      });
+    });
+
+    // Sort: in_production first, then by priority+date
+    const PRIORITY_ORDER = { urgent:0, high:1, normal:2, low:3 };
+    const BUCKET_ORDER = { in_production:0, requested:1, scheduled:2, complete:3 };
+    items.sort((a,b) => {
+      const bo = (BUCKET_ORDER[a._bucket]||9) - (BUCKET_ORDER[b._bucket]||9);
+      if (bo !== 0) return bo;
+      const po = (PRIORITY_ORDER[a.priority]||2) - (PRIORITY_ORDER[b.priority]||2);
+      if (po !== 0) return po;
+      return new Date(a.prodDate||a.createdAt||0) - new Date(b.prodDate||b.createdAt||0);
+    });
+
+    window._oqAllItems = items;
+
+    // Update counts
+    const counts = { requested:0, in_production:0, scheduled:0, complete:0 };
+    items.forEach(i => { if (counts[i._bucket] !== undefined) counts[i._bucket]++; });
+    Object.entries(counts).forEach(([k,v]) => {
+      const el = document.getElementById('oq-count-'+k);
+      if (el) el.textContent = v;
+    });
+
+    // Update nav badge
+    const navBadge = document.getElementById('oq-nav-badge');
+    if (navBadge) {
+      const urgent = counts.requested + counts.in_production;
+      navBadge.textContent = urgent;
+      navBadge.style.display = urgent > 0 ? 'inline' : 'none';
+    }
+
+    _oqRenderList();
+
+  } catch(e) {
+    const list = document.getElementById('oq-orders-list');
+    if (list) list.innerHTML = `<div class="card" style="padding:24px"><div class="alert alert-error">Error: ${e.message}</div></div>`;
+  }
+}
+
+function _oqRenderList() {
+  const list = document.getElementById('oq-orders-list');
+  if (!list) return;
+  const active = window._oqActive || 'requested';
+  const items = (window._oqAllItems || []).filter(i => active === 'all' || i._bucket === active);
+
+  if (!items.length) {
+    const emptyMessages = {
+      requested:    'No pending requests — your partners haven't submitted anything yet.',
+      in_production:'No active production runs right now.',
+      scheduled:    'Nothing scheduled yet.',
+      complete:     'No completed batches yet.',
+      all:          'No production items yet.',
+    };
+    list.innerHTML = `<div class="card" style="padding:60px;text-align:center;color:var(--text3)">
+      <div style="font-size:36px;margin-bottom:12px">${active==='in_production'?'⚗️':active==='complete'?'✅':active==='scheduled'?'📅':'📋'}</div>
+      <div style="font-size:14px">${emptyMessages[active]||'Nothing here yet.'}</div>
     </div>`;
     return;
   }
 
-  const STATUS = {
-    pending:     { label:'Pending',      col:'var(--text3)' },
-    'in-progress':{ label:'In Progress', col:'var(--amber)' },
-    scheduled:   { label:'Scheduled',    col:'var(--blue)'  },
-    complete:    { label:'Complete',     col:'var(--green)' },
-    cancelled:   { label:'Cancelled',   col:'var(--red)'   },
-    delayed:     { label:'Delayed ⚠',   col:'var(--red)'   },
+  const PRIORITY_COLORS = { urgent:'var(--red)', high:'var(--amber)', normal:'var(--text3)', low:'var(--text3)' };
+  const STATUS_COLORS = {
+    submitted:'var(--amber)', received:'var(--blue)', approved:'var(--green)',
+    scheduled:'var(--purple)', in_production:'#00bcd4', produced:'var(--green)',
+    shipped:'var(--green)', complete:'var(--green)', on_hold_credit:'var(--red)',
+    on_hold_admin:'var(--red)', cancelled:'var(--text3)', 'in-progress':'#00bcd4',
+    completed:'var(--green)'
+  };
+  const STATUS_LABELS = {
+    submitted:'Submitted', received:'Received', approved:'Approved',
+    scheduled:'Scheduled', in_production:'In Production', produced:'Produced',
+    shipped:'Shipped', complete:'Complete', on_hold_credit:'Hold: Credit',
+    on_hold_admin:'Hold: Admin', cancelled:'Cancelled', 'in-progress':'In Production',
+    completed:'Complete'
   };
 
-  list.innerHTML = [...orders].reverse().map(o => {
-    const sc = STATUS[o.status] || { label: o.status, col: 'var(--text3)' };
-    const totalCases = (o.batches||[]).reduce((a,b) => a + (b.runs||[]).reduce((x,r) => x+(r.estCases||0), 0), 0);
-    const hasDelay = o.delayFlag;
-    return `<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${sc.col};border-radius:10px;padding:14px 18px;margin-bottom:8px;cursor:pointer;transition:all 0.15s"
-      onclick="oqOpenModal('${o.id}')"
-      onmouseover="this.style.borderColor='${sc.col}'" onmouseout="this.style.borderColor='var(--border2)';this.style.borderLeftColor='${sc.col}'">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+  list.innerHTML = items.map(item => {
+    const sc = STATUS_COLORS[item.status] || 'var(--text3)';
+    const sl = STATUS_LABELS[item.status] || item.status;
+    const pc = PRIORITY_COLORS[item.priority] || 'var(--text3)';
+    const isPortal = item._type === 'portal_request';
+    const dateStr = item.prodDate ? new Date(item.prodDate).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+    const submittedStr = item.submittedAt ? new Date(item.submittedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+    const daysAgo = item.createdAt ? Math.floor((Date.now()-new Date(item.createdAt).getTime())/86400000) : null;
+
+    return `<div style="background:var(--card);border:1px solid var(--border2);border-left:3px solid ${sc};border-radius:10px;padding:16px 18px;margin-bottom:10px;cursor:pointer;transition:border-color 0.15s"
+      onclick="oqOpenModal('${item._id}','${item._type}')"
+      onmouseover="this.style.borderColor='${sc}'" onmouseout="this.style.borderColor='var(--border2)';this.style.borderLeftColor='${sc}'">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-            <span style="font-weight:700;font-size:14px">${o.brand||'Unknown'}</span>
-            <span style="font-size:10px;background:var(--bg3);border:1px solid var(--border2);color:var(--text3);padding:1px 7px;border-radius:10px;font-family:var(--font-mono)">${o.id}</span>
-            ${hasDelay?`<span style="font-size:10px;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.3);color:var(--red);padding:1px 7px;border-radius:10px">⚠ Delayed</span>`:''}
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+            <span style="font-weight:700;font-size:14px;color:var(--text)">${item.brand}</span>
+            ${isPortal?'<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(176,108,255,0.15);color:var(--purple);font-family:var(--font-mono)">PORTAL</span>':''}
+            ${item.priority==='urgent'||item.priority==='high'?`<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:${pc}22;color:${pc};font-family:var(--font-mono)">${(item.priority||'').toUpperCase()}</span>`:''}
+            ${item.holdReason?'<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(255,80,80,0.15);color:var(--red);font-family:var(--font-mono)">ON HOLD</span>':''}
           </div>
-          <div style="font-size:12px;color:var(--text3)">
-            ${o.contactName||''}${o.contactName&&o.contactEmail?' · ':''}${o.contactEmail||''}
-            ${totalCases ? ` · ${totalCases} est. cases` : ''}
-            ${o.requestedDate ? ` · Requested: ${o.requestedDate}` : ''}
+          <div style="font-size:13px;color:var(--text2);margin-bottom:4px">${item.flavor}${item.mg?' · '+item.mg:''}${item.canSize?' · '+item.canSize:''}</div>
+          <div style="font-size:11px;color:var(--text3);display:flex;gap:12px;flex-wrap:wrap">
+            ${item.estCases?`<span>📦 ${item.estCases} cases</span>`:''}
+            ${item.batchCount>1?`<span>× ${item.batchCount} batches</span>`:''}
+            ${dateStr?`<span>📅 ${dateStr}</span>`:''}
+            ${submittedStr?`<span>Submitted ${submittedStr}</span>`:''}
+            ${daysAgo!==null&&daysAgo>0?`<span style="color:${daysAgo>7?'var(--red)':'var(--text3)'}">${daysAgo}d ago</span>`:''}
+            ${item.poNumber?`<span>PO: ${item.poNumber}</span>`:''}
           </div>
-          ${(o.batches||[]).length ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">
-            ${(o.batches||[]).map(b=>`${b.flavor} (${(b.runs||[]).length} run${(b.runs||[]).length!==1?'s':''})`).join(' · ')}
-          </div>` : ''}
+          ${item.holdReason?`<div style="font-size:11px;color:var(--red);margin-top:4px">⚠ ${item.holdReason}</div>`:''}
+          ${item.notes?`<div style="font-size:11px;color:var(--text3);margin-top:4px;font-style:italic">"${item.notes.slice(0,80)}${item.notes.length>80?'…':''}"</div>`:''}
         </div>
-        <div style="text-align:right;flex-shrink:0">
-          <div style="font-size:12px;font-weight:700;color:${sc.col}">${sc.label}</div>
-          <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${o.createdAt?new Date(o.createdAt).toLocaleDateString():''}</div>
+        <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+          <div style="font-size:11px;font-weight:700;color:${sc};font-family:var(--font-mono)">${sl.toUpperCase()}</div>
+          ${item._type==='production_run'?'<div style="font-size:10px;color:var(--text3)">Production Run</div>':''}
+          ${(item._type==='portal_request'&&['submitted','received','approved','scheduled'].includes(item.status))?`<button onclick="event.stopPropagation();startBatchFromRequest((window._oqAllItems||[]).find(x=>x._id==='${item._id}'))" style="background:var(--green);border:none;color:#0a0e08;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap">▶ Start Batch</button>`:''}
         </div>
       </div>
     </div>`;
   }).join('');
 }
 
-function oqFilter(status) {
-  const allStatuses = ['all','requested','scheduled','in-production','complete'];
-  allStatuses.forEach(s => {
-    const btn = document.getElementById('oq-f-'+s);
-    if (btn) {
-      btn.style.borderColor = s === (status||'all') ? 'var(--green)' : '';
-      btn.style.color       = s === (status||'all') ? 'var(--green)' : '';
-    }
-  });
-  // Apply filter
-  oqLoadOrders();
-  let orders = [...customerOrders];
-  const brandF = document.getElementById('oq-brand-filter')?.value || '';
-  if (brandF) orders = orders.filter(o => o.brand === brandF);
-  if (status && status !== 'all') {
-    orders = orders.filter(o => {
-      if (status === 'in-production') return ['in-progress','in-production'].includes(o.status);
-      return o.status === status;
-    });
+let _oqCurrentItem = null;
+function oqOpenModal(id, type) {
+  const item = (window._oqAllItems||[]).find(i => i._id === id);
+  if (!item) return;
+  _oqCurrentItem = item;
+  const modal = document.getElementById('oq-modal');
+  const info  = document.getElementById('oq-modal-order-info');
+  const title = document.getElementById('oq-modal-title');
+  const sel   = document.getElementById('oq-modal-status');
+  if (!modal || !info) return;
+  if (title) title.textContent = item._type === 'portal_request' ? 'UPDATE REQUEST' : 'PRODUCTION RUN DETAIL';
+  // Show/hide Start Batch button based on item type and status
+  const startBatchBtn = document.getElementById('oq-start-batch-btn');
+  if (startBatchBtn) {
+    const canStart = item._type === 'portal_request' && ['submitted','received','approved','scheduled'].includes(item.status);
+    startBatchBtn.style.display = canStart ? 'block' : 'none';
+    startBatchBtn.onclick = () => { oqCloseModal(); startBatchFromRequest(item); };
   }
-  const list = document.getElementById('oq-orders-list');
-  if (!list) return;
-  renderOrderQueue();
+  info.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">
+      <div><div style="font-size:10px;color:var(--text3);margin-bottom:2px">BRAND</div><div style="font-weight:600">${item.brand}</div></div>
+      <div><div style="font-size:10px;color:var(--text3);margin-bottom:2px">FLAVOR / SKU</div><div>${item.flavor}${item.mg?' · '+item.mg:''}</div></div>
+      <div><div style="font-size:10px;color:var(--text3);margin-bottom:2px">EST. CASES</div><div style="font-family:var(--font-mono)">${item.estCases||'—'}</div></div>
+      <div><div style="font-size:10px;color:var(--text3);margin-bottom:2px">REQUESTED DATE</div><div>${item.prodDate?new Date(item.prodDate).toLocaleDateString():'—'}</div></div>
+      ${item.poNumber?`<div><div style="font-size:10px;color:var(--text3);margin-bottom:2px">PO NUMBER</div><div style="font-family:var(--font-mono)">${item.poNumber}</div></div>`:''}
+      ${item.holdReason?`<div style="grid-column:1/-1"><div style="font-size:10px;color:var(--red);margin-bottom:2px">HOLD REASON</div><div style="color:var(--red)">${item.holdReason}</div></div>`:''}
+    </div>`;
+  if (sel) sel.value = item.status || 'submitted';
+  document.getElementById('oq-modal-note').value = '';
+  modal.classList.remove('hidden');
 }
+
+async function oqSaveStatus() {
+  if (!_oqCurrentItem) return;
+  const newStatus = document.getElementById('oq-modal-status')?.value;
+  const note = document.getElementById('oq-modal-note')?.value?.trim();
+  const btn = document.querySelector('#oq-modal .btn-primary');
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+  try {
+    if (_oqCurrentItem._type === 'portal_request') {
+      const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+      if (!sb) throw new Error('No connection');
+      const update = { status: newStatus };
+      if (newStatus === 'on_hold_admin') update.hold_reason = note || 'Admin hold';
+      if (newStatus !== 'on_hold_admin' && newStatus !== 'on_hold_credit') update.hold_reason = null;
+      const { error } = await sb.from('portal_production_requests').update(update).eq('id', _oqCurrentItem._id);
+      if (error) throw new Error(error.message);
+      // Post message to customer thread if note provided
+      if (note) {
+        const { data: thread } = await sb.from('portal_threads')
+          .select('id').eq('context_type','production_request').eq('context_id',_oqCurrentItem._id).maybeSingle();
+        if (thread) {
+          await sb.from('portal_messages').insert({
+            thread_id: thread.id, brand_id: _oqCurrentItem._raw.brand_id,
+            sender_type: 'internal', sender_name: '420 Craft Team',
+            body: `Status updated to ${newStatus.replace(/_/g,' ')}: ${note}`
+          });
+          await sb.from('portal_threads').update({ last_message_at: new Date().toISOString(), unread_customer: 1 }).eq('id', thread.id);
+        }
+      }
+      showToast(`✓ Request updated to ${newStatus.replace(/_/g,' ')}`);
+    }
+    oqCloseModal();
+    renderOrderQueue();
+  } catch(e) {
+    showToast('⚠ ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = '✓ Save Update'; btn.disabled = false; }
+  }
+}
+
+function oqCloseModal(e) {
+  if (e && e.target !== document.getElementById('oq-modal')) return;
+  document.getElementById('oq-modal')?.classList.add('hidden');
+  _oqCurrentItem = null;
+}
+
+function oqFilter(status) { oqSetFilter(status); }
+
 
 function oqOpenModal(id) {
   oqLoadOrders();
@@ -21488,6 +21738,10 @@ var _tableSync = {
     pages: ['prod-run','schedule','dashboard','inv-detail','acct-costing'],
     postFetch: (runs) => {
       _prodRunsData = runs;
+      // Update badge immediately when data loads
+      const _inProg = runs.filter(r=>r.status==='in-progress').length;
+      const _badge = document.getElementById('prod-run-badge');
+      if (_badge) { _badge.textContent=_inProg; _badge.style.display=_inProg>0?'inline':'none'; }
       if (!prodRunActive) return;
       const remote = runs.find(r => r.id === prodRunActive.id);
       if (!remote) return;
@@ -21576,7 +21830,12 @@ var _tableSync = {
     transform: r => ({ ...r, id: r.id, customerId: r.customer_id,
       status: r.status, items: r.items||[], shipTo: r.ship_to }),
     pages: ['order-queue','dashboard','shipping'],
-    postFetch: (data) => { _customerOrdersData = data; },
+    postFetch: (data) => {
+      _customerOrdersData = data;
+      const _pending = (data||[]).filter(o=>['requested','pending'].includes(o.status)).length;
+      const _oqb = document.getElementById('oq-nav-badge');
+      if (_oqb) { _oqb.textContent=_pending; _oqb.style.display=_pending>0?'inline':'none'; }
+    },
   },
   vendors: {
     key: null,
@@ -24424,12 +24683,17 @@ async function renderPortalInbox() {
     const sb = await _sbAdmin();
     const statusFilter = document.getElementById('pi-filter-status')?.value || '';
     let q = sb.from('portal_production_requests')
-      .select('id, sku_name, flavor, mg_strength, can_size, case_size, batch_count, estimated_cases, requested_prod_date, requested_ship_date, priority, po_number, notes, status, hold_reason, credit_check_result, submitted_at, created_at, brand_id, brands(name)')
+      .select('id, sku_name, flavor, mg_strength, can_size, case_size, batch_count, estimated_cases, requested_prod_date, requested_ship_date, priority, po_number, notes, status, hold_reason, credit_check_result, submitted_at, created_at, brand_id')
       .order('created_at', { ascending: false })
       .limit(200);
     if (statusFilter) q = q.eq('status', statusFilter);
     const { data: requests, error } = await q;
     if (error) throw new Error(error.message);
+    // Enrich with brand names
+    const { data: brands } = await sb.from('brands').select('id, name');
+    const brandMap = {};
+    (brands||[]).forEach(b => { brandMap[b.id] = b.name; });
+    requests.forEach(r => { r._brandName = brandMap[r.brand_id] || '—'; });
     if (!requests || requests.length === 0) {
       body.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">No partner requests yet.</div>';
       return;
@@ -24458,7 +24722,7 @@ async function renderPortalInbox() {
           <tbody>
             ${requests.map(r => `
               <tr style="border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''" onclick="piShowRequestDetail('${r.id}')">
-                <td style="padding:10px 14px;font-size:12px;font-weight:600;color:var(--text)">${r.brands?.name||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px;font-weight:600;color:var(--text)">${r._brandName||'—'}</td>
                 <td style="padding:10px 14px;font-size:12px;color:var(--text2)">
                   <div>${r.flavor||r.sku_name||'—'}</div>
                   <div style="font-size:10px;color:var(--text3)">${r.mg_strength||''} ${r.can_size||''}</div>
@@ -24489,15 +24753,21 @@ function piShowRequestDetail(id) {
   // Find request data from the table and show modal
   const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
   if (!sb) return;
-  sb.from('portal_production_requests')
-    .select('*, brands(name)')
+  const sb2 = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+  if (!sb2) return;
+  const { data: brandsData } = await sb2.from('brands').select('id, name');
+  const brandMap = {};
+  (brandsData||[]).forEach(b => { brandMap[b.id] = b.name; });
+  sb2.from('portal_production_requests')
+    .select('*')
     .eq('id', id)
     .single()
     .then(({data:r, error}) => {
       if (error || !r) return showToast('Could not load request');
+      r._brandName = brandMap[r.brand_id] || '—';
       const body = `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px">
-          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">BRAND</div><div style="color:var(--text)">${r.brands?.name||'—'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">BRAND</div><div style="color:var(--text)">${r._brandName||'—'}</div></div>
           <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">STATUS</div>${_portalStatusBadge(r.status)}</div>
           <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">SKU / FLAVOR</div><div style="color:var(--text)">${r.flavor||r.sku_name||'—'}</div></div>
           <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">MG / CAN SIZE</div><div style="color:var(--text)">${r.mg_strength||'—'} / ${r.can_size||'—'}</div></div>
@@ -24763,6 +25033,134 @@ async function piUpdateRole(membershipId, newRole) {
   const { error } = await sb.from('portal_brand_memberships').update({ role: newRole }).eq('id', membershipId);
   if (error) { showToast('⚠ ' + error.message); return; }
   showToast(`✓ Role updated to ${newRole}`);
+}
+
+
+
+// ── LIVE BADGE UPDATES ───────────────────────────────────────
+// Updates all nav badges from live data — runs on load and every 60s
+async function _updateAllBadges() {
+  try {
+    const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+    if (!sb) return;
+
+    // 1. Production runs in-progress badge
+    const runs = _prodRunsData || [];
+    const inProg = runs.filter(r => r.status === 'in-progress').length;
+    const prodBadge = document.getElementById('prod-run-badge');
+    if (prodBadge) { prodBadge.textContent = inProg; prodBadge.style.display = inProg > 0 ? 'inline' : 'none'; }
+
+    // 2. Partner requests needing attention badge
+    const { data: partnerReqs } = await sb
+      .from('portal_production_requests')
+      .select('id, status')
+      .in('status', ['submitted', 'received', 'on_hold_credit', 'on_hold_admin']);
+    const partnerCount = (partnerReqs || []).length;
+    const partnerBadge = document.getElementById('portal-inbox-badge');
+    if (partnerBadge) { partnerBadge.textContent = partnerCount; partnerBadge.style.display = partnerCount > 0 ? 'inline' : 'none'; }
+
+    // 3. Order queue — pending/requested orders
+    const orders = _customerOrdersData || [];
+    const pendingOrders = orders.filter(o => ['requested','pending'].includes(o.status)).length;
+    const oqBadge = document.getElementById('oq-nav-badge');
+    if (oqBadge) { oqBadge.textContent = pendingOrders; oqBadge.style.display = pendingOrders > 0 ? 'inline' : 'none'; }
+
+    // 4. Accounting exceptions badge (run inline — uses existing data)
+    try { if (typeof runExceptionEngine === 'function') runExceptionEngine(); } catch(e) {}
+
+    // 5. Refresh dashboard KPIs if visible
+    const dashPage = document.getElementById('page-dashboard');
+    if (dashPage && dashPage.classList.contains('active') && typeof renderDashboard === 'function') {
+      renderDashboard();
+    }
+  } catch(e) { /* silent fail */ }
+}
+
+// Run on load after data settles, then every 60 seconds
+setTimeout(() => {
+  _updateAllBadges();
+  setInterval(_updateAllBadges, 60000);
+}, 5000);
+
+
+// ── START BATCH FROM PORTAL REQUEST / QUEUE ──────────────────
+// Pre-populates the production run wizard with data from a portal
+// request or queue item, and links the run back to the request.
+function startBatchFromRequest(item) {
+  if (!item) return;
+
+  // Try to find a matching flavor in the flavor catalog
+  const flavorName = item.flavor || item.sku_name || '';
+  const catalog = typeof flavorLoadCatalog === 'function' ? flavorLoadCatalog() : [];
+  const matchedFlavor = catalog.find(f =>
+    flavorName.toLowerCase().includes(f.name.toLowerCase()) ||
+    f.name.toLowerCase().includes(flavorName.toLowerCase()) ||
+    (f.skus||[]).some(s => flavorName.toLowerCase().includes(s.toLowerCase()))
+  );
+
+  // Pre-populate wizard data
+  prodRunWizardData = {
+    startDate: new Date().toISOString().slice(0,10),
+    flavorName: flavorName,
+    flavorId: matchedFlavor?.id || null,
+    // Link back to portal request for status sync
+    portalRequestId: item._type === 'portal_request' ? item._id : null,
+    portalBrandId: item._raw?.brand_id || null,
+    fromQueue: true,
+  };
+
+  if (matchedFlavor) {
+    prodRunWizardData.flavorId = matchedFlavor.id;
+    prodRunWizardData.flavorName = matchedFlavor.name;
+    if (matchedFlavor.skus && matchedFlavor.skus.length === 1) {
+      prodRunWizardData.sku = matchedFlavor.skus[0];
+    }
+    prodRunWizardStep = 2; // skip flavor selection
+  } else {
+    // No flavor match — go to step 1 but show info
+    prodRunWizardStep = 1;
+    showToast(`ℹ Starting run for: ${flavorName} — select flavor below`);
+  }
+
+  // Update portal request status to in_production when run starts
+  if (item._type === 'portal_request' && item._id) {
+    const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+    if (sb) {
+      sb.from('portal_production_requests')
+        .update({ status: 'in_production' })
+        .eq('id', item._id)
+        .then(({ error }) => {
+          if (!error) {
+            showToast('✓ Request status updated to In Production');
+            // Notify customer via thread
+            sb.from('portal_threads')
+              .select('id')
+              .eq('context_type', 'production_request')
+              .eq('context_id', item._id)
+              .maybeSingle()
+              .then(({ data: thread }) => {
+                if (thread) {
+                  sb.from('portal_messages').insert({
+                    thread_id: thread.id,
+                    brand_id: item._raw?.brand_id,
+                    sender_type: 'internal',
+                    sender_name: '420 Craft Team',
+                    body: `Your production batch has started! We'll update you when it's complete.`
+                  });
+                  sb.from('portal_threads').update({
+                    last_message_at: new Date().toISOString(),
+                    unread_customer: 1
+                  }).eq('id', thread.id);
+                }
+              });
+          }
+        });
+    }
+  }
+
+  document.getElementById('prod-run-wizard').classList.remove('hidden');
+  _prodRunWizardRender();
+  showPage('prod-run', document.querySelector('[onclick*="prod-run"]'));
 }
 
 
