@@ -24810,10 +24810,13 @@ async function renderPortalInvites() {
 
   try {
     const sb = await _sbAdmin();
-    const [{ data: profiles }, { data: invites }] = await Promise.all([
-      sb.from('portal_profiles').select('id, email, full_name, is_active, last_login_at, created_at, portal_brand_memberships(brand_id, role, is_active, brands(name))'),
-      sb.from('portal_invites').select('id, email, role, created_at, expires_at, accepted_at, brands(name)').is('accepted_at', null).order('created_at', { ascending: false })
+    const [{ data: profiles }, { data: invites }, { data: brandsData }] = await Promise.all([
+      sb.from('portal_profiles').select('id, email, full_name, is_active, last_login_at, created_at, portal_brand_memberships(brand_id, role, is_active)'),
+      sb.from('portal_invites').select('id, email, role, created_at, expires_at, accepted_at, brand_id').is('accepted_at', null).order('created_at', { ascending: false }),
+      sb.from('brands').select('id, name')
     ]);
+    const brandMap = {};
+    (brandsData||[]).forEach(b => { brandMap[b.id] = b.name; });
 
     // Active partners
     if (!profiles || profiles.length === 0) {
@@ -24830,7 +24833,7 @@ async function renderPortalInvites() {
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:10px 14px;font-size:12px;color:var(--text)">${p.full_name}</td>
                 <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${p.email}</td>
-                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${mem?.brands?.name||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${brandMap[mem?.brand_id]||'—'}</td>
                 <td style="padding:10px 14px;font-size:12px;color:var(--text3);text-transform:uppercase">${mem?.role||'—'}</td>
                 <td style="padding:10px 14px;font-size:11px;color:var(--text3)">${p.last_login_at?new Date(p.last_login_at).toLocaleDateString():'Never'}</td>
                 <td style="padding:10px 14px"><span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${p.is_active?'rgba(57,232,122,0.15)':'rgba(255,80,80,0.1)'};color:${p.is_active?'var(--green)':'var(--red)'};font-family:var(--font-mono)">${p.is_active?'ACTIVE':'INACTIVE'}</span></td>
@@ -24857,7 +24860,7 @@ async function renderPortalInvites() {
             ${invites.map(i => `
               <tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:10px 14px;font-size:12px;color:var(--text)">${i.email}</td>
-                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${i.brands?.name||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${brandMap[i.brand_id]||'—'}</td>
                 <td style="padding:10px 14px;font-size:12px;color:var(--text3);text-transform:uppercase">${i.role}</td>
                 <td style="padding:10px 14px;font-size:11px;color:var(--text3)">${new Date(i.created_at).toLocaleDateString()}</td>
                 <td style="padding:10px 14px;font-size:11px;color:${new Date(i.expires_at)<new Date()?'var(--red)':'var(--text3)'}">${new Date(i.expires_at).toLocaleDateString()}</td>
@@ -24910,10 +24913,15 @@ async function renderPortalPermissions() {
   body.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">Loading…</div>';
   try {
     const sb = await _sbAdmin();
-    const { data: memberships, error } = await sb.from('portal_brand_memberships')
-      .select('id, role, is_active, brand_id, ' + _PERM_FLAGS.map(f=>f.key).join(', ') + ', portal_profiles(id, full_name, email), brands(name)')
-      .order('created_at', { ascending: false });
+    const [{ data: memberships, error }, { data: brandsList }] = await Promise.all([
+      sb.from('portal_brand_memberships')
+        .select('id, role, is_active, brand_id, ' + _PERM_FLAGS.map(f=>f.key).join(', ') + ', portal_profiles(id, full_name, email)')
+        .order('created_at', { ascending: false }),
+      sb.from('brands').select('id, name')
+    ]);
     if (error) throw new Error(error.message);
+    const brandMap = {};
+    (brandsList||[]).forEach(b => { brandMap[b.id] = b.name; });
     if (!memberships || memberships.length === 0) {
       body.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">No partner memberships yet.</div>';
       return;
@@ -24923,7 +24931,7 @@ async function renderPortalPermissions() {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
           <div>
             <div style="font-size:14px;font-weight:600;color:var(--text)">${m.portal_profiles?.full_name||'Unknown'}</div>
-            <div style="font-size:12px;color:var(--text3)">${m.portal_profiles?.email||'—'} · <span style="color:var(--green)">${m.brands?.name||'—'}</span></div>
+            <div style="font-size:12px;color:var(--text3)">${m.portal_profiles?.email||'—'} · <span style="color:var(--green)">${brandMap[m.brand_id]||'—'}</span></div>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <select onchange="piUpdateRole('${m.id}',this.value)" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-size:12px;padding:6px 10px;border-radius:8px">
