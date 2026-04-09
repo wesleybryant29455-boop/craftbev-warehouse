@@ -24673,7 +24673,7 @@ async function renderPortalInbox() {
   }
 }
 
-function piShowRequestDetail(id) {
+async function piShowRequestDetail(id) {
   // Find request data from the table and show modal
   const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
   if (!sb) return;
