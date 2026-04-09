@@ -17823,7 +17823,7 @@ function _oqRenderList() {
         <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
           <div style="font-size:11px;font-weight:700;color:${sc};font-family:var(--font-mono)">${sl.toUpperCase()}</div>
           ${item._type==='production_run'?'<div style="font-size:10px;color:var(--text3)">Production Run</div>':''}
-          ${(item._type==='portal_request'&&['submitted','received','approved','scheduled'].includes(item.status))?`<button onclick="event.stopPropagation();startBatchFromRequest((window._oqAllItems||[]).find(x=>x._id==='${item._id}'))" style="background:var(--green);border:none;color:#0a0e08;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap">▶ Start Batch</button>`:''}
+          ${(item._type==='portal_request'&&['submitted','received','approved','scheduled'].includes(item.status))?'<button onclick="event.stopPropagation();startBatchFromRequest((window._oqAllItems||[]).find(x=>x._id===this.dataset.id))" data-id="'+item._id+'" style="background:var(--green);border:none;color:#0a0e08;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap">&#9654; Start Batch</button>':''}
         </div>
       </div>
     </div>`;
@@ -17910,87 +17910,11 @@ function oqCloseModal(e) {
 function oqFilter(status) { oqSetFilter(status); }
 
 
-function oqOpenModal(id) {
-  oqLoadOrders();
-  const o = customerOrders.find(x => x.id === id);
-  if (!o) return;
 
-  const modal = document.getElementById('oq-modal');
-  const body  = document.getElementById('oq-modal-order-info');
-  if (!modal || !body) return;
 
-  const STATUS_OPTS = ['pending','in-progress','scheduled','complete','cancelled','delayed']
-    .map(s => `<option value="${s}" ${s===o.status?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('');
 
-  body.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div>
-        <div style="font-weight:800;font-size:18px;color:var(--text)">${o.brand||'Unknown'}</div>
-        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3)">${o.id}</div>
-      </div>
-      <button onclick="document.getElementById('oq-order-modal').classList.add('hidden')" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:13px">
-      <div><span style="color:var(--text3)">Contact:</span> <strong>${o.contactName||'—'}</strong></div>
-      <div><span style="color:var(--text3)">Email:</span> ${o.contactEmail||'—'}</div>
-      <div><span style="color:var(--text3)">Requested:</span> ${o.requestedDate||'—'}</div>
-      <div><span style="color:var(--text3)">Created:</span> ${o.createdAt?new Date(o.createdAt).toLocaleDateString():'—'}</div>
-    </div>
-    ${(o.batches||[]).length ? `
-    <div style="margin-bottom:14px">
-      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:2px;margin-bottom:8px">PRODUCTION BATCHES</div>
-      ${(o.batches).map((b,bi)=>`
-      <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:8px">
-        <div style="font-weight:700;font-size:13px;margin-bottom:6px">${b.flavor}</div>
-        ${(b.runs||[]).map((r,ri)=>`
-        <div style="font-size:12px;color:var(--text3);padding:4px 0;border-bottom:1px solid var(--border2)">
-          ${r.mg} · ${r.canSize} · ~${r.estCases} cases
-        </div>`).join('')}
-      </div>`).join('')}
-    </div>` : ''}
-    ${(o.delays||[]).length ? `
-    <div style="margin-bottom:14px;padding:10px 14px;background:rgba(231,76,60,0.06);border:1px solid rgba(231,76,60,0.2);border-radius:8px">
-      <div style="font-size:10px;font-family:var(--font-mono);color:var(--red);letter-spacing:2px;margin-bottom:8px">DELAY LOG</div>
-      ${o.delays.map(d=>`<div style="font-size:12px;margin-bottom:4px">
-        <strong style="color:var(--amber)">${d.date}</strong> · ${d.reason}
-        ${d.newDate?` → Rescheduled to ${d.newDate}`:''}
-      </div>`).join('')}
-    </div>` : ''}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-      <div class="form-group"><label class="form-label">Status</label><select class="form-input" id="oq-modal-status">${STATUS_OPTS}</select></div>
-      <div class="form-group"><label class="form-label">Notes</label><input class="form-input" id="oq-modal-notes" value="${o.notes||''}" placeholder="Internal notes"></div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button onclick="oqSaveStatus('${o.id}')" class="btn btn-primary" style="flex:1">Save Updates</button>
-      <button onclick="oqDeleteOrder('${o.id}')" style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);color:var(--red);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer">Delete</button>
-    </div>`;
 
-  modal.dataset.orderId = id;
-  modal.classList.remove('hidden');
-}
 
-function oqSaveStatus(id) {
-  if (!id) {
-    const modal = document.getElementById('oq-modal');
-    id = modal?.dataset.orderId;
-  }
-  oqLoadOrders();
-  const o = customerOrders.find(x => x.id === id);
-  if (!o) return;
-  const st = document.getElementById('oq-modal-status')?.value;
-  const notes = document.getElementById('oq-modal-notes')?.value.trim();
-  if (st) { o.status = st; if (st !== 'delayed') o.delayFlag = false; }
-  if (notes !== undefined) o.notes = notes;
-  oqSaveOrders();
-  document.getElementById('oq-modal')?.classList.add('hidden');
-  renderOrderQueue();
-  showToast('✓ Order updated');
-}
-
-function oqCloseModal(e) {
-  if (!e || e.target === document.getElementById('oq-order-modal'))
-    document.getElementById('oq-modal')?.classList.add('hidden');
-}
 
 function oqDeleteOrder(id) {
   if (!confirm('Delete this order? This cannot be undone.')) return;
