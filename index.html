@@ -18621,6 +18621,24 @@ function acctSave(key, data) {
   }
   if (typeof sheetsQueue==='function' && typeof sheetsEnabled==='function' && sheetsEnabled())
     sheetsQueue('save_acct_data', {key: key.replace('420craft_',''), data});
+  // ── PORTAL SYNC: also write to proper Supabase table so customer portal stays current ──
+  try {
+    const _acctCfg = typeof _SB_ACCT_MAP !== 'undefined' && _SB_ACCT_MAP && _SB_ACCT_MAP[key];
+    const _sbPortal = getSupabaseClient ? getSupabaseClient() : null;
+    if (_acctCfg && _sbPortal && Array.isArray(data) && data.length) {
+      _sbPortal.auth.getSession().then(({ data: _sd }) => {
+        if (!_sd?.session) return;
+        const _rows = data.filter(r => r && (r.id || r[_acctCfg.conflict]));
+        if (!_rows.length) return;
+        _sbPortal.from(_acctCfg.table)
+          .upsert(_rows, { onConflict: _acctCfg.conflict, ignoreDuplicates: false })
+          .then(({ error: _pe }) => {
+            if (_pe) console.warn('[PortalSync]', _acctCfg.table, _pe.message);
+            else console.log('[PortalSync] synced', _rows.length, 'rows to', _acctCfg.table);
+          });
+      }).catch(() => {});
+    }
+  } catch(_e) { console.warn('[PortalSync] error:', _e.message); }
 }
 function acctId(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,6).toUpperCase();}
 function acctNow(){return new Date().toISOString();}
@@ -22502,7 +22520,7 @@ var _SB_WRITE_MAP = {
   '420craft_brands': {
     table: 'brands',
     getRows: () => {
-      return _brandsData || [];
+      return brandCatalog || _brandsData || [];
     },
     toRow: b => ({
       name: b.name||'',
