@@ -1261,6 +1261,9 @@ const ALL_NAV_PAGES = [
   { id:'acct-roles',          label:'🛡️ Roles & Permissions',   section:'Admin' },
   { id:'notifications',       label:'📧 Notifications',         section:'Admin' },
   { id:'admin-diagnostics',   label:'🩺 Diagnostics',           section:'Admin' },
+  { id:'portal-inbox',        label:'📬 Partner Requests',      section:'Partner Portal' },
+  { id:'portal-invites',      label:'✉️ Invite Partners',        section:'Partner Portal' },
+  { id:'portal-permissions',  label:'🔐 Partner Permissions',   section:'Partner Portal' },
   { id:'pay-visible',         label:'💰 See Pay Rates',         section:'Sensitive', special:true },
 ];
 
@@ -2740,6 +2743,97 @@ window.addEventListener('load', function() {
   <div class="page" id="page-acct-roles"><div id="acct-roles-content"></div></div>
   <div class="page" id="page-acct-price-books"><div id="acct-price-books-content"></div></div>
   <div class="page" id="page-acct-tax-rules"><div id="acct-tax-rules-content"></div></div>
+
+
+  <!-- ══════════════════════════════════════════════════════════
+       PARTNER PORTAL — INBOX
+  ══════════════════════════════════════════════════════════ -->
+  <div class="page" id="page-portal-inbox">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+      <div>
+        <div class="section-title">📬 PARTNER REQUESTS</div>
+        <div class="section-desc">Incoming production requests from brand partners via the customer portal</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="pi-filter-status" onchange="renderPortalInbox()" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:6px 12px;border-radius:8px">
+          <option value="">All Statuses</option>
+          <option value="submitted">Submitted</option>
+          <option value="received">Received</option>
+          <option value="approved">Approved</option>
+          <option value="on_hold_credit">On Hold (Credit)</option>
+          <option value="on_hold_admin">On Hold (Admin)</option>
+          <option value="scheduled">Scheduled</option>
+          <option value="in_production">In Production</option>
+          <option value="complete">Complete</option>
+        </select>
+        <button onclick="renderPortalInbox()" class="btn btn-ghost" style="font-size:12px">↻ Refresh</button>
+      </div>
+    </div>
+    <div id="portal-inbox-body"><div class="card" style="padding:40px;text-align:center;color:var(--text3)">Loading partner requests…</div></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       PARTNER PORTAL — INVITES
+  ══════════════════════════════════════════════════════════ -->
+  <div class="page" id="page-portal-invites">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+      <div>
+        <div class="section-title">✉️ INVITE PARTNERS</div>
+        <div class="section-desc">Invite brand partners to access their customer portal</div>
+      </div>
+      <button onclick="piShowInviteForm()" class="btn btn-primary">+ New Invite</button>
+    </div>
+    <div id="pi-invite-form" class="card" style="display:none;margin-bottom:24px;padding:24px">
+      <div style="font-family:var(--font-display);font-size:14px;color:var(--green);margin-bottom:16px">SEND PORTAL INVITE</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">EMAIL ADDRESS</div>
+          <input class="form-input" id="pi-inv-email" placeholder="partner@brand.com" type="email">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">FULL NAME</div>
+          <input class="form-input" id="pi-inv-name" placeholder="Contact Name">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">BRAND</div>
+          <select class="form-input" id="pi-inv-brand"><option value="">Select brand…</option></select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">ROLE</div>
+          <select class="form-input" id="pi-inv-role">
+            <option value="executive">Executive (full access)</option>
+            <option value="finance">Finance (financials + billing)</option>
+            <option value="operations">Operations (production + inventory)</option>
+            <option value="brand_manager">Brand Manager (launches + flavors)</option>
+            <option value="viewer">Viewer (read only)</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:16px">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px">PERSONAL MESSAGE (optional)</div>
+        <textarea class="form-input" id="pi-inv-message" rows="2" placeholder="Welcome to the 420 Craft partner portal…" style="resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="document.getElementById('pi-invite-form').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button onclick="piSendInvite()" class="btn btn-primary">Send Invite →</button>
+      </div>
+    </div>
+    <div style="font-family:var(--font-display);font-size:12px;color:var(--text3);margin-bottom:12px">ACTIVE PARTNERS</div>
+    <div id="pi-partners-list" class="card" style="padding:20px;color:var(--text3);text-align:center">Loading…</div>
+    <div style="font-family:var(--font-display);font-size:12px;color:var(--text3);margin:24px 0 12px">PENDING INVITES</div>
+    <div id="pi-invites-list" class="card" style="padding:20px;color:var(--text3);text-align:center">Loading…</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       PARTNER PORTAL — PERMISSIONS
+  ══════════════════════════════════════════════════════════ -->
+  <div class="page" id="page-portal-permissions">
+    <div style="margin-bottom:24px">
+      <div class="section-title">🔐 PARTNER PERMISSIONS</div>
+      <div class="section-desc">Control what each brand partner can see and do in their portal</div>
+    </div>
+    <div id="portal-permissions-body"><div class="card" style="padding:40px;text-align:center;color:var(--text3)">Loading permissions…</div></div>
+  </div>
 
   <div class="page" id="page-backup">
     <div class="section-header">
@@ -5566,6 +5660,9 @@ const pageTitles = {
   'acct-price-books':'PRICE BOOKS','acct-tax-rules':'TAX & FEE RULES',
   'admin-diagnostics':'SYSTEM DIAGNOSTICS',
   'user-permissions':'USER PERMISSIONS',
+  'portal-inbox':'PARTNER REQUESTS',
+  'portal-invites':'INVITE PARTNERS',
+  'portal-permissions':'PARTNER PERMISSIONS',
 };
 function showPage(id, el) {
   // Auto-close sidebar on mobile whenever a page is shown
@@ -5613,6 +5710,9 @@ function showPage(id, el) {
   if (id === 'acct-reports')         renderAcctReports();
   if (id === 'acct-shipment-costing') renderAcctShipmentCosting();
   if (id === 'acct-integrations')    renderAcctIntegrations();
+  if (id === 'portal-inbox')         renderPortalInbox();
+  if (id === 'portal-invites')       renderPortalInvites();
+  if (id === 'portal-permissions')   renderPortalPermissions();
 }
 
 // ══════════════════════════════════════════
@@ -24336,6 +24436,405 @@ setTimeout(() => {
     </div>
   </div>
 </div>
+
+
+// ══════════════════════════════════════════════════════════════
+// PARTNER PORTAL — INBOX, INVITES, PERMISSIONS
+// ══════════════════════════════════════════════════════════════
+
+const PORTAL_EF_BASE = 'https://vuiorapiugmfmgwdolzq.supabase.co/functions/v1';
+const PORTAL_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1aW9yYXBpdWdtZm1nd2RvbHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODEwNjQsImV4cCI6MjA5MTA1NzA2NH0.eHHsGvc1__KyJBhUiImPUghVhdie08V42FPt8WZFcvA';
+
+async function _portalFetch(path, opts={}) {
+  const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+  if (!sb) throw new Error('No Supabase connection');
+  const url = `${PORTAL_EF_BASE}/${path}`;
+  const res = await fetch(url, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'apikey': PORTAL_ANON, ...(opts.headers||{}) }
+  });
+  if (!res.ok) { const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||res.statusText); }
+  return res.json();
+}
+
+async function _sbAdmin() {
+  const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+  if (!sb) throw new Error('No Supabase connection');
+  return sb;
+}
+
+// ── STATUS BADGE ────────────────────────────────────────────
+function _portalStatusBadge(status) {
+  const map = {
+    draft:           ['var(--text3)','#333','Draft'],
+    submitted:       ['var(--amber)','rgba(255,184,48,0.15)','Submitted'],
+    received:        ['var(--blue)','rgba(100,160,255,0.15)','Received'],
+    approved:        ['var(--green)','rgba(57,232,122,0.15)','Approved'],
+    on_hold_credit:  ['var(--red)','rgba(255,80,80,0.15)','Hold: Credit'],
+    on_hold_admin:   ['var(--red)','rgba(255,80,80,0.15)','Hold: Admin'],
+    scheduled:       ['var(--purple)','rgba(176,108,255,0.15)','Scheduled'],
+    in_production:   ['#00bcd4','rgba(0,188,212,0.15)','In Production'],
+    produced:        ['var(--green)','rgba(57,232,122,0.15)','Produced'],
+    shipped:         ['var(--green)','rgba(57,232,122,0.15)','Shipped'],
+    complete:        ['var(--text3)','#333','Complete'],
+    cancelled:       ['var(--text3)','#222','Cancelled'],
+  };
+  const [color, bg, label] = map[status] || ['var(--text3)','#333', status];
+  return `<span style="font-size:10px;font-family:var(--font-mono);padding:2px 8px;border-radius:4px;background:${bg};color:${color};font-weight:700">${label.toUpperCase()}</span>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// PORTAL INBOX
+// ══════════════════════════════════════════════════════════════
+async function renderPortalInbox() {
+  const body = document.getElementById('portal-inbox-body');
+  if (!body) return;
+  body.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">Loading…</div>';
+  try {
+    const sb = await _sbAdmin();
+    const statusFilter = document.getElementById('pi-filter-status')?.value || '';
+    let q = sb.from('portal_production_requests')
+      .select('id, sku_name, flavor, mg_strength, can_size, case_size, batch_count, estimated_cases, requested_prod_date, requested_ship_date, priority, po_number, notes, status, hold_reason, credit_check_result, submitted_at, created_at, brand_id, brands(name)')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (statusFilter) q = q.eq('status', statusFilter);
+    const { data: requests, error } = await q;
+    if (error) throw new Error(error.message);
+    if (!requests || requests.length === 0) {
+      body.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">No partner requests yet.</div>';
+      return;
+    }
+
+    // Summary counts
+    const counts = {};
+    requests.forEach(r => { counts[r.status] = (counts[r.status]||0)+1; });
+    const newCount = (counts.submitted||0) + (counts.received||0);
+
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:24px">
+        ${[['submitted','var(--amber)'],['approved','var(--green)'],['scheduled','var(--purple)'],['in_production','#00bcd4'],['on_hold_credit','var(--red)'],['on_hold_admin','var(--red)']].map(([s,c])=>`
+          <div class="card" style="padding:16px;text-align:center;cursor:pointer" onclick="document.getElementById('pi-filter-status').value='${s}';renderPortalInbox()">
+            <div style="font-size:22px;font-weight:700;color:${c};font-family:var(--font-mono)">${counts[s]||0}</div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-top:4px">${s.replace(/_/g,' ')}</div>
+          </div>`).join('')}
+      </div>
+      <div class="card" style="overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border2)">
+              ${['Brand','SKU / Flavor','Cases','Prod Date','Priority','Status','Actions'].map(h=>`<th style="padding:10px 14px;text-align:left;font-size:10px;color:var(--text3);font-family:var(--font-mono);font-weight:600">${h}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${requests.map(r => `
+              <tr style="border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''" onclick="piShowRequestDetail('${r.id}')">
+                <td style="padding:10px 14px;font-size:12px;font-weight:600;color:var(--text)">${r.brands?.name||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">
+                  <div>${r.flavor||r.sku_name||'—'}</div>
+                  <div style="font-size:10px;color:var(--text3)">${r.mg_strength||''} ${r.can_size||''}</div>
+                </td>
+                <td style="padding:10px 14px;font-size:12px;font-family:var(--font-mono);color:var(--text2)">${r.estimated_cases||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${r.requested_prod_date||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px">
+                  <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${r.priority==='urgent'?'rgba(255,80,80,0.15)':r.priority==='high'?'rgba(255,184,48,0.15)':'var(--bg3)'};color:${r.priority==='urgent'?'var(--red)':r.priority==='high'?'var(--amber)':'var(--text3)'};font-family:var(--font-mono)">${(r.priority||'normal').toUpperCase()}</span>
+                </td>
+                <td style="padding:10px 14px">${_portalStatusBadge(r.status)}</td>
+                <td style="padding:10px 14px">
+                  <div style="display:flex;gap:6px">
+                    ${r.status==='submitted'?`<button onclick="event.stopPropagation();piUpdateRequestStatus('${r.id}','received')" style="font-size:10px;padding:4px 10px;background:rgba(100,160,255,0.15);color:var(--blue);border:1px solid rgba(100,160,255,0.3);border-radius:6px;cursor:pointer">Receive</button>`:''}
+                    ${r.status==='received'?`<button onclick="event.stopPropagation();piUpdateRequestStatus('${r.id}','approved')" style="font-size:10px;padding:4px 10px;background:rgba(57,232,122,0.15);color:var(--green);border:1px solid rgba(57,232,122,0.3);border-radius:6px;cursor:pointer">Approve</button>`:''}
+                    ${(r.status==='on_hold_credit'||r.status==='on_hold_admin')?`<button onclick="event.stopPropagation();piReleaseHold('${r.id}')" style="font-size:10px;padding:4px 10px;background:rgba(57,232,122,0.15);color:var(--green);border:1px solid rgba(57,232,122,0.3);border-radius:6px;cursor:pointer">Release Hold</button>`:''}
+                  </div>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    body.innerHTML = `<div class="card" style="padding:24px"><div class="alert alert-error">Error: ${e.message}</div></div>`;
+  }
+}
+
+function piShowRequestDetail(id) {
+  // Find request data from the table and show modal
+  const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+  if (!sb) return;
+  sb.from('portal_production_requests')
+    .select('*, brands(name)')
+    .eq('id', id)
+    .single()
+    .then(({data:r, error}) => {
+      if (error || !r) return showToast('Could not load request');
+      const body = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px">
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">BRAND</div><div style="color:var(--text)">${r.brands?.name||'—'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">STATUS</div>${_portalStatusBadge(r.status)}</div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">SKU / FLAVOR</div><div style="color:var(--text)">${r.flavor||r.sku_name||'—'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">MG / CAN SIZE</div><div style="color:var(--text)">${r.mg_strength||'—'} / ${r.can_size||'—'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">EST. CASES</div><div style="color:var(--text);font-family:var(--font-mono)">${r.estimated_cases||'—'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">BATCH COUNT</div><div style="color:var(--text);font-family:var(--font-mono)">${r.batch_count||1}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">REQUESTED PROD DATE</div><div style="color:var(--text)">${r.requested_prod_date||'—'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">REQUESTED SHIP DATE</div><div style="color:var(--text)">${r.requested_ship_date||'—'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">PRIORITY</div><div style="color:var(--text);text-transform:uppercase">${r.priority||'normal'}</div></div>
+          <div><div style="font-size:10px;color:var(--text3);margin-bottom:4px">PO NUMBER</div><div style="color:var(--text)">${r.po_number||'—'}</div></div>
+          ${r.hold_reason?`<div style="grid-column:1/-1"><div style="font-size:10px;color:var(--red);margin-bottom:4px">HOLD REASON</div><div style="color:var(--red)">${r.hold_reason}</div></div>`:''}
+          ${r.notes?`<div style="grid-column:1/-1"><div style="font-size:10px;color:var(--text3);margin-bottom:4px">NOTES</div><div style="color:var(--text2)">${r.notes}</div></div>`:''}
+        </div>
+        <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap">
+          ${r.status==='submitted'?`<button onclick="piUpdateRequestStatus('${r.id}','received');document.getElementById('acct-modal-overlay')?.remove()" style="padding:8px 16px;background:rgba(100,160,255,0.15);color:var(--blue);border:1px solid rgba(100,160,255,0.3);border-radius:8px;cursor:pointer;font-size:12px">Mark Received</button>`:''}
+          ${r.status==='received'?`<button onclick="piUpdateRequestStatus('${r.id}','approved');document.getElementById('acct-modal-overlay')?.remove()" style="padding:8px 16px;background:rgba(57,232,122,0.15);color:var(--green);border:1px solid rgba(57,232,122,0.3);border-radius:8px;cursor:pointer;font-size:12px">Approve</button>`:''}
+          ${(r.status==='on_hold_credit'||r.status==='on_hold_admin')?`<button onclick="piReleaseHold('${r.id}');document.getElementById('acct-modal-overlay')?.remove()" style="padding:8px 16px;background:rgba(57,232,122,0.15);color:var(--green);border:1px solid rgba(57,232,122,0.3);border-radius:8px;cursor:pointer;font-size:12px">Release Hold</button>`:''}
+          <button onclick="piUpdateRequestStatus('${r.id}','cancelled');document.getElementById('acct-modal-overlay')?.remove()" style="padding:8px 16px;background:rgba(255,80,80,0.1);color:var(--red);border:1px solid rgba(255,80,80,0.3);border-radius:8px;cursor:pointer;font-size:12px">Cancel Request</button>
+        </div>`;
+      showAcctModal(`Request: ${r.flavor||r.sku_name||id}`, body, null);
+    });
+}
+
+async function piUpdateRequestStatus(id, newStatus) {
+  const sb = await _sbAdmin();
+  const { error } = await sb.from('portal_production_requests').update({ status: newStatus }).eq('id', id);
+  if (error) { showToast('⚠ ' + error.message); return; }
+  showToast(`✓ Request marked ${newStatus}`);
+  renderPortalInbox();
+}
+
+async function piReleaseHold(id) {
+  const sb = await _sbAdmin();
+  const { error } = await sb.from('portal_production_requests').update({ status: 'approved', hold_reason: null, hold_released_at: new Date().toISOString() }).eq('id', id);
+  if (error) { showToast('⚠ ' + error.message); return; }
+  showToast('✓ Hold released — request approved');
+  renderPortalInbox();
+}
+
+// ══════════════════════════════════════════════════════════════
+// PORTAL INVITES
+// ══════════════════════════════════════════════════════════════
+function piShowInviteForm() {
+  const form = document.getElementById('pi-invite-form');
+  if (!form) return;
+  form.style.display = 'block';
+  // Populate brand dropdown
+  const sel = document.getElementById('pi-inv-brand');
+  if (sel && brandCatalog && brandCatalog.length) {
+    sel.innerHTML = '<option value="">Select brand…</option>' +
+      brandCatalog.filter(b=>b.status!=='Archived').map(b=>`<option value="${b.name}">${b.name}</option>`).join('');
+  } else {
+    // Load from Supabase
+    const sb = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+    if (sb) {
+      sb.from('brands').select('id,name').eq('status','active').order('name').then(({data}) => {
+        if (data) sel.innerHTML = '<option value="">Select brand…</option>' + data.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+      });
+    }
+  }
+}
+
+async function piSendInvite() {
+  const email = document.getElementById('pi-inv-email')?.value.trim();
+  const name  = document.getElementById('pi-inv-name')?.value.trim();
+  const brand = document.getElementById('pi-inv-brand')?.value;
+  const role  = document.getElementById('pi-inv-role')?.value || 'viewer';
+  const msg   = document.getElementById('pi-inv-message')?.value.trim();
+  if (!email || !brand) { showToast('⚠ Email and brand are required'); return; }
+
+  const btn = document.querySelector('#pi-invite-form .btn-primary');
+  if (btn) { btn.textContent = 'Sending…'; btn.disabled = true; }
+
+  try {
+    const sb = await _sbAdmin();
+    // Look up brand UUID if we got a name
+    let brandId = brand;
+    if (!brand.match(/^[0-9a-f-]{36}$/i)) {
+      const { data: b } = await sb.from('brands').select('id').eq('name', brand).single();
+      brandId = b?.id || brand;
+    }
+    // Create invite record
+    const { data: invite, error } = await sb.from('portal_invites').insert({
+      email, brand_id: brandId, role, message: msg||null,
+      invited_by: typeof currentUserEmail === 'function' ? currentUserEmail() : 'admin'
+    }).select().single();
+    if (error) throw new Error(error.message);
+
+    // Send invite email via edge function
+    await fetch(`${PORTAL_EF_BASE}/portal-invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': PORTAL_ANON },
+      body: JSON.stringify({ email, full_name: name, brand_id: brandId, role, message: msg, token: invite.token })
+    });
+
+    showToast(`✓ Invite sent to ${email}`);
+    document.getElementById('pi-invite-form').style.display = 'none';
+    document.getElementById('pi-inv-email').value = '';
+    document.getElementById('pi-inv-name').value = '';
+    document.getElementById('pi-inv-message').value = '';
+    renderPortalInvites();
+  } catch(e) {
+    showToast('⚠ ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = 'Send Invite →'; btn.disabled = false; }
+  }
+}
+
+async function renderPortalInvites() {
+  const partnersList = document.getElementById('pi-partners-list');
+  const invitesList  = document.getElementById('pi-invites-list');
+  if (!partnersList || !invitesList) return;
+
+  partnersList.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3)">Loading…</div>';
+  invitesList.innerHTML  = '<div style="padding:20px;text-align:center;color:var(--text3)">Loading…</div>';
+
+  try {
+    const sb = await _sbAdmin();
+    const [{ data: profiles }, { data: invites }] = await Promise.all([
+      sb.from('portal_profiles').select('id, email, full_name, is_active, last_login_at, created_at, portal_brand_memberships(brand_id, role, is_active, brands(name))'),
+      sb.from('portal_invites').select('id, email, role, created_at, expires_at, accepted_at, brands(name)').is('accepted_at', null).order('created_at', { ascending: false })
+    ]);
+
+    // Active partners
+    if (!profiles || profiles.length === 0) {
+      partnersList.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3)">No partners yet.</div>';
+    } else {
+      partnersList.innerHTML = `
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid var(--border2)">
+            ${['Name','Email','Brand','Role','Last Login','Status','Actions'].map(h=>`<th style="padding:10px 14px;text-align:left;font-size:10px;color:var(--text3);font-family:var(--font-mono)">${h}</th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${profiles.map(p => {
+              const mem = (p.portal_brand_memberships||[])[0];
+              return `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:10px 14px;font-size:12px;color:var(--text)">${p.full_name}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${p.email}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${mem?.brands?.name||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text3);text-transform:uppercase">${mem?.role||'—'}</td>
+                <td style="padding:10px 14px;font-size:11px;color:var(--text3)">${p.last_login_at?new Date(p.last_login_at).toLocaleDateString():'Never'}</td>
+                <td style="padding:10px 14px"><span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${p.is_active?'rgba(57,232,122,0.15)':'rgba(255,80,80,0.1)'};color:${p.is_active?'var(--green)':'var(--red)'};font-family:var(--font-mono)">${p.is_active?'ACTIVE':'INACTIVE'}</span></td>
+                <td style="padding:10px 14px;display:flex;gap:6px">
+                  <button onclick="showPage('portal-permissions',document.querySelector('[onclick*=portal-permissions]'))" style="font-size:10px;padding:4px 10px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:6px;cursor:pointer">Permissions</button>
+                  <button onclick="piTogglePartnerActive('${p.id}',${p.is_active})" style="font-size:10px;padding:4px 10px;background:${p.is_active?'rgba(255,80,80,0.1)':'rgba(57,232,122,0.15)'};color:${p.is_active?'var(--red)':'var(--green)'};border:1px solid ${p.is_active?'rgba(255,80,80,0.3)':'rgba(57,232,122,0.3)'};border-radius:6px;cursor:pointer">${p.is_active?'Deactivate':'Activate'}</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // Pending invites
+    if (!invites || invites.length === 0) {
+      invitesList.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3)">No pending invites.</div>';
+    } else {
+      invitesList.innerHTML = `
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid var(--border2)">
+            ${['Email','Brand','Role','Sent','Expires','Actions'].map(h=>`<th style="padding:10px 14px;text-align:left;font-size:10px;color:var(--text3);font-family:var(--font-mono)">${h}</th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${invites.map(i => `
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:10px 14px;font-size:12px;color:var(--text)">${i.email}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${i.brands?.name||'—'}</td>
+                <td style="padding:10px 14px;font-size:12px;color:var(--text3);text-transform:uppercase">${i.role}</td>
+                <td style="padding:10px 14px;font-size:11px;color:var(--text3)">${new Date(i.created_at).toLocaleDateString()}</td>
+                <td style="padding:10px 14px;font-size:11px;color:${new Date(i.expires_at)<new Date()?'var(--red)':'var(--text3)'}">${new Date(i.expires_at).toLocaleDateString()}</td>
+                <td style="padding:10px 14px">
+                  <button onclick="piResendInvite('${i.id}','${i.email}')" style="font-size:10px;padding:4px 10px;background:rgba(57,232,122,0.15);color:var(--green);border:1px solid rgba(57,232,122,0.3);border-radius:6px;cursor:pointer">Resend</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+  } catch(e) {
+    partnersList.innerHTML = `<div class="alert alert-error" style="margin:16px">Error: ${e.message}</div>`;
+  }
+}
+
+async function piTogglePartnerActive(profileId, currentlyActive) {
+  const sb = await _sbAdmin();
+  const { error } = await sb.from('portal_profiles').update({ is_active: !currentlyActive }).eq('id', profileId);
+  if (error) { showToast('⚠ ' + error.message); return; }
+  showToast(currentlyActive ? '✓ Partner deactivated' : '✓ Partner activated');
+  renderPortalInvites();
+}
+
+async function piResendInvite(inviteId, email) {
+  const sb = await _sbAdmin();
+  // Extend expiry by 7 days
+  const { error } = await sb.from('portal_invites').update({ expires_at: new Date(Date.now() + 7*86400000).toISOString() }).eq('id', inviteId);
+  if (error) { showToast('⚠ ' + error.message); return; }
+  showToast(`✓ Invite resent to ${email}`);
+}
+
+// ══════════════════════════════════════════════════════════════
+// PORTAL PERMISSIONS
+// ══════════════════════════════════════════════════════════════
+const _PERM_FLAGS = [
+  { key:'can_view_inventory',      label:'View Inventory' },
+  { key:'can_view_batch_history',  label:'Batch History' },
+  { key:'can_manage_orders',       label:'Submit Orders' },
+  { key:'can_request_fulfillment', label:'Request Fulfillment' },
+  { key:'can_view_financials',     label:'View Financials' },
+  { key:'can_view_costs',          label:'View Costs' },
+  { key:'can_view_settlements',    label:'View Settlements' },
+  { key:'can_manage_launches',     label:'Manage Launches' },
+  { key:'can_manage_files',        label:'Manage Files' },
+];
+
+async function renderPortalPermissions() {
+  const body = document.getElementById('portal-permissions-body');
+  if (!body) return;
+  body.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">Loading…</div>';
+  try {
+    const sb = await _sbAdmin();
+    const { data: memberships, error } = await sb.from('portal_brand_memberships')
+      .select('id, role, is_active, brand_id, ' + _PERM_FLAGS.map(f=>f.key).join(', ') + ', portal_profiles(id, full_name, email), brands(name)')
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    if (!memberships || memberships.length === 0) {
+      body.innerHTML = '<div class="card" style="padding:40px;text-align:center;color:var(--text3)">No partner memberships yet.</div>';
+      return;
+    }
+    body.innerHTML = memberships.map(m => `
+      <div class="card" style="margin-bottom:16px;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:14px;font-weight:600;color:var(--text)">${m.portal_profiles?.full_name||'Unknown'}</div>
+            <div style="font-size:12px;color:var(--text3)">${m.portal_profiles?.email||'—'} · <span style="color:var(--green)">${m.brands?.name||'—'}</span></div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select onchange="piUpdateRole('${m.id}',this.value)" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-size:12px;padding:6px 10px;border-radius:8px">
+              ${['executive','finance','operations','brand_manager','viewer'].map(r=>`<option value="${r}" ${m.role===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1).replace('_',' ')}</option>`).join('')}
+            </select>
+            <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${m.is_active?'rgba(57,232,122,0.15)':'rgba(255,80,80,0.1)'};color:${m.is_active?'var(--green)':'var(--red)'};font-family:var(--font-mono)">${m.is_active?'ACTIVE':'INACTIVE'}</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">
+          ${_PERM_FLAGS.map(f => `
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text2)">
+              <input type="checkbox" ${m[f.key]?'checked':''} onchange="piUpdatePermission('${m.id}','${f.key}',this.checked)"
+                style="width:14px;height:14px;accent-color:var(--green);cursor:pointer">
+              ${f.label}
+            </label>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    body.innerHTML = `<div class="card" style="padding:24px"><div class="alert alert-error">Error: ${e.message}</div></div>`;
+  }
+}
+
+async function piUpdatePermission(membershipId, flag, value) {
+  const sb = await _sbAdmin();
+  const { error } = await sb.from('portal_brand_memberships').update({ [flag]: value }).eq('id', membershipId);
+  if (error) { showToast('⚠ ' + error.message); return; }
+  showToast(`✓ Permission updated`);
+}
+
+async function piUpdateRole(membershipId, newRole) {
+  const sb = await _sbAdmin();
+  const { error } = await sb.from('portal_brand_memberships').update({ role: newRole }).eq('id', membershipId);
+  if (error) { showToast('⚠ ' + error.message); return; }
+  showToast(`✓ Role updated to ${newRole}`);
+}
+
 
 </body>
 </html>
