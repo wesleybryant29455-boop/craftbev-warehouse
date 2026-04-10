@@ -24781,13 +24781,17 @@ async function piSendInvite() {
     if (error) throw new Error(error.message);
 
     // Send invite email via edge function
-    await fetch(`${PORTAL_EF_BASE}/portal-invite`, {
+    const invResp = await fetch(`${PORTAL_EF_BASE}/portal-invite`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': PORTAL_ANON },
       body: JSON.stringify({ email, full_name: name, brand_id: brandId, role, message: msg, token: invite.token })
     });
-
-    showToast(`✓ Invite sent to ${email}`);
+    const invResult = await invResp.json().catch(()=>({}));
+    if (invResult.ok) {
+      showToast(`✓ Invite email sent to ${email}`);
+    } else {
+      showToast(`⚠ Invite saved but email failed: ${invResult.error||'unknown error'}`);
+    }
     document.getElementById('pi-invite-form').style.display = 'none';
     document.getElementById('pi-inv-email').value = '';
     document.getElementById('pi-inv-name').value = '';
@@ -24886,10 +24890,29 @@ async function piTogglePartnerActive(profileId, currentlyActive) {
 
 async function piResendInvite(inviteId, email) {
   const sb = await _sbAdmin();
-  // Extend expiry by 7 days
-  const { error } = await sb.from('portal_invites').update({ expires_at: new Date(Date.now() + 7*86400000).toISOString() }).eq('id', inviteId);
-  if (error) { showToast('⚠ ' + error.message); return; }
-  showToast(`✓ Invite resent to ${email}`);
+  // Get the invite details
+  const { data: invite, error: fetchErr } = await sb.from('portal_invites')
+    .select('email, brand_id, role, token')
+    .eq('id', inviteId).single();
+  if (fetchErr || !invite) { showToast('⚠ Could not load invite'); return; }
+  // Extend expiry
+  await sb.from('portal_invites').update({ expires_at: new Date(Date.now() + 7*86400000).toISOString() }).eq('id', inviteId);
+  // Actually send the email via edge function
+  try {
+    const resp = await fetch(`${PORTAL_EF_BASE}/portal-invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': PORTAL_ANON },
+      body: JSON.stringify({ email: invite.email, brand_id: invite.brand_id, role: invite.role, token: invite.token })
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      showToast(`✓ Invite email sent to ${email}`);
+    } else {
+      showToast(`⚠ ${result.error || 'Send failed'}`);
+    }
+  } catch(e) {
+    showToast('⚠ ' + e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
